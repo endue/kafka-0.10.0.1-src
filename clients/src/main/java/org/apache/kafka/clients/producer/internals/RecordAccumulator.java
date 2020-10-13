@@ -62,12 +62,13 @@ public final class RecordAccumulator {
     private volatile boolean closed;
     private final AtomicInteger flushesInProgress;
     private final AtomicInteger appendsInProgress;
-    private final int batchSize;
+    private final int batchSize;// 默认16kb
     private final CompressionType compression;
     private final long lingerMs;
     private final long retryBackoffMs;
     private final BufferPool free;
     private final Time time;
+    // 保存TopicPartition对应的消息记录
     private final ConcurrentMap<TopicPartition, Deque<RecordBatch>> batches;
     private final IncompleteRecordBatches incomplete;
     // The following variables are only accessed by the sender thread, so we don't need to protect them.
@@ -88,13 +89,13 @@ public final class RecordAccumulator {
      * @param metrics The metrics
      * @param time The time instance to use
      */
-    public RecordAccumulator(int batchSize,
-                             long totalSize,
-                             CompressionType compression,
-                             long lingerMs,
-                             long retryBackoffMs,
-                             Metrics metrics,
-                             Time time) {
+    public RecordAccumulator(int batchSize,// 默认16kb
+                             long totalSize,// 默认32M
+                             CompressionType compression,// 默认none
+                             long lingerMs,// 默认0
+                             long retryBackoffMs,// 默认100ms
+                             Metrics metrics,// 默认2
+                             Time time) {// 默认当前时间
         this.drainIndex = 0;
         this.closed = false;
         this.flushesInProgress = new AtomicInteger(0);
@@ -163,6 +164,7 @@ public final class RecordAccumulator {
                                      long maxTimeToBlock) throws InterruptedException {
         // We keep track of the number of appending thread to make sure we do not miss batches in
         // abortIncompleteBatches().
+        // AtomicInteger类型累计并发线程数
         appendsInProgress.incrementAndGet();
         try {
             // check if we have an in-progress batch
@@ -170,31 +172,38 @@ public final class RecordAccumulator {
             synchronized (dq) {
                 if (closed)
                     throw new IllegalStateException("Cannot send after the producer is closed.");
+                // 尝试将消息放到RecordBatch中
                 RecordAppendResult appendResult = tryAppend(timestamp, key, value, callback, dq);
                 if (appendResult != null)
                     return appendResult;
             }
 
             // we don't have an in-progress record batch try to allocate a new batch
+            // 如果上一步失败，说明没有可以的RecordBatch，则需要创建一个，
+            // 获取size大小
             int size = Math.max(this.batchSize, Records.LOG_OVERHEAD + Record.recordSize(key, value));
             log.trace("Allocating a new {} byte message buffer for topic {} partition {}", size, tp.topic(), tp.partition());
+            // 申请一块buffer空间
             ByteBuffer buffer = free.allocate(size, maxTimeToBlock);
             synchronized (dq) {
                 // Need to check if producer is closed again after grabbing the dequeue lock.
                 if (closed)
                     throw new IllegalStateException("Cannot send after the producer is closed.");
-
+                // 再次尝试将消息放到RecordBatch中防止多线程时已被其他线程创建
                 RecordAppendResult appendResult = tryAppend(timestamp, key, value, callback, dq);
+                // 释放申请的buffer
                 if (appendResult != null) {
                     // Somebody else found us a batch, return the one we waited for! Hopefully this doesn't happen often...
                     free.deallocate(buffer);
                     return appendResult;
                 }
+                // 创建MemoryRecords
                 MemoryRecords records = MemoryRecords.emptyRecords(buffer, compression, this.batchSize);
                 RecordBatch batch = new RecordBatch(tp, records, time.milliseconds());
                 FutureRecordMetadata future = Utils.notNull(batch.tryAppend(timestamp, key, value, callback, time.milliseconds()));
-
+                // 将RecordBatch保存到Deque中
                 dq.addLast(batch);
+                // 将RecordBatch记录到IncompleteRecordBatches中
                 incomplete.add(batch);
                 return new RecordAppendResult(future, dq.size() > 1 || batch.records.isFull(), true);
             }
