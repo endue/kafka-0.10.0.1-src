@@ -64,10 +64,11 @@ public final class RecordBatch {
      * @return The RecordSend corresponding to this record or null if there isn't sufficient room.
      */
     public FutureRecordMetadata tryAppend(long timestamp, byte[] key, byte[] value, Callback callback, long now) {
-        // 判断是否还有足够的空间
+        // 没有足够的空间，直接返回
         if (!this.records.hasRoomFor(key, value)) {
             return null;
         } else {
+            // 将消息保存到MemoryRecords中
             long checksum = this.records.append(offsetCounter++, timestamp, key, value);
             this.maxRecordSize = Math.max(this.maxRecordSize, Record.recordSize(key, value));
             this.lastAppendTime = now;

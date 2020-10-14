@@ -168,22 +168,23 @@ public final class RecordAccumulator {
         appendsInProgress.incrementAndGet();
         try {
             // check if we have an in-progress batch
+            // 获取topic对应的Deque
             Deque<RecordBatch> dq = getOrCreateDeque(tp);
             synchronized (dq) {
                 if (closed)
                     throw new IllegalStateException("Cannot send after the producer is closed.");
-                // 尝试将消息放到RecordBatch中
+                // 尝试将消息放到topic对应的Deque中最后一个RecordBatch中
                 RecordAppendResult appendResult = tryAppend(timestamp, key, value, callback, dq);
                 if (appendResult != null)
                     return appendResult;
             }
 
             // we don't have an in-progress record batch try to allocate a new batch
-            // 如果上一步失败，说明没有可以的RecordBatch，则需要创建一个，
-            // 获取size大小
+            // 如果上一步失败，说明没有可用的RecordBatch，需要创建一个
+            // 获取size大小：取 batchSize(默认16KB)和消息 中最大值
             int size = Math.max(this.batchSize, Records.LOG_OVERHEAD + Record.recordSize(key, value));
             log.trace("Allocating a new {} byte message buffer for topic {} partition {}", size, tp.topic(), tp.partition());
-            // 申请一块buffer空间
+            // 基于size在BufferPool中申请一块buffer空间
             ByteBuffer buffer = free.allocate(size, maxTimeToBlock);
             synchronized (dq) {
                 // Need to check if producer is closed again after grabbing the dequeue lock.
@@ -191,13 +192,14 @@ public final class RecordAccumulator {
                     throw new IllegalStateException("Cannot send after the producer is closed.");
                 // 再次尝试将消息放到RecordBatch中防止多线程时已被其他线程创建
                 RecordAppendResult appendResult = tryAppend(timestamp, key, value, callback, dq);
-                // 释放申请的buffer
+                // 消息放置成功说明RecordBatch已被其他线程创建，释放申请的buffer
                 if (appendResult != null) {
                     // Somebody else found us a batch, return the one we waited for! Hopefully this doesn't happen often...
                     free.deallocate(buffer);
                     return appendResult;
                 }
-                // 创建MemoryRecords
+                // 走到这一步说明当前线程已申请了一块buffer空间并且没有其他线程在相同的topic中创建RecordBatch
+                // 创建RecordBatch
                 MemoryRecords records = MemoryRecords.emptyRecords(buffer, compression, this.batchSize);
                 RecordBatch batch = new RecordBatch(tp, records, time.milliseconds());
                 FutureRecordMetadata future = Utils.notNull(batch.tryAppend(timestamp, key, value, callback, time.milliseconds()));
@@ -219,7 +221,9 @@ public final class RecordAccumulator {
     private RecordAppendResult tryAppend(long timestamp, byte[] key, byte[] value, Callback callback, Deque<RecordBatch> deque) {
         RecordBatch last = deque.peekLast();
         if (last != null) {
+            // 将消息放到RecordBatch中
             FutureRecordMetadata future = last.tryAppend(timestamp, key, value, callback, time.milliseconds());
+            // 表示没有足够的空间，将当前MemoryRecords标记为不可写并调用底层buffer.flip()方法
             if (future == null)
                 last.records.close();
             else

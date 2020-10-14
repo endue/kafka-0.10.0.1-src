@@ -206,7 +206,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
     private KafkaProducer(ProducerConfig config, Serializer<K> keySerializer, Serializer<V> valueSerializer) {
         try {
             log.trace("Starting the Kafka producer");
-            // 获取配置ProducerConfig默认配置以及用户自定义配置
+            // 获取ProducerConfig默认配置以及用户自定义配置
             Map<String, Object> userProvidedConfigs = config.originals();
             this.producerConfig = config;
             this.time = new SystemTime();
@@ -285,7 +285,8 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
                     time);
             // 保存服务列表
             List<InetSocketAddress> addresses = ClientUtils.parseAndValidateAddresses(config.getList(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG));
-            //
+            // 拉取集群元数据
+            // 其实并没有真正的去拉取集群元数据，而是对metadata中的一些属性做了初始化
             this.metadata.update(Cluster.bootstrap(addresses), time.milliseconds());
             ChannelBuilder channelBuilder = ClientUtils.createChannelBuilder(config.values());
             // 网络通信组件
@@ -442,6 +443,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
     @Override
     public Future<RecordMetadata> send(ProducerRecord<K, V> record, Callback callback) {
         // intercept the record, which can be potentially modified; this method does not throw exceptions
+        // 执行实现了ProducerInterceptor接口的自定义实现类的onSend()方法
         ProducerRecord<K, V> interceptedRecord = this.interceptors == null ? record : this.interceptors.onSend(record);
         return doSend(interceptedRecord, callback);
     }
@@ -477,14 +479,20 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             // 计算record需要发送到哪个分区
             int partition = partition(record, serializedKey, serializedValue, metadata.fetch());
             // 计算消息长度
+            // SIZE_LENGTH(4Byte) + OFFSET_LENGTH(8Byte) +
+            // CRC_LENGTH(4Byte) + MAGIC_LENGTH(1Byte) +
+            // ATTRIBUTE_LENGTH(1Byte) + TIMESTAMP_LENGTH(8Byte) +
+            // KEY_SIZE_LENGTH(4Byte) + keySize(key长度发送方决定) + VALUE_SIZE_LENGTH(4Byte) + valueSize(value长度发送方决定)
             int serializedSize = Records.LOG_OVERHEAD + Record.recordSize(serializedKey, serializedValue);
             // 验证消息长度
+            // serializedSize 不大于 (maxRequestSize(1M) && totalMemorySize(32M))
             ensureValidRecordSize(serializedSize);
+            // 初始化TopicPartition(保存主题和分区)
             tp = new TopicPartition(record.topic(), partition);
             long timestamp = record.timestamp() == null ? time.milliseconds() : record.timestamp();
             log.trace("Sending record {} with callback {} to topic {} partition {}", record, callback, record.topic(), partition);
             // producer callback will make sure to call both 'callback' and interceptor callback
-            // 拦截器
+            // 如果自定义了拦截器则对回调方法callback包装
             Callback interceptCallback = this.interceptors == null ? callback : new InterceptorCallback<>(callback, this.interceptors, tp);
             // 将消息放入到消息累加器RecordAccumulator中
             RecordAccumulator.RecordAppendResult result = accumulator.append(tp, timestamp, serializedKey, serializedValue, interceptCallback, remainingWaitMs);
@@ -492,6 +500,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
                 log.trace("Waking up the sender since topic {} partition {} is either full or getting a new batch", record.topic(), partition);
                 this.sender.wakeup();
             }
+            // 返回结果
             return result.future;
             // handling exceptions and record the errors;
             // for API exceptions return them in the future,
@@ -548,6 +557,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             log.trace("Requesting metadata update for topic {}.", topic);
             int version = metadata.requestUpdate();
             sender.wakeup();
+            // wait
             metadata.awaitUpdate(version, remainingWaitMs);
             long elapsed = time.milliseconds() - begin;
             if (elapsed >= maxWaitMs)
@@ -556,6 +566,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
                 throw new TopicAuthorizationException(topic);
             remainingWaitMs = maxWaitMs - elapsed;
         }
+        // 返回等待耗费的时间
         return time.milliseconds() - begin;
     }
 

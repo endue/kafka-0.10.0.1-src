@@ -93,8 +93,26 @@ public class MemoryRecords implements Records {
     public long append(long offset, long timestamp, byte[] key, byte[] value) {
         if (!writable)
             throw new IllegalStateException("Memory records is not writable");
-
+        // 计算消息大小
+        // SIZE_LENGTH(4Byte) + OFFSET_LENGTH(8Byte) +
+        // CRC_LENGTH(4Byte) + MAGIC_LENGTH(1Byte) +
+        // ATTRIBUTE_LENGTH(1Byte) + TIMESTAMP_LENGTH(8Byte) +
+        // KEY_SIZE_LENGTH(4Byte) + keySize(key长度发送方决定) + VALUE_SIZE_LENGTH(4Byte) + valueSize(value长度发送方决定)
         int size = Record.recordSize(key, value);
+        // 保存消息
+        /**
+         * |offset|
+         * |消息大小|
+         * |crc|
+         * |magic|
+         * |attributes|
+         * |timestamp|
+         * |key.length|
+         * |key|
+         * |valueSize|
+         * |value|
+         * -------
+         */
         compressor.putLong(offset);
         compressor.putInt(size);
         long crc = compressor.putRecord(timestamp, key, value);
@@ -115,9 +133,10 @@ public class MemoryRecords implements Records {
      * to accept this single record.
      */
     public boolean hasRoomFor(byte[] key, byte[] value) {
+        // 判断是否可写
         if (!this.writable)
             return false;
-
+        // 校验剩余容量是否满足消息大小
         return this.compressor.numRecordsWritten() == 0 ?
             this.initialCapacity >= Records.LOG_OVERHEAD + Record.recordSize(key, value) :
             this.writeLimit >= this.compressor.estimatedBytesWritten() + Records.LOG_OVERHEAD + Record.recordSize(key, value);
