@@ -35,6 +35,7 @@ public final class RecordBatch {
 
     public int recordCount = 0;
     public int maxRecordSize = 0;
+    // 重试次数，在发送RecordBatch时使用
     public volatile int attempts = 0;
     public final long createdMs;
     public long drainedMs;

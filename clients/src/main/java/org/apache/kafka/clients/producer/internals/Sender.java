@@ -62,6 +62,7 @@ public class Sender implements Runnable {
     private final KafkaClient client;
 
     /* the record accumulator that batches records */
+    // 对消息记录进行批处理的记录累加器
     private final RecordAccumulator accumulator;
 
     /* the metadata for the client */
@@ -172,9 +173,11 @@ public class Sender implements Runnable {
     void run(long now) {
         Cluster cluster = metadata.fetch();
         // get the list of partitions with data ready to send
+        // 获取准备发送数据的分区列表
         RecordAccumulator.ReadyCheckResult result = this.accumulator.ready(cluster, now);
 
         // if there are any partitions whose leaders are not known yet, force metadata update
+        // 如果有分区不知道它的leader节点，则修改metadata标志位needUpdate为true
         if (result.unknownLeadersExist)
             this.metadata.requestUpdate();
 

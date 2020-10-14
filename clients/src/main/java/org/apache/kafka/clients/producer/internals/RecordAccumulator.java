@@ -310,28 +310,38 @@ public final class RecordAccumulator {
      * </ol>
      */
     public ReadyCheckResult ready(Cluster cluster, long nowMs) {
+        // 记录准备好发送消息记录的节点
         Set<Node> readyNodes = new HashSet<>();
         long nextReadyCheckDelayMs = Long.MAX_VALUE;
         boolean unknownLeadersExist = false;
-
+        // 记录是否有等待分配空间的线程(即当前BufferPool已用尽)
         boolean exhausted = this.free.queued() > 0;
+        // 遍历所有的分区
         for (Map.Entry<TopicPartition, Deque<RecordBatch>> entry : this.batches.entrySet()) {
             TopicPartition part = entry.getKey();
             Deque<RecordBatch> deque = entry.getValue();
-
+            // 获取当前分区的leader节点
             Node leader = cluster.leaderFor(part);
             if (leader == null) {
+                // 当前分区的leaser节点未知
                 unknownLeadersExist = true;
             } else if (!readyNodes.contains(leader) && !muted.contains(part)) {
                 synchronized (deque) {
                     RecordBatch batch = deque.peekFirst();
                     if (batch != null) {
+                        // 是否是重试RecordBatch 并且 已到达重试时间
                         boolean backingOff = batch.attempts > 0 && batch.lastAttemptMs + retryBackoffMs > nowMs;
+                        // 记录当前重试等待时间
                         long waitedTimeMs = nowMs - batch.lastAttemptMs;
+                        // 如果是重试消息则记录retryBackoffMs，如果不是则记录lingerMs
                         long timeToWaitMs = backingOff ? retryBackoffMs : lingerMs;
+                        // 记录理想等待时间 - 实际等待时间 的差值
                         long timeLeftMs = Math.max(timeToWaitMs - waitedTimeMs, 0);
+                        // 当前topic的deque不为空或者deque中最早的一个MemoryRecords已经准备发送
                         boolean full = deque.size() > 1 || batch.records.isFull();
+                        // 记录实际等待时间 - 理想等待时间 的差值
                         boolean expired = waitedTimeMs >= timeToWaitMs;
+                        // 最早总结下来就是方法注释中的四种场景就会触发当前RecordBatch需要发送出去
                         boolean sendable = full || expired || exhausted || closed || flushInProgress();
                         if (sendable && !backingOff) {
                             readyNodes.add(leader);
