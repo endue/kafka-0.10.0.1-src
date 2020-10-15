@@ -150,7 +150,7 @@ public class NetworkClient implements KafkaClient {
     public boolean ready(Node node, long now) {
         if (node.isEmpty())
             throw new IllegalArgumentException("Cannot connect to empty node " + node);
-
+        // 当前node节点连接是否可用
         if (isReady(node, now))
             return true;
 
@@ -495,6 +495,7 @@ public class NetworkClient implements KafkaClient {
         try {
             log.debug("Initiating connection to node {} at {}:{}.", node.id(), node.host(), node.port());
             this.connectionStates.connecting(nodeConnectionId, now);
+            // 建立连接，底层基于SocketChannel实现
             selector.connect(nodeConnectionId,
                              new InetSocketAddress(node.host(), node.port()),
                              this.socketSendBuffer,
@@ -530,6 +531,11 @@ public class NetworkClient implements KafkaClient {
             return metadata.fetch().nodes();
         }
 
+        /**
+         * metadata非正在更新或下一个更新时间为0 则返回true
+         * @param now
+         * @return
+         */
         @Override
         public boolean isUpdateDue(long now) {
             return !this.metadataFetchInProgress && this.metadata.timeToNextUpdate(now) == 0;

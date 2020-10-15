@@ -69,6 +69,7 @@ public class Sender implements Runnable {
     private final Metadata metadata;
 
     /* the flag indicating whether the producer should guarantee the message order on the broker or not. */
+    // 是否保证现在的有序，默认false,由MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION == 1决定
     private final boolean guaranteeMessageOrder;
 
     /* the maximum request size to attempt to send to the server */
@@ -112,7 +113,7 @@ public class Sender implements Runnable {
         this.client = client;
         this.accumulator = accumulator;
         this.metadata = metadata;
-        this.guaranteeMessageOrder = guaranteeMessageOrder;
+        this.guaranteeMessageOrder = guaranteeMessageOrder;// 默认false
         this.maxRequestSize = maxRequestSize;
         this.running = true;
         this.acks = acks;
@@ -130,6 +131,7 @@ public class Sender implements Runnable {
         log.debug("Starting Kafka producer I/O thread.");
 
         // main loop, runs until close is called
+        // 死循环扫描可发送消息的topic
         while (running) {
             try {
                 run(time.milliseconds());
@@ -173,19 +175,22 @@ public class Sender implements Runnable {
     void run(long now) {
         Cluster cluster = metadata.fetch();
         // get the list of partitions with data ready to send
-        // 获取准备发送数据的分区列表
+        // 获取准备发送数据的topic的leader列表
         RecordAccumulator.ReadyCheckResult result = this.accumulator.ready(cluster, now);
 
         // if there are any partitions whose leaders are not known yet, force metadata update
-        // 如果有分区不知道它的leader节点，则修改metadata标志位needUpdate为true
+        // 如果有topic不知道它的leader节点，则修改元数据metadata标志位needUpdate为true
         if (result.unknownLeadersExist)
             this.metadata.requestUpdate();
 
         // remove any nodes we aren't ready to send to
+        // 如果有node的连接未准备好，则剔除当前node
         Iterator<Node> iter = result.readyNodes.iterator();
+        // 记录node重连需要等待的时间
         long notReadyTimeout = Long.MAX_VALUE;
         while (iter.hasNext()) {
             Node node = iter.next();
+            // 判断当前leader的连接是否打开，如果不是则剔除当前leader并在内部尝试创建连接
             if (!this.client.ready(node, now)) {
                 iter.remove();
                 notReadyTimeout = Math.min(notReadyTimeout, this.client.connectionDelay(node, now));
@@ -193,10 +198,14 @@ public class Sender implements Runnable {
         }
 
         // create produce requests
+        // 将nodes中的所有消息进行划分
+        // key是node id,value是发送到这个node的消息
         Map<Integer, List<RecordBatch>> batches = this.accumulator.drain(cluster,
                                                                          result.readyNodes,
                                                                          this.maxRequestSize,
                                                                          now);
+        // 是否保证消息的有序性，默认false
+        // TODO 保证消息的有序性，待研究
         if (guaranteeMessageOrder) {
             // Mute all the partitions drained
             for (List<RecordBatch> batchList : batches.values()) {
@@ -204,24 +213,31 @@ public class Sender implements Runnable {
                     this.accumulator.mutePartition(batch.topicPartition);
             }
         }
-
+        // 获取过期的消息列表
         List<RecordBatch> expiredBatches = this.accumulator.abortExpiredBatches(this.requestTimeout, now);
         // update sensors
         for (RecordBatch expiredBatch : expiredBatches)
             this.sensors.recordErrors(expiredBatch.topicPartition.topic(), expiredBatch.recordCount);
 
         sensors.updateProduceRequestMetrics(batches);
+        // 将待发送node和对应的List<RecordBatch>转为ClientRequest
         List<ClientRequest> requests = createProduceRequests(batches, now);
         // If we have any nodes that are ready to send + have sendable data, poll with 0 timeout so this can immediately
         // loop and try sending more data. Otherwise, the timeout is determined by nodes that have partitions with data
         // that isn't yet sendable (e.g. lingering, backing off). Note that this specifically does not include nodes
         // with sendable data that aren't ready to send since they would cause busy looping.
+        // 计算poll方法的timeout
+        // 如果有发送的数据，则timeout直接为0
+        // 如果无发送的数据，需要更加nextReadyCheckDelayMs和notReadyTimeout中最小值决定
+        //  nextReadyCheckDelayMs代表扫描topic的deque需要等待的时间
+        //  notReadyTimeout表示建立broker连接需要等待的时间，因为当创建新连接后，就要扫描需要发送到这个broker上的数据
         long pollTimeout = Math.min(result.nextReadyCheckDelayMs, notReadyTimeout);
         if (result.readyNodes.size() > 0) {
             log.trace("Nodes with data ready to send: {}", result.readyNodes);
             log.trace("Created {} produce requests: {}", requests.size(), requests);
             pollTimeout = 0;
         }
+        // 发送消息(实际底层知识关注了OP_WRITE事件)
         for (ClientRequest request : requests)
             client.send(request, now);
 
@@ -336,6 +352,7 @@ public class Sender implements Runnable {
      */
     private List<ClientRequest> createProduceRequests(Map<Integer, List<RecordBatch>> collated, long now) {
         List<ClientRequest> requests = new ArrayList<ClientRequest>(collated.size());
+        // 遍历collated，key是node的ID，value是发往某个node的所有RecordBatch
         for (Map.Entry<Integer, List<RecordBatch>> entry : collated.entrySet())
             requests.add(produceRequest(now, entry.getKey(), acks, requestTimeout, entry.getValue()));
         return requests;
@@ -353,6 +370,7 @@ public class Sender implements Runnable {
             recordsByPartition.put(tp, batch);
         }
         ProduceRequest request = new ProduceRequest(acks, timeout, produceRecordsByPartition);
+        // 后续发送消息时，发送的是RequestSend
         RequestSend send = new RequestSend(Integer.toString(destination),
                                            this.client.nextRequestHeader(ApiKeys.PRODUCE),
                                            request.toStruct());

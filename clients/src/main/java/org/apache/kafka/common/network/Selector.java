@@ -443,6 +443,10 @@ public class Selector implements Selectable {
      * @return The number of keys ready
      * @throws IllegalArgumentException
      * @throws IOException
+     *
+     * select()阻塞到至少有一个通道在你注册的事件上就绪了。
+     * select(long timeout)和select()一样，除了最长会阻塞timeout毫秒(参数)。
+     * selectNow()不会阻塞，不管什么通道就绪都立刻返回（此方法执行非阻塞的选择操作。如果自从前一次选择操作后，没有通道变成可选择的，则此方法直接返回零）
      */
     private int select(long ms) throws IOException {
         if (ms < 0L)

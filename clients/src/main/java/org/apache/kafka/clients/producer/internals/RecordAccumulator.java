@@ -310,7 +310,7 @@ public final class RecordAccumulator {
      * </ol>
      */
     public ReadyCheckResult ready(Cluster cluster, long nowMs) {
-        // 记录准备好发送消息记录的节点
+        // 记录可发送消息记录的topic的leader节点
         Set<Node> readyNodes = new HashSet<>();
         long nextReadyCheckDelayMs = Long.MAX_VALUE;
         boolean unknownLeadersExist = false;
@@ -327,35 +327,41 @@ public final class RecordAccumulator {
                 unknownLeadersExist = true;
             } else if (!readyNodes.contains(leader) && !muted.contains(part)) {
                 synchronized (deque) {
+                    // 获取topic第一个RecordBatch
                     RecordBatch batch = deque.peekFirst();
                     if (batch != null) {
-                        // 是否是重试RecordBatch 并且 已到达重试时间
+                        // 记录当前RecordBatch是否为重试 并且 (最后一次重试时间 + 重试间隔 > 当前时间)
                         boolean backingOff = batch.attempts > 0 && batch.lastAttemptMs + retryBackoffMs > nowMs;
-                        // 记录当前重试等待时间
+                        // 记录当前RecordBatch已等待时间waitedTimeMs = 当前时间 - 最后一次重试时间的间隔
                         long waitedTimeMs = nowMs - batch.lastAttemptMs;
-                        // 如果是重试消息则记录retryBackoffMs，如果不是则记录lingerMs
+                        // 记录当前RecordBatch需要等待的时间 timeToWaitMs = 如果是重试消息则记录retryBackoffMs，如果不是则记录lingerMs
                         long timeToWaitMs = backingOff ? retryBackoffMs : lingerMs;
-                        // 记录理想等待时间 - 实际等待时间 的差值
+                        // 记录当前RecordBatch消息剩余等待时间timeLeftMs
                         long timeLeftMs = Math.max(timeToWaitMs - waitedTimeMs, 0);
-                        // 当前topic的deque不为空或者deque中最早的一个MemoryRecords已经准备发送
+                        // 记录当前topic的deque数量是否超过1个或者RecordBatch中的MemoryRecords已准备发送
                         boolean full = deque.size() > 1 || batch.records.isFull();
-                        // 记录实际等待时间 - 理想等待时间 的差值
+                        // 记录当前RecordBatch是否超时
                         boolean expired = waitedTimeMs >= timeToWaitMs;
-                        // 最早总结下来就是方法注释中的四种场景就会触发当前RecordBatch需要发送出去
+                        // 最终总结下来就是方法注释中的四种场景就会触发当前RecordBatch需要发送出去
                         boolean sendable = full || expired || exhausted || closed || flushInProgress();
+                        // RecordBatch可发送 && (非重试 || 重试时间已到)
                         if (sendable && !backingOff) {
                             readyNodes.add(leader);
                         } else {
                             // Note that this results in a conservative estimate since an un-sendable partition may have
                             // a leader that will later be found to have sendable data. However, this is good enough
                             // since we'll just wake up and then sleep again for the remaining time.
+                            // RecordBatch不能发送时，需要记录下来RecordBatch触发发送条件需要等待多久
+                            // 场景一：RecordBatch为重试记录，并且重试时间未到
+                            // 场景二：RecordBatch为非重试记录，并且等待时间未超过lingerMs配置
+                            // 最终取轮询结果中的最小值
                             nextReadyCheckDelayMs = Math.min(timeLeftMs, nextReadyCheckDelayMs);
                         }
                     }
                 }
             }
         }
-
+        // 返回结果：可发送消息的Topic的leader节点，下次触发扫描需要等待的时间，未知leader的Topic
         return new ReadyCheckResult(readyNodes, nextReadyCheckDelayMs, unknownLeadersExist);
     }
 
@@ -389,33 +395,49 @@ public final class RecordAccumulator {
                                                  long now) {
         if (nodes.isEmpty())
             return Collections.emptyMap();
-
+        /**
+         * nodes已里是leader节点，下面遍历nodes之后再次获取node上的所有分区
+         * 这么做的原因是attempts to avoid choosing the same topic-node over and over
+         * 因为有可能存在多个主题如：topic1和topic2的主partition都在同一个node上
+         */
         Map<Integer, List<RecordBatch>> batches = new HashMap<>();
+        // 遍历所有的节点
         for (Node node : nodes) {
+            // 累加当前node中消息大小
             int size = 0;
+            // 获取节点上所有的分区
             List<PartitionInfo> parts = cluster.partitionsForNode(node.id());
             List<RecordBatch> ready = new ArrayList<>();
             /* to make starvation less likely this loop doesn't start at 0 */
+            // drainIndex是全局遍历，记录了上次遍历nodes后停止的位置。当再次执行该方法时，可以继续往下遍历node
             int start = drainIndex = drainIndex % parts.size();
+            // 遍历node下所有的分区
             do {
                 PartitionInfo part = parts.get(drainIndex);
                 TopicPartition tp = new TopicPartition(part.topic(), part.partition());
                 // Only proceed if the partition has no in-flight batches.
+                // TODO:
                 if (!muted.contains(tp)) {
+                    // 获取当前topic的deque
                     Deque<RecordBatch> deque = getDeque(new TopicPartition(part.topic(), part.partition()));
                     if (deque != null) {
                         synchronized (deque) {
+                            // 获取第一个记录
                             RecordBatch first = deque.peekFirst();
                             if (first != null) {
                                 boolean backoff = first.attempts > 0 && first.lastAttemptMs + retryBackoffMs > now;
                                 // Only drain the batch if it is not during backoff period.
+                                // 非重试消息 或者 是重试消息&&已到重发时间
                                 if (!backoff) {
+                                    // 这里的if判断就是当前node的累加消息大小已超过可发送最大值，则跳出循环
+                                    // 剩余消息等待下次发送
                                     if (size + first.records.sizeInBytes() > maxSize && !ready.isEmpty()) {
                                         // there is a rare case that a single batch size is larger than the request size due
                                         // to compression; in this case we will still eventually send this batch in a single
                                         // request
                                         break;
                                     } else {
+                                        // 累加消息到batch中
                                         RecordBatch batch = deque.pollFirst();
                                         batch.records.close();
                                         size += batch.records.sizeInBytes();
@@ -570,8 +592,11 @@ public final class RecordAccumulator {
      * The set of nodes that have at least one complete record batch in the accumulator
      */
     public final static class ReadyCheckResult {
+        // 可发送消息的topic的leader节点
         public final Set<Node> readyNodes;
+        // 下次扫描可发送消息需要等待的时间
         public final long nextReadyCheckDelayMs;
+        // 未知leader节点的topic
         public final boolean unknownLeadersExist;
 
         public ReadyCheckResult(Set<Node> readyNodes, long nextReadyCheckDelayMs, boolean unknownLeadersExist) {

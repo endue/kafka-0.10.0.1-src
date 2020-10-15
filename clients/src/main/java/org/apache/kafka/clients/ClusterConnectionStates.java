@@ -21,6 +21,7 @@ import java.util.Map;
  */
 final class ClusterConnectionStates {
     private final long reconnectBackoffMs;
+    //
     private final Map<String, NodeConnectionState> nodeState;
 
     public ClusterConnectionStates(long reconnectBackoffMs) {
