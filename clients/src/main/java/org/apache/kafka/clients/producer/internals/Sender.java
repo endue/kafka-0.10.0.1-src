@@ -199,7 +199,9 @@ public class Sender implements Runnable {
 
         // create produce requests
         // 将nodes中的所有消息进行划分
-        // key是node id,value是发送到这个node的消息
+        // 将原本＜分区,Deque＜ProducerBatch＞＞的保存形式转变成＜Node,List<ProducerBatch＞的形式
+        // node是kafka上的broker节点
+        // 对于网络连接来说，生产者客户端是与具体broker节点建立的连接，也就是向具体的broker节点发送消息，而并不关心消息属于哪一个分区
         Map<Integer, List<RecordBatch>> batches = this.accumulator.drain(cluster,
                                                                          result.readyNodes,
                                                                          this.maxRequestSize,
@@ -213,14 +215,14 @@ public class Sender implements Runnable {
                     this.accumulator.mutePartition(batch.topicPartition);
             }
         }
-        // 获取过期的消息列表
+        // 获取过期的消息列表并释放底层ByteBuffer
         List<RecordBatch> expiredBatches = this.accumulator.abortExpiredBatches(this.requestTimeout, now);
         // update sensors
         for (RecordBatch expiredBatch : expiredBatches)
             this.sensors.recordErrors(expiredBatch.topicPartition.topic(), expiredBatch.recordCount);
 
         sensors.updateProduceRequestMetrics(batches);
-        // 将待发送node和对应的List<RecordBatch>转为ClientRequest
+        // 将待发送node和对应的List<RecordBatch>转为ClientRequest形式
         List<ClientRequest> requests = createProduceRequests(batches, now);
         // If we have any nodes that are ready to send + have sendable data, poll with 0 timeout so this can immediately
         // loop and try sending more data. Otherwise, the timeout is determined by nodes that have partitions with data
@@ -228,7 +230,7 @@ public class Sender implements Runnable {
         // with sendable data that aren't ready to send since they would cause busy looping.
         // 计算poll方法的timeout
         // 如果有发送的数据，则timeout直接为0
-        // 如果无发送的数据，需要更加nextReadyCheckDelayMs和notReadyTimeout中最小值决定
+        // 如果无发送的数据，需要更加nextReadyCheckDelayMs和notReadyTimeout中最小者决定
         //  nextReadyCheckDelayMs代表扫描topic的deque需要等待的时间
         //  notReadyTimeout表示建立broker连接需要等待的时间，因为当创建新连接后，就要扫描需要发送到这个broker上的数据
         long pollTimeout = Math.min(result.nextReadyCheckDelayMs, notReadyTimeout);
@@ -237,7 +239,7 @@ public class Sender implements Runnable {
             log.trace("Created {} produce requests: {}", requests.size(), requests);
             pollTimeout = 0;
         }
-        // 发送消息(实际底层知识关注了OP_WRITE事件)
+        // 发送消息(实际底层只是关注了对应node的channel的OP_WRITE事件并且将数据发送到了InFlightRequests中)
         for (ClientRequest request : requests)
             client.send(request, now);
 

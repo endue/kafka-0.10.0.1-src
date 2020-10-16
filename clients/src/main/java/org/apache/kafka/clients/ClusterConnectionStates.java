@@ -21,7 +21,7 @@ import java.util.Map;
  */
 final class ClusterConnectionStates {
     private final long reconnectBackoffMs;
-    //
+    // key是node的id，value是对应的状态描述
     private final Map<String, NodeConnectionState> nodeState;
 
     public ClusterConnectionStates(long reconnectBackoffMs) {
@@ -35,6 +35,9 @@ final class ClusterConnectionStates {
      * @param id The connection id to check
      * @param now The current time in MS
      * @return true if we can initiate a new connection
+     * 重新建立连接两种常见：
+     *      没有连接
+     *      连接已断开&&符合重连时间(默认50ms)
      */
     public boolean canConnect(String id, long now) {
         NodeConnectionState state = nodeState.get(id);

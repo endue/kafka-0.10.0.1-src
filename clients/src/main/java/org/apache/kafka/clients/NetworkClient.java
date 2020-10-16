@@ -153,9 +153,12 @@ public class NetworkClient implements KafkaClient {
         // 当前node节点连接是否可用
         if (isReady(node, now))
             return true;
-
+        // 判断是否可以建立连接:
+        //  没有连接
+        //  有连接 && 已断开 && 符合重连时间(默认50ms)
         if (connectionStates.canConnect(node.idString(), now))
             // if we are interested in sending to a node and we don't have a connection to it, initiate one
+            // 重新建立连接
             initiateConnect(node, now);
 
         return false;
@@ -240,6 +243,7 @@ public class NetworkClient implements KafkaClient {
 
     private void doSend(ClientRequest request, long now) {
         request.setSendTimeMs(now);
+        // 这里又将request暂存到inFlightRequests的Map<String, Deque<ClientRequest>> requests中
         this.inFlightRequests.add(request);
         selector.send(request.request());
     }
@@ -494,6 +498,7 @@ public class NetworkClient implements KafkaClient {
         String nodeConnectionId = node.idString();
         try {
             log.debug("Initiating connection to node {} at {}:{}.", node.id(), node.host(), node.port());
+            // 为当前节点封装一个connectionStates
             this.connectionStates.connecting(nodeConnectionId, now);
             // 建立连接，底层基于SocketChannel实现
             selector.connect(nodeConnectionId,

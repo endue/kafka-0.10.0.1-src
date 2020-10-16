@@ -70,6 +70,7 @@ public final class RecordAccumulator {
     private final Time time;
     // 保存TopicPartition对应的消息记录
     private final ConcurrentMap<TopicPartition, Deque<RecordBatch>> batches;
+    // 消息待发送的RecordBatch
     private final IncompleteRecordBatches incomplete;
     // The following variables are only accessed by the sender thread, so we don't need to protect them.
     private final Set<TopicPartition> muted;
@@ -203,9 +204,9 @@ public final class RecordAccumulator {
                 MemoryRecords records = MemoryRecords.emptyRecords(buffer, compression, this.batchSize);
                 RecordBatch batch = new RecordBatch(tp, records, time.milliseconds());
                 FutureRecordMetadata future = Utils.notNull(batch.tryAppend(timestamp, key, value, callback, time.milliseconds()));
-                // 将RecordBatch保存到Deque中
+                // 将RecordBatch保存到Deque的末尾
                 dq.addLast(batch);
-                // 将RecordBatch记录到IncompleteRecordBatches中
+                // 将待发送RecordBatch记录到IncompleteRecordBatches中
                 incomplete.add(batch);
                 return new RecordAppendResult(future, dq.size() > 1 || batch.records.isFull(), true);
             }
@@ -249,12 +250,15 @@ public final class RecordAccumulator {
             if (!muted.contains(tp)) {
                 synchronized (dq) {
                     // iterate over the batches and expire them if they have been in the accumulator for more than requestTimeOut
+                    // 获取Deque末尾RecordBatch，添加的时候用的是dq.addLast();
+                    // 也就是最新的一个RecordBatch
                     RecordBatch lastBatch = dq.peekLast();
                     Iterator<RecordBatch> batchIterator = dq.iterator();
                     while (batchIterator.hasNext()) {
                         RecordBatch batch = batchIterator.next();
                         boolean isFull = batch != lastBatch || batch.records.isFull();
                         // check if the batch is expired
+                        // 判断是否过期
                         if (batch.maybeExpire(requestTimeout, retryBackoffMs, now, this.lingerMs, isFull)) {
                             expiredBatches.add(batch);
                             count++;
@@ -396,7 +400,7 @@ public final class RecordAccumulator {
         if (nodes.isEmpty())
             return Collections.emptyMap();
         /**
-         * nodes已里是leader节点，下面遍历nodes之后再次获取node上的所有分区
+         * nodes已里是broker节点，下面遍历nodes之后再次获取node上的所有分区
          * 这么做的原因是attempts to avoid choosing the same topic-node over and over
          * 因为有可能存在多个主题如：topic1和topic2的主partition都在同一个node上
          */

@@ -80,10 +80,12 @@ public class Selector implements Selectable {
     private static final Logger log = LoggerFactory.getLogger(Selector.class);
 
     private final java.nio.channels.Selector nioSelector;
+    // key是node节点ID，value是对应的KafkaChannel
     private final Map<String, KafkaChannel> channels;
     private final List<Send> completedSends;
     private final List<NetworkReceive> completedReceives;
     private final Map<KafkaChannel, Deque<NetworkReceive>> stagedReceives;
+    // 保存建立连接的SelectionKey
     private final Set<SelectionKey> immediatelyConnectedKeys;
     private final List<String> disconnected;
     private final List<String> connected;
@@ -228,8 +230,10 @@ public class Selector implements Selectable {
      * @param send The request to send
      */
     public void send(Send send) {
+        // 获取目的地的KafkaChannel
         KafkaChannel channel = channelOrFail(send.destination());
         try {
+            // 将数据赋值到要发送node节点的channel的send属性中并关注OP_WRITE事件
             channel.setSend(send);
         } catch (CancelledKeyException e) {
             this.failedSends.add(send.destination());
@@ -266,9 +270,9 @@ public class Selector implements Selectable {
     public void poll(long timeout) throws IOException {
         if (timeout < 0)
             throw new IllegalArgumentException("timeout should be >= 0");
-
+        // 清理上一次poll保存的记录
         clear();
-
+        //
         if (hasStagedReceives() || !immediatelyConnectedKeys.isEmpty())
             timeout = 0;
 
