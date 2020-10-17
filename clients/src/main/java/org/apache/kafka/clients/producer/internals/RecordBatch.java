@@ -39,6 +39,7 @@ public final class RecordBatch {
     public volatile int attempts = 0;
     public final long createdMs;
     public long drainedMs;
+    // 记录最后一次放入消息的时间戳
     public long lastAttemptMs;
     public final MemoryRecords records;
     public final TopicPartition topicPartition;

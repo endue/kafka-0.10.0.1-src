@@ -201,7 +201,7 @@ public class Sender implements Runnable {
 
         // create produce requests
         // 将nodes中的所有消息进行划分
-        // 将原本＜分区,Deque＜ProducerBatch＞＞的保存形式转变成＜Node,List<ProducerBatch＞的形式
+        // 将原本<topic分区,Deque<ProducerBatch>>的保存形式转变成<Node,List<ProducerBatch>的形式
         // node是kafka上的broker节点
         // 对于网络连接来说，生产者客户端是与具体broker节点建立的连接，也就是向具体的broker节点发送消息，而并不关心消息属于哪一个分区
         Map<Integer, List<RecordBatch>> batches = this.accumulator.drain(cluster,
@@ -209,7 +209,7 @@ public class Sender implements Runnable {
                                                                          this.maxRequestSize,
                                                                          now);
         // 是否保证消息的有序性，默认false
-        // TODO 保证消息的有序性，待研究
+        // 注意：还需要设置max.in.flight.requests.per.connection = 1 （默认为5）才会保证消息的有序性
         if (guaranteeMessageOrder) {
             // Mute all the partitions drained
             for (List<RecordBatch> batchList : batches.values()) {

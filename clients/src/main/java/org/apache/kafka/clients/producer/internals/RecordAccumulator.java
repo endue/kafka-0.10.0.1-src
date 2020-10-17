@@ -64,8 +64,11 @@ public final class RecordAccumulator {
     private final AtomicInteger appendsInProgress;
     private final int batchSize;// 默认16kb
     private final CompressionType compression;
+    // RecordBatch等待lingerMs后，必须发送出去
     private final long lingerMs;
+    // RecordBatch重试需要等待的时间(默认100ms)
     private final long retryBackoffMs;
+    // BufferPool，一个ByteBuffer池子
     private final BufferPool free;
     private final Time time;
     // 保存TopicPartition对应的消息记录
@@ -73,6 +76,7 @@ public final class RecordAccumulator {
     // 消息待发送的RecordBatch
     private final IncompleteRecordBatches incomplete;
     // The following variables are only accessed by the sender thread, so we don't need to protect them.
+    // 记录所有需要保证消息有序性的分区topic
     private final Set<TopicPartition> muted;
     private int drainIndex;
 
@@ -280,6 +284,7 @@ public final class RecordAccumulator {
 
     /**
      * Re-enqueue the given record batch in the accumulator to retry
+     * 消息重新进入RecordBatch
      */
     public void reenqueue(RecordBatch batch, long now) {
         batch.attempts++;
@@ -316,6 +321,7 @@ public final class RecordAccumulator {
     public ReadyCheckResult ready(Cluster cluster, long nowMs) {
         // 记录可发送消息记录的topic的leader节点
         Set<Node> readyNodes = new HashSet<>();
+        // 记录触发下次检查可发送消息需要等待的时间
         long nextReadyCheckDelayMs = Long.MAX_VALUE;
         boolean unknownLeadersExist = false;
         // 记录是否有等待分配空间的线程(即当前BufferPool已用尽)
@@ -365,7 +371,7 @@ public final class RecordAccumulator {
                 }
             }
         }
-        // 返回结果：可发送消息的Topic的leader节点，下次触发扫描需要等待的时间，未知leader的Topic
+        // 返回结果：可发送消息的Topic的leader所在的node节点，下次触发扫描需要等待的时间，是否存在不知到leader的Topic
         return new ReadyCheckResult(readyNodes, nextReadyCheckDelayMs, unknownLeadersExist);
     }
 

@@ -155,7 +155,7 @@ public class NetworkClient implements KafkaClient {
             return true;
         // 判断是否可以建立连接:
         //  没有连接
-        //  有连接 && 已断开 && 符合重连时间(默认50ms)
+        //  未创建连接 || (已断开 && 符合重连时间(默认50ms))
         if (connectionStates.canConnect(node.idString(), now))
             // if we are interested in sending to a node and we don't have a connection to it, initiate one
             // 重新建立连接

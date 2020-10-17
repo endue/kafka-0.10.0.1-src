@@ -47,7 +47,7 @@ public final class BufferPool {
     // ByteBuffer默认大小
     private final int poolableSize;
     private final ReentrantLock lock;
-    // 记录所有大小为poolableSize的ByteBuffer
+    // 记录所有大小为poolableSize的空闲ByteBuffer
     private final Deque<ByteBuffer> free;
     // 等待获取内存空间的线程
     private final Deque<Condition> waiters;
