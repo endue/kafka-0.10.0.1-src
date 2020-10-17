@@ -82,12 +82,17 @@ public class Selector implements Selectable {
     private final java.nio.channels.Selector nioSelector;
     // key是node节点ID，value是对应的KafkaChannel
     private final Map<String, KafkaChannel> channels;
+    // 记录每一次poll时，已发送的send
     private final List<Send> completedSends;
+    // 记录每一次poll时，接受到的响应
     private final List<NetworkReceive> completedReceives;
+    // 记录每一次poll时，KafkaChannel对应的响应
     private final Map<KafkaChannel, Deque<NetworkReceive>> stagedReceives;
     // 保存建立连接的SelectionKey
     private final Set<SelectionKey> immediatelyConnectedKeys;
+    // 记录每一次poll时，断开的KafkaChannel连接
     private final List<String> disconnected;
+    // 记录每一次poll时，创建完连接的node ID
     private final List<String> connected;
     private final List<String> failedSends;
     private final Time time;
@@ -272,7 +277,7 @@ public class Selector implements Selectable {
             throw new IllegalArgumentException("timeout should be >= 0");
         // 清理上一次poll保存的记录
         clear();
-        //
+        // 判断是否有接受到的回复 || 创建的链接
         if (hasStagedReceives() || !immediatelyConnectedKeys.isEmpty())
             timeout = 0;
 
@@ -322,15 +327,20 @@ public class Selector implements Selectable {
                     channel.prepare();
 
                 /* if channel is ready read from any connections that have readable data */
+                // 当前node的channel是可读的
                 if (channel.ready() && key.isReadable() && !hasStagedReceive(channel)) {
                     NetworkReceive networkReceive;
+                    // 读取响应
                     while ((networkReceive = channel.read()) != null)
+                        // 暂存响应
                         addToStagedReceives(channel, networkReceive);
                 }
 
                 /* if channel is ready write to any sockets that have space in their buffer and for which we have data */
+                // 当前node的channel是可写的
                 if (channel.ready() && key.isWritable()) {
                     Send send = channel.write();
+                    // 当send不为空时，说明消息已全部发送完毕，否则需要等待下一次的执行
                     if (send != null) {
                         this.completedSends.add(send);
                         this.sensors.recordBytesSent(channel.id(), send.size());

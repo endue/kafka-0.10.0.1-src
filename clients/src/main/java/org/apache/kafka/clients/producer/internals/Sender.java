@@ -69,7 +69,7 @@ public class Sender implements Runnable {
     private final Metadata metadata;
 
     /* the flag indicating whether the producer should guarantee the message order on the broker or not. */
-    // 是否保证现在的有序，默认false,由MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION == 1决定
+    // 是否保证消息的有序性，默认false,由MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION == 1决定
     private final boolean guaranteeMessageOrder;
 
     /* the maximum request size to attempt to send to the server */
@@ -88,6 +88,7 @@ public class Sender implements Runnable {
     private volatile boolean running;
 
     /* true when the caller wants to ignore all unsent/inflight messages and force close.  */
+    // 强制关闭
     private volatile boolean forceClose;
 
     /* metrics */
@@ -145,6 +146,7 @@ public class Sender implements Runnable {
         // okay we stopped accepting requests but there may still be
         // requests in the accumulator or waiting for acknowledgment,
         // wait until these are completed.
+        // 判断是否还存在未发送的消息
         while (!forceClose && (this.accumulator.hasUnsent() || this.client.inFlightRequestCount() > 0)) {
             try {
                 run(time.milliseconds());

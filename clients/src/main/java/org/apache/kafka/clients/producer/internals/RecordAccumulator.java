@@ -95,7 +95,7 @@ public final class RecordAccumulator {
                              CompressionType compression,// 默认none
                              long lingerMs,// 默认0
                              long retryBackoffMs,// 默认100ms
-                             Metrics metrics,// 默认2
+                             Metrics metrics,
                              Time time) {// 默认当前时间
         this.drainIndex = 0;
         this.closed = false;
@@ -174,7 +174,7 @@ public final class RecordAccumulator {
             synchronized (dq) {
                 if (closed)
                     throw new IllegalStateException("Cannot send after the producer is closed.");
-                // 尝试将消息放到topic对应的Deque中最后一个RecordBatch中
+                // 尝试将消息放到topic对应的Deque尾部的RecordBatch中
                 RecordAppendResult appendResult = tryAppend(timestamp, key, value, callback, dq);
                 if (appendResult != null)
                     return appendResult;

@@ -132,7 +132,7 @@ public class KafkaChannel {
         if (receive == null) {
             receive = new NetworkReceive(maxReceiveSize, id);
         }
-
+        // 读取消息
         receive(receive);
         if (receive.complete()) {
             receive.payload().rewind();
@@ -144,6 +144,7 @@ public class KafkaChannel {
 
     public Send write() throws IOException {
         Send result = null;
+        // 发送消息，当确认消息全部发送完毕后会将send置为null，否则不处理
         if (send != null && send(send)) {
             result = send;
             send = null;
@@ -156,10 +157,12 @@ public class KafkaChannel {
     }
 
     private boolean send(Send send) throws IOException {
+        // 发送消息transportLayer中记录了当前KafkaChannel对应的SocketChannel
         send.writeTo(transportLayer);
+        // 确认消息全部发送完毕，则取消对事件OP_WRITE的关注
         if (send.completed())
             transportLayer.removeInterestOps(SelectionKey.OP_WRITE);
-
+        // 返回是否完成全部消息发送的判断值
         return send.completed();
     }
 
