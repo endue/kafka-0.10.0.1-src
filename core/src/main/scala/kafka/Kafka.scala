@@ -26,6 +26,9 @@ import org.apache.kafka.common.utils.Utils
 
 import scala.collection.JavaConversions._
 
+/**
+  * kafka服务端启动类
+  */
 object Kafka extends Logging {
 
   def getPropsFromArgs(args: Array[String]): Properties = {
@@ -52,8 +55,13 @@ object Kafka extends Logging {
     props
   }
 
+  /**
+    * 启动方法
+    * @param args
+    */
   def main(args: Array[String]): Unit = {
     try {
+      // 加载配置
       val serverProps = getPropsFromArgs(args)
       val kafkaServerStartable = KafkaServerStartable.fromProps(serverProps)
 
@@ -63,7 +71,7 @@ object Kafka extends Logging {
           kafkaServerStartable.shutdown
         }
       })
-
+      // 启动kafkaServer
       kafkaServerStartable.startup
       kafkaServerStartable.awaitShutdown
     }

@@ -87,14 +87,17 @@ class SocketServer(val config: KafkaConfig, val metrics: Metrics, val time: Time
       var processorBeginIndex = 0
       endpoints.values.foreach { endpoint =>
         val protocol = endpoint.protocolType
+        // numProcessorThreads 默认为3
         val processorEndIndex = processorBeginIndex + numProcessorThreads
-
+        // 创建三个processor
         for (i <- processorBeginIndex until processorEndIndex)
           processors(i) = newProcessor(i, connectionQuotas, protocol)
-
+        // 创建一个acceptor，并将上述processors传递进去
+        // 内部创建一个nioSelector并启动所有的processor
         val acceptor = new Acceptor(endpoint, sendBufferSize, recvBufferSize, brokerId,
           processors.slice(processorBeginIndex, processorEndIndex), connectionQuotas)
         acceptors.put(endpoint, acceptor)
+        // 启动线程，执行acceptor的run方法
         Utils.newThread("kafka-socket-acceptor-%s-%d".format(protocol.toString, endpoint.port), acceptor, false).start()
         acceptor.awaitStartup()
 
@@ -236,10 +239,10 @@ private[kafka] class Acceptor(val endPoint: EndPoint,
                               brokerId: Int,
                               processors: Array[Processor],
                               connectionQuotas: ConnectionQuotas) extends AbstractServerThread(connectionQuotas) with KafkaMetricsGroup {
-
+  // 创建一个nioSelector
   private val nioSelector = NSelector.open()
   val serverChannel = openServerSocket(endPoint.host, endPoint.port)
-
+  // 启动内部的processor
   this.synchronized {
     processors.foreach { processor =>
       Utils.newThread("kafka-network-thread-%d-%s-%d".format(brokerId, endPoint.protocolType.toString, processor.id), processor, false).start()
@@ -250,6 +253,7 @@ private[kafka] class Acceptor(val endPoint: EndPoint,
    * Accept loop that checks for new connection attempts
    */
   def run() {
+    // 注册监听OP_ACCEPT事件
     serverChannel.register(nioSelector, SelectionKey.OP_ACCEPT)
     startupComplete()
     try {
@@ -265,11 +269,13 @@ private[kafka] class Acceptor(val endPoint: EndPoint,
                 val key = iter.next
                 iter.remove()
                 if (key.isAcceptable)
+                  // 将连接请求叫给Processor
                   accept(key, processors(currentProcessor))
                 else
                   throw new IllegalStateException("Unrecognized key state for acceptor thread.")
 
                 // round robin to the next processor thread
+                // 轮询所有的Processor，均匀的处理每个请求
                 currentProcessor = (currentProcessor + 1) % processors.length
               } catch {
                 case e: Throwable => error("Error while accepting connection", e)

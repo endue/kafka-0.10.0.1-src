@@ -186,7 +186,8 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePr
         /* generate brokerId */
         config.brokerId =  getBrokerId
         this.logIdent = "[Kafka Server " + config.brokerId + "], "
-
+        // 创建socker
+        // 接受请求
         socketServer = new SocketServer(config, metrics, kafkaMetricsTime)
         socketServer.startup()
 
@@ -211,8 +212,10 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePr
         }
 
         /* start processing requests */
+        // KafkaApis封装了处理各种请求的业务逻辑
         apis = new KafkaApis(socketServer.requestChannel, replicaManager, groupCoordinator,
           kafkaController, zkUtils, config.brokerId, config, metadataCache, metrics, authorizer)
+        // 创建处理请求池，将KafkaApis传递进去
         requestHandlerPool = new KafkaRequestHandlerPool(config.brokerId, socketServer.requestChannel, apis, config.numIoThreads)
         brokerState.newState(RunningAsBroker)
 
