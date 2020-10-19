@@ -430,7 +430,7 @@ private[kafka] class Processor(val id: Int,
         processCompletedReceives()
         //读取selector中completedSends中的消息，然后基于目的地删掉inflightResponses中的记录
         processCompletedSends()
-        //
+        // 处理断开的连接
         processDisconnected()
       } catch {
         // We catch all the throwables here to prevent the processor thread from exiting. We do this because

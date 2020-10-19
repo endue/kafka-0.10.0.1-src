@@ -78,7 +78,7 @@ import org.slf4j.LoggerFactory;
 public class Selector implements Selectable {
 
     private static final Logger log = LoggerFactory.getLogger(Selector.class);
-
+    // java nio selector
     private final java.nio.channels.Selector nioSelector;
     // key是node节点ID，value是对应的KafkaChannel
     private final Map<String, KafkaChannel> channels;
