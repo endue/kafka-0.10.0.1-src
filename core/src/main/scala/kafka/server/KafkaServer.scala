@@ -186,8 +186,7 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePr
         /* generate brokerId */
         config.brokerId =  getBrokerId
         this.logIdent = "[Kafka Server " + config.brokerId + "], "
-        // 创建socker
-        // 接受请求
+        // 创建socker接受请求
         socketServer = new SocketServer(config, metrics, kafkaMetricsTime)
         socketServer.startup()
 
