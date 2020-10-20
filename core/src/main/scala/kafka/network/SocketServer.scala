@@ -418,17 +418,18 @@ private[kafka] class Processor(val id: Int,
     while (isRunning) {
       try {
         // setup any new connections that have been queued up
-        // 配置所有的新连接，并关注OP_READ事件
+        // 配置所有的新连接，并设置新的connnection的socketChannel关注OP_READ事件
         configureNewConnections()
         // register any new responses for writing
-        // 处理响应
+        // 处理新的响应，并设置Response对应的socketChannel关注OP_WRITE事件
         processNewResponses()
         // 拉取或写入消息
         poll()
         // 处理接收到的消息保存到requestChannel的requestQueue中
-        // 然后获取当前selector的channel并关注OP_READ事件
+        // 然后获取当前selector的channel去掉关注的OP_READ事件
         processCompletedReceives()
         //读取selector中completedSends中的消息，然后基于目的地删掉inflightResponses中的记录
+        // 并关注对应channel的OP_READ事件
         processCompletedSends()
         // 处理断开的连接
         processDisconnected()
@@ -510,7 +511,9 @@ private[kafka] class Processor(val id: Int,
         val session = RequestChannel.Session(new KafkaPrincipal(KafkaPrincipal.USER_TYPE, channel.principal.getName),
           channel.socketAddress)
         val req = RequestChannel.Request(processor = id, connectionId = receive.source, session = session, buffer = receive.payload, startTimeMs = time.milliseconds, securityProtocol = protocol)
+        // 处理接收到的请求并保存到requestQueue中
         requestChannel.sendRequest(req)
+        // 去掉当前socketChannel关注的OP_READ事件
         selector.mute(receive.source)
       } catch {
         case e @ (_: InvalidRequestException | _: SchemaException) =>
@@ -527,6 +530,7 @@ private[kafka] class Processor(val id: Int,
         throw new IllegalStateException(s"Send for ${send.destination} completed, but not in `inflightResponses`")
       }
       resp.request.updateRequestMetrics()
+      // 关注OP_READ事件
       selector.unmute(send.destination)
     }
   }
