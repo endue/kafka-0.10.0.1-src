@@ -231,7 +231,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             long retryBackoffMs = config.getLong(ProducerConfig.RETRY_BACKOFF_MS_CONFIG);
             // metadata，其中参数metadata.max.age.ms默认是5分钟，默认每隔5分钟强制刷新一下
             this.metadata = new Metadata(retryBackoffMs, config.getLong(ProducerConfig.METADATA_MAX_AGE_CONFIG));
-            // max.request.size，每个请求的最大大小，默认1M
+            // max.request.size，每个请求的最大大小，默认1M(不是消息的大小,是batch的大小)
             this.maxRequestSize = config.getInt(ProducerConfig.MAX_REQUEST_SIZE_CONFIG);
             // buffer.memory，缓冲区的内存大小，默认32M
             this.totalMemorySize = config.getLong(ProducerConfig.BUFFER_MEMORY_CONFIG);
@@ -283,7 +283,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
                     retryBackoffMs,
                     metrics,
                     time);
-            // 保存服务列表
+            // 保存broker服务列表
             List<InetSocketAddress> addresses = ClientUtils.parseAndValidateAddresses(config.getList(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG));
             // 拉取集群元数据
             // 其实并没有真正的去拉取集群元数据，而是对metadata中的一些属性做了初始化
@@ -337,8 +337,10 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             // load interceptors and make sure they get clientId
             // 拦截器
             userProvidedConfigs.put(ProducerConfig.CLIENT_ID_CONFIG, clientId);
+            // 获取配置的拦截器
             List<ProducerInterceptor<K, V>> interceptorList = (List) (new ProducerConfig(userProvidedConfigs)).getConfiguredInstances(ProducerConfig.INTERCEPTOR_CLASSES_CONFIG,
                     ProducerInterceptor.class);
+            // 如果不为null，添加到全局变量interceptors中
             this.interceptors = interceptorList.isEmpty() ? null : new ProducerInterceptors<>(interceptorList);
 
             config.logUnused();

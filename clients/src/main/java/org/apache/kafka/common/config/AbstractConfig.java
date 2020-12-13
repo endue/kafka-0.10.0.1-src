@@ -40,6 +40,7 @@ public class AbstractConfig {
     private final Set<String> used;
 
     /* the original values passed in by the user */
+    // 记录用户传入的配置
     private final Map<String, ?> originals;
 
     /* the parsed values */

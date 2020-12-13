@@ -37,12 +37,14 @@ public interface ProducerInterceptor<K, V> extends Configurable {
      * This is called from {@link org.apache.kafka.clients.producer.KafkaProducer#send(ProducerRecord)} and
      * {@link org.apache.kafka.clients.producer.KafkaProducer#send(ProducerRecord, Callback)} methods, before key and value
      * get serialized and partition is assigned (if partition is not specified in ProducerRecord).
+     * 在将消息序列化和分区之前调用该方法
      * <p>
      * This method is allowed to modify the record, in which case, the new record will be returned. The implication of modifying
      * key/value is that partition assignment (if not specified in ProducerRecord) will be done based on modified key/value,
      * not key/value from the client. Consequently, key and value transformation done in onSend() needs to be consistent:
      * same key and value should mutate to the same (modified) key and value. Otherwise, log compaction would not work
      * as expected.
+     *
      * <p>
      * Similarly, it is up to interceptor implementation to ensure that correct topic/partition is returned in ProducerRecord.
      * Most often, it should be the same topic/partition from 'record'.
@@ -67,14 +69,18 @@ public interface ProducerInterceptor<K, V> extends Configurable {
     /**
      * This method is called when the record sent to the server has been acknowledged, or when sending the record fails before
      * it gets sent to the server.
+     * 在消息被应答(cknowledgement)之前或消息发送失败时调用
      * <p>
      * This method is generally called just before the user callback is called, and in additional cases when <code>KafkaProducer.send()</code>
      * throws an exception.
+     * 该方法会优先于用户设定的Callback之前执行
      * <p>
      * Any exception thrown by this method will be ignored by the caller.
+     * 该方法抛出的任何异常都将被调用者忽略
      * <p>
      * This method will generally execute in the background I/O thread, so the implementation should be reasonably fast.
      * Otherwise, sending of messages from other threads could be delayed.
+     * 这个方法通常运行在后台I/O线程中，所以，实现的越简单越好，否则，会影响其他线程发消息的速度
      *
      * @param metadata The metadata for the record that was sent (i.e. the partition and offset).
      *                 If an error occurred, metadata will contain only valid topic and maybe
@@ -88,6 +94,7 @@ public interface ProducerInterceptor<K, V> extends Configurable {
 
     /**
      * This is called when interceptor is closed
+     * 当拦截器关闭时调用
      */
     public void close();
 }
