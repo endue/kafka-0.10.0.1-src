@@ -292,7 +292,7 @@ public class Selector implements Selectable {
             pollSelectionKeys(this.nioSelector.selectedKeys(), false);
             pollSelectionKeys(immediatelyConnectedKeys, true);
         }
-
+        // 处理stagedReceives中的消息到completedReceives中
         addToCompletedReceives();
 
         long endIo = time.nanoseconds();
