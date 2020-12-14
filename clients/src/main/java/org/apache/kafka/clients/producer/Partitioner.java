@@ -28,18 +28,20 @@ public interface Partitioner extends Configurable {
 
     /**
      * Compute the partition for the given record.
+     * 计算消息记录的分区
      *
-     * @param topic The topic name
-     * @param key The key to partition on (or null if no key)
-     * @param keyBytes The serialized key to partition on( or null if no key)
-     * @param value The value to partition on or null
-     * @param valueBytes The serialized value to partition on or null
-     * @param cluster The current cluster metadata
+     * @param topic The topic name topic名称
+     * @param key The key to partition on (or null if no key) key，
+     * @param keyBytes The serialized key to partition on( or null if no key) 序列化后的key
+     * @param value The value to partition on or null value
+     * @param valueBytes The serialized value to partition on or null 序列化后的valeu
+     * @param cluster The current cluster metadata 集群元数据
      */
     public int partition(String topic, Object key, byte[] keyBytes, Object value, byte[] valueBytes, Cluster cluster);
 
     /**
      * This is called when partitioner is closed.
+     * 当分区器关闭时调用
      */
     public void close();
 
