@@ -14,13 +14,18 @@ package org.apache.kafka.common;
 
 /**
  * Information about a topic-partition.
+ * 记录主题的分区信息
  */
 public class PartitionInfo {
-
+    // 主题
     private final String topic;
+    // 分区号
     private final int partition;
+    // 分区中的leader节点
     private final Node leader;
+    // 分区中的follower节点列表
     private final Node[] replicas;
+    // 分区中的ISR节点列表
     private final Node[] inSyncReplicas;
 
     public PartitionInfo(String topic, int partition, Node leader, Node[] replicas, Node[] inSyncReplicas) {

@@ -20,11 +20,14 @@ import java.io.Serializable;
 
 /**
  * A topic name and partition number
+ * 记录主题和分区号的关系
  */
 public final class TopicPartition implements Serializable {
-
+    // hash值默认0
     private int hash = 0;
+    // 分区号
     private final int partition;
+    // 主题
     private final String topic;
 
     public TopicPartition(String topic, int partition) {

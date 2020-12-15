@@ -14,6 +14,7 @@ package org.apache.kafka.common;
 
 /**
  * Information about a Kafka node
+ * 关于Kafka节点的信息，也就是kafka broker
  */
 public class Node {
 

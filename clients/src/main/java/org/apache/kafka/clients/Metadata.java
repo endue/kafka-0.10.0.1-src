@@ -26,26 +26,38 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
+ * 元数据类
  * A class encapsulating some of the logic around metadata.
  * <p>
  * This class is shared by the client thread (for partitioning) and the background sender thread.
+ * 这个类由客户机线程(用于分区也就是kafka producer)和后台发送方线程共享。
  * 
  * Metadata is maintained for only a subset of topics, which can be added to over time. When we request metadata for a
  * topic we don't have any metadata for it will trigger a metadata update.
+ * metadata作为所有主题的一个子集，当我们请求原数据时，也就是发送数据，如果没有原数据，它会触发元数据更新操作
  */
 public final class Metadata {
 
     private static final Logger log = LoggerFactory.getLogger(Metadata.class);
-
+    // 发送消息失败后的重试间隔，默认200ms
     private final long refreshBackoffMs;
+    // metadata自动刷新的时间间隔，默认 5 * 60 * 1000ms
     private final long metadataExpireMs;
+    // 版本
     private int version;
+    // 上一次刷新metadata的时间戳
     private long lastRefreshMs;
+    // 上一次成功刷新metadata的时间戳
     private long lastSuccessfulRefreshMs;
+    // 集群信息
     private Cluster cluster;
+    // 是否需要更新标识
     private boolean needUpdate;
+    // 主题
     private final Set<String> topics;
+    // 监听着
     private final List<Listener> listeners;
+    // 是否需要拉取所有的topic
     private boolean needMetadataForAllTopics;
 
     /**
@@ -62,8 +74,8 @@ public final class Metadata {
      * @param metadataExpireMs The maximum amount of time that metadata can be retained without refresh
      */
     public Metadata(long refreshBackoffMs, long metadataExpireMs) {
-        this.refreshBackoffMs = refreshBackoffMs;
-        this.metadataExpireMs = metadataExpireMs;
+        this.refreshBackoffMs = refreshBackoffMs;// 默认100ms
+        this.metadataExpireMs = metadataExpireMs;// 默认5 * 60 * 1000ms
         this.lastRefreshMs = 0L;
         this.lastSuccessfulRefreshMs = 0L;
         this.version = 0;
@@ -92,6 +104,7 @@ public final class Metadata {
      * The next time to update the cluster info is the maximum of the time the current info will expire and the time the
      * current info can be updated (i.e. backoff time has elapsed); If an update has been request then the expiry time
      * is now
+     * 计算下次更新metadata的时间戳
      */
     public synchronized long timeToNextUpdate(long nowMs) {
         long timeToExpire = needUpdate ? 0 : Math.max(this.lastSuccessfulRefreshMs + this.metadataExpireMs - nowMs, 0);
@@ -101,6 +114,7 @@ public final class Metadata {
 
     /**
      * Request an update of the current cluster metadata info, return the current version before the update
+     * 更新metadata时调用该接口，返回metadata当前版本号，或标注metadata待更新
      */
     public synchronized int requestUpdate() {
         this.needUpdate = true;
@@ -110,6 +124,7 @@ public final class Metadata {
     /**
      * Check whether an update has been explicitly requested.
      * @return true if an update was requested, false otherwise
+     * 是否需要更新metadata
      */
     public synchronized boolean updateRequested() {
         return this.needUpdate;
@@ -117,6 +132,7 @@ public final class Metadata {
 
     /**
      * Wait for metadata update until the current version is larger than the last version we know of
+     * 等待metadata更新，直到当前版本大于我们知道的上一个版本
      */
     public synchronized void awaitUpdate(final int lastVersion, final long maxWaitMs) throws InterruptedException {
         if (maxWaitMs < 0) {
@@ -137,8 +153,10 @@ public final class Metadata {
     /**
      * Replace the current set of topics maintained to the one provided
      * @param topics
+     * 将当前维护的主题集替换为提供的主题集合
      */
     public synchronized void setTopics(Collection<String> topics) {
+        // 如果当前集合不完全包含替换集合中的topic，那么将metadata标注为待更新
         if (!this.topics.containsAll(topics))
             requestUpdate();
         this.topics.clear();
@@ -163,6 +181,7 @@ public final class Metadata {
 
     /**
      * Update the cluster metadata
+     * 更新metadata
      */
     public synchronized void update(Cluster cluster, long now) {
         this.needUpdate = false;

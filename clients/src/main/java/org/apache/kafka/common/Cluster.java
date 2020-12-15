@@ -26,16 +26,24 @@ import java.util.Set;
 
 /**
  * A representation of a subset of the nodes, topics, and partitions in the Kafka cluster.
+ * 该类记录Kafka集群中节点、主题和分区相关信息
  */
 public final class Cluster {
 
     private final boolean isBootstrapConfigured;
+    // 记录kafka集群节点，也就是kafka broker
     private final List<Node> nodes;
+    // 记录为授权的topic
     private final Set<String> unauthorizedTopics;
+    // 记录【主题与其所有分区】关系
     private final Map<TopicPartition, PartitionInfo> partitionsByTopicPartition;
+    // 记录【主题与其所有分区】关系
     private final Map<String, List<PartitionInfo>> partitionsByTopic;
+    // 记录【主题与其可用分区】关系
     private final Map<String, List<PartitionInfo>> availablePartitionsByTopic;
+    // 记录【node节点与其可用分区】关系
     private final Map<Integer, List<PartitionInfo>> partitionsByNode;
+    // 记录【node节点与其id】关系
     private final Map<Integer, Node> nodesById;
 
     /**
@@ -49,6 +57,13 @@ public final class Cluster {
         this(false, nodes, partitions, unauthorizedTopics);
     }
 
+    /**
+     * 根据参数初始化所有的属性
+     * @param isBootstrapConfigured
+     * @param nodes
+     * @param partitions
+     * @param unauthorizedTopics
+     */
     private Cluster(boolean isBootstrapConfigured,
                     Collection<Node> nodes,
                     Collection<PartitionInfo> partitions,
@@ -56,26 +71,33 @@ public final class Cluster {
         this.isBootstrapConfigured = isBootstrapConfigured;
 
         // make a randomized, unmodifiable copy of the nodes
+        // 生成的nodes节点，只允许get操作，任何修改操作都将报错
         List<Node> copy = new ArrayList<>(nodes);
         Collections.shuffle(copy);
         this.nodes = Collections.unmodifiableList(copy);
+        // 记录node节点与其ID的关系到nodesById
         this.nodesById = new HashMap<>();
         for (Node node : nodes)
             this.nodesById.put(node.id(), node);
 
         // index the partitions by topic/partition for quick lookup
+        // 将参数partitions按照主题、分区的关系记录到partitionsByTopicPartition
         this.partitionsByTopicPartition = new HashMap<>(partitions.size());
         for (PartitionInfo p : partitions)
+            // todo 这里key是new TopicPartition，当一个主题存在多个分区是，partitionsByTopicPartition里会存在多条记录
             this.partitionsByTopicPartition.put(new TopicPartition(p.topic(), p.partition()), p);
 
+        // 分别按主题和节点索引分区
         // index the partitions by topic and node respectively, and make the lists
         // unmodifiable so we can hand them out in user-facing apis without risk
         // of the client modifying the contents
         HashMap<String, List<PartitionInfo>> partsForTopic = new HashMap<>();
         HashMap<Integer, List<PartitionInfo>> partsForNode = new HashMap<>();
+        // 将nodes也就是kafka broker按照ID进行分类
         for (Node n : this.nodes) {
             partsForNode.put(n.id(), new ArrayList<PartitionInfo>());
         }
+        // 将分区信息按照主题分类
         for (PartitionInfo p : partitions) {
             if (!partsForTopic.containsKey(p.topic()))
                 partsForTopic.put(p.topic(), new ArrayList<PartitionInfo>());
@@ -90,20 +112,25 @@ public final class Cluster {
         this.partitionsByTopic = new HashMap<>(partsForTopic.size());
         this.availablePartitionsByTopic = new HashMap<>(partsForTopic.size());
         for (Map.Entry<String, List<PartitionInfo>> entry : partsForTopic.entrySet()) {
+            // 获取主题和对应的分区列表
             String topic = entry.getKey();
             List<PartitionInfo> partitionList = entry.getValue();
+            // 将主题与其所有分区信息记录到partitionsByTopic
             this.partitionsByTopic.put(topic, Collections.unmodifiableList(partitionList));
+            // 遍历主题所有分区信息，如果leader不为null，就代表是一个可用node
             List<PartitionInfo> availablePartitions = new ArrayList<>();
             for (PartitionInfo part : partitionList) {
                 if (part.leader() != null)
                     availablePartitions.add(part);
             }
+            // 将主题与其可用分区信息记录到partitionsByTopic
             this.availablePartitionsByTopic.put(topic, Collections.unmodifiableList(availablePartitions));
         }
+        // 封装partitionsByNode
         this.partitionsByNode = new HashMap<>(partsForNode.size());
         for (Map.Entry<Integer, List<PartitionInfo>> entry : partsForNode.entrySet())
             this.partitionsByNode.put(entry.getKey(), Collections.unmodifiableList(entry.getValue()));
-
+        // 封装unauthorizedTopics
         this.unauthorizedTopics = Collections.unmodifiableSet(unauthorizedTopics);
     }
 
@@ -116,6 +143,7 @@ public final class Cluster {
 
     /**
      * Create a "bootstrap" cluster using the given list of host/ports
+     * 基于InetSocketAddress列表，封装一个Cluster对象
      * @param addresses The addresses
      * @return A cluster for these hosts/ports
      */
