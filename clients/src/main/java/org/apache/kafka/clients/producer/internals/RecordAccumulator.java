@@ -58,11 +58,15 @@ import java.util.concurrent.atomic.AtomicInteger;
 public final class RecordAccumulator {
 
     private static final Logger log = LoggerFactory.getLogger(RecordAccumulator.class);
-
+    // 记录状态是否关闭
     private volatile boolean closed;
+    // 记录flush操作的线程数
     private final AtomicInteger flushesInProgress;
+    // 记录写消息的线程数
     private final AtomicInteger appendsInProgress;
-    private final int batchSize;// 默认16kb
+    // 记录每次申请RecordBatch的大小，默认16kb
+    private final int batchSize;
+    // 压缩类型
     private final CompressionType compression;
     // RecordBatch等待lingerMs后，必须发送出去
     private final long lingerMs;
@@ -71,9 +75,9 @@ public final class RecordAccumulator {
     // BufferPool，一个ByteBuffer池子
     private final BufferPool free;
     private final Time time;
-    // 保存TopicPartition对应的消息记录
+    // 记录TopicPartition对应的所有消息记录
     private final ConcurrentMap<TopicPartition, Deque<RecordBatch>> batches;
-    // 消息待发送的RecordBatch
+    // 记录发送后待确认的RecordBatch
     private final IncompleteRecordBatches incomplete;
     // The following variables are only accessed by the sender thread, so we don't need to protect them.
     // 记录所有需要保证消息有序性的分区topic
@@ -94,7 +98,7 @@ public final class RecordAccumulator {
      * @param metrics The metrics
      * @param time The time instance to use
      */
-    public RecordAccumulator(int batchSize,// 默认16kb
+    public RecordAccumulator(int batchSize,// 默认16384 = 16kb
                              long totalSize,// 默认32M
                              CompressionType compression,// 默认none
                              long lingerMs,// 默认0

@@ -204,6 +204,7 @@ public final class Cluster {
 
     /**
      * Get the list of partitions for this topic
+     * 获取主题对应的分区列表
      * @param topic The topic name
      * @return A list of partitions
      */

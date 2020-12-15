@@ -543,13 +543,14 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
      * Wait for cluster metadata including partitions for the given topic to be available.
      * @param topic The topic we want metadata for
      * @param maxWaitMs The maximum time in ms for waiting on the metadata
-     * @return The amount of time we waited in ms
+     * @return The amount of time we waited in ms 返回表示更新元数据耗费的时间
      */
     private long waitOnMetadata(String topic, long maxWaitMs) throws InterruptedException {
         // add topic to metadata topic list if it is not there already.
+        // 如果metadata中不包含当前主题，那么记录到metadata中
         if (!this.metadata.containsTopic(topic))
             this.metadata.add(topic);
-
+        // 拉取主题对应的分区信息，如果不为null，直接返回0
         if (metadata.fetch().partitionsForTopic(topic) != null)
             return 0;
 

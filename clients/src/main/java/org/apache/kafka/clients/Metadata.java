@@ -140,12 +140,16 @@ public final class Metadata {
         }
         long begin = System.currentTimeMillis();
         long remainingWaitMs = maxWaitMs;
+        // 获取当前版本与上一次的版本，如果未更新则执行等待更新
         while (this.version <= lastVersion) {
             if (remainingWaitMs != 0)
                 wait(remainingWaitMs);
+            // 计算更新耗时
             long elapsed = System.currentTimeMillis() - begin;
+            // 超时抛出异常
             if (elapsed >= maxWaitMs)
                 throw new TimeoutException("Failed to update metadata after " + maxWaitMs + " ms.");
+            // 计算剩余时间
             remainingWaitMs = maxWaitMs - elapsed;
         }
     }
