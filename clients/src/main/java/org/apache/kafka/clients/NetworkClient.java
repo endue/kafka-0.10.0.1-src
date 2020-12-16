@@ -57,6 +57,7 @@ public class NetworkClient implements KafkaClient {
     private final Random randOffset;
 
     /* the state of each node's connection */
+    // 记录每个节点的连接状态
     private final ClusterConnectionStates connectionStates;
 
     /* the set of requests currently being sent or awaiting a response */
@@ -259,6 +260,7 @@ public class NetworkClient implements KafkaClient {
      */
     @Override
     public List<ClientResponse> poll(long timeout, long now) {
+        // 获取metadata当前时间距离上次刷新时的时间戳
         long metadataTimeout = metadataUpdater.maybeUpdate(now);
         try {
             this.selector.poll(Utils.min(timeout, metadataTimeout, requestTimeoutMs));
@@ -356,19 +358,23 @@ public class NetworkClient implements KafkaClient {
      * prefer a node with an existing connection, but will potentially choose a node for which we don't yet have a
      * connection if all existing connections are in use. This method will never choose a node for which there is no
      * existing connection and from which we have disconnected within the reconnect backoff period.
-     *
+     * 选择未完成请求最少且至少符合连接条件的节点。此方法将首选具有现有连接的节点，但如果所有现有连接都在使用中，
+     * 则可能会选择尚未连接的节点。此方法永远不会选择不存在现有连接的节点，也不会选择在重新连接回退期间已断开连接的节点
      * @return The node with the fewest in-flight requests.
      */
     @Override
     public Node leastLoadedNode(long now) {
+        // 获取所有的kafak broker
         List<Node> nodes = this.metadataUpdater.fetchNodes();
         int inflight = Integer.MAX_VALUE;
         Node found = null;
-
+        // 获取随机下标
         int offset = this.randOffset.nextInt(nodes.size());
         for (int i = 0; i < nodes.size(); i++) {
+            // 计算一个node下标并获取对应node
             int idx = (offset + i) % nodes.size();
             Node node = nodes.get(idx);
+            //
             int currInflight = this.inFlightRequests.inFlightRequestCount(node.idString());
             if (currInflight == 0 && this.connectionStates.isConnected(node.idString())) {
                 // if we find an established connection with no in-flight requests we can stop right away
@@ -525,12 +531,15 @@ public class NetworkClient implements KafkaClient {
     class DefaultMetadataUpdater implements MetadataUpdater {
 
         /* the current cluster metadata */
+        // 记录当前集群元数据
         private final Metadata metadata;
 
         /* true iff there is a metadata request that has been sent and for which we have not yet received a response */
+        // 记录当前是否有一个元数据请求已经发送并且还没有收到回应
         private boolean metadataFetchInProgress;
 
         /* the last timestamp when no broker node is available to connect */
+        // 记录没有可用node节点时的时间戳
         private long lastNoNodeAvailableMs;
 
         DefaultMetadataUpdater(Metadata metadata) {
@@ -545,7 +554,9 @@ public class NetworkClient implements KafkaClient {
         }
 
         /**
-         * metadata非正在更新或下一个更新时间为0 则返回true
+         * 是否需要触发更新操作，以下任一返回true
+         *  1.当前没有发生更新metadata的请求
+         *  2.下一个更新操作的时间为0
          * @param now
          * @return
          */
@@ -554,16 +565,24 @@ public class NetworkClient implements KafkaClient {
             return !this.metadataFetchInProgress && this.metadata.timeToNextUpdate(now) == 0;
         }
 
+        /**
+         * 计算metadata上次刷新距离当前时间的时间戳
+         * @param now
+         * @return
+         */
         @Override
         public long maybeUpdate(long now) {
             // should we update our metadata?
+            // 获取下次更新metadata的时间戳
             long timeToNextMetadataUpdate = metadata.timeToNextUpdate(now);
+            //
             long timeToNextReconnectAttempt = Math.max(this.lastNoNodeAvailableMs + metadata.refreshBackoff() - now, 0);
+            //
             long waitForMetadataFetch = this.metadataFetchInProgress ? Integer.MAX_VALUE : 0;
             // if there is no node available to connect, back off refreshing metadata
             long metadataTimeout = Math.max(Math.max(timeToNextMetadataUpdate, timeToNextReconnectAttempt),
                     waitForMetadataFetch);
-
+            // 已经到达更新的时间
             if (metadataTimeout == 0) {
                 // Beware that the behavior of this method and the computation of timeouts for poll() are
                 // highly dependent on the behavior of leastLoadedNode.
@@ -638,6 +657,7 @@ public class NetworkClient implements KafkaClient {
 
         /**
          * Add a metadata request to the list of sends if we can make one
+         * 如果可以的话，在发送列表中添加一个更新元数据的请求
          */
         private void maybeUpdate(long now, Node node) {
             if (node == null) {

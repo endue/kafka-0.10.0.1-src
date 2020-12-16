@@ -87,6 +87,7 @@ public class Compressor {
     private final int initPos;
 
     public long writtenUncompressed;
+    // 记录写记录的数量
     public long numRecords;
     public float compressionRate;
     public long maxTimestamp;

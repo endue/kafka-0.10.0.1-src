@@ -58,7 +58,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 public final class RecordAccumulator {
 
     private static final Logger log = LoggerFactory.getLogger(RecordAccumulator.class);
-    // 记录状态是否关闭
+    // 记录RecordAccumulator状态是否关闭
     private volatile boolean closed;
     // 记录flush操作的线程数
     private final AtomicInteger flushesInProgress;
@@ -75,7 +75,7 @@ public final class RecordAccumulator {
     // BufferPool，一个ByteBuffer池子
     private final BufferPool free;
     private final Time time;
-    // 记录TopicPartition对应的所有消息记录
+    // 记录TopicPartition与自身的Deque<RecordBatch>
     private final ConcurrentMap<TopicPartition, Deque<RecordBatch>> batches;
     // 记录发送后待确认的RecordBatch
     private final IncompleteRecordBatches incomplete;
@@ -226,9 +226,12 @@ public final class RecordAccumulator {
     /**
      * If `RecordBatch.tryAppend` fails (i.e. the record batch is full), close its memory records to release temporary
      * resources (like compression streams buffers).
+     * 将消息放到对应主题的Deque<RecordBatch>尾部的RecordBatch中
      */
     private RecordAppendResult tryAppend(long timestamp, byte[] key, byte[] value, Callback callback, Deque<RecordBatch> deque) {
+        // 获取topic对应的Deque末尾的RecordBatch
         RecordBatch last = deque.peekLast();
+        // 如果RecordBatch不为null继续执行，否则返回null
         if (last != null) {
             // 将消息放到RecordBatch中
             FutureRecordMetadata future = last.tryAppend(timestamp, key, value, callback, time.milliseconds());

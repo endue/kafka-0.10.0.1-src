@@ -246,9 +246,12 @@ public class Sender implements Runnable {
             client.send(request, now);
 
         // if some partitions are already ready to be sent, the select time would be 0;
+        // 如果某些分区已经准备好发送消息(batch凑够16kb)，那么pollTimeout为0
         // otherwise if some partition already has some data accumulated but not ready yet,
         // the select time will be the time difference between now and its linger expiry time;
+        // 如果某些分区已经存储了消息(batch没凑够16kb)，那么pollTimeout为 batch创建事件 + linger.ms - now
         // otherwise the select time will be the time difference between now and the metadata expiry time;
+        // 其他情况，pollTimeout为metadata上次刷新时间 + 过期时间 - now
         this.client.poll(pollTimeout, now);
     }
 

@@ -312,6 +312,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
                     clientId,
                     this.requestTimeoutMs);
             String ioThreadName = "kafka-producer-network-thread" + (clientId.length() > 0 ? " | " + clientId : "");
+            // 将sender封装到一个thread后启动thread
             this.ioThread = new KafkaThread(ioThreadName, this.sender, true);
             this.ioThread.start();
 
@@ -540,17 +541,20 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
     }
 
     /**
+     * 等待获取对应topic的元数据
      * Wait for cluster metadata including partitions for the given topic to be available.
-     * @param topic The topic we want metadata for
-     * @param maxWaitMs The maximum time in ms for waiting on the metadata
+     * @param topic The topic we want metadata for 获取元数据的topic
+     * @param maxWaitMs The maximum time in ms for waiting on the metadata 获取元数据的最大等待时间
      * @return The amount of time we waited in ms 返回表示更新元数据耗费的时间
+     *
      */
     private long waitOnMetadata(String topic, long maxWaitMs) throws InterruptedException {
         // add topic to metadata topic list if it is not there already.
-        // 如果metadata中不包含当前主题，那么记录到metadata中
+        // 如果metadata中不包含当前topic，那么记录到metadata中
         if (!this.metadata.containsTopic(topic))
             this.metadata.add(topic);
-        // 拉取主题对应的分区信息，如果不为null，直接返回0
+        // 拉取topic对应的分区信息，如果不为null，直接返回0
+        // 没有等待，所以返回0
         if (metadata.fetch().partitionsForTopic(topic) != null)
             return 0;
 

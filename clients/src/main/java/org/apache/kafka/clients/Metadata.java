@@ -53,9 +53,9 @@ public final class Metadata {
     private Cluster cluster;
     // 是否需要更新标识
     private boolean needUpdate;
-    // 主题
+    // 记录包含的主题
     private final Set<String> topics;
-    // 监听着
+    // 监听者
     private final List<Listener> listeners;
     // 是否需要拉取所有的topic
     private boolean needMetadataForAllTopics;
