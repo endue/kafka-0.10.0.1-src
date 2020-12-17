@@ -343,6 +343,7 @@ public class NetworkClient implements KafkaClient {
     public void wakeup() {
         // 当B线程阻塞在select()或select(long)方法上时，A线程调用wakeup后，B线程会立刻返回。
         // 如果没有线程阻塞在select()方法上，那么下一次某个线程调用select()或select(long)方法时会立刻返回。
+        // 如果调用selector.wakeup()方法，当前没有阻塞在select()上，那么会影响下一次调用select()。
         this.selector.wakeup();
     }
 
