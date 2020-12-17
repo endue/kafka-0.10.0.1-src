@@ -261,7 +261,7 @@ public class NetworkClient implements KafkaClient {
      */
     @Override
     public List<ClientResponse> poll(long timeout, long now) {
-        // 获取metadata当前时间距离上次刷新时的时间戳
+        // 获取metadata当前时间距离上次刷新时的时间戳，如果可以将更新metadata
         long metadataTimeout = metadataUpdater.maybeUpdate(now);
         try {
             this.selector.poll(Utils.min(timeout, metadataTimeout, requestTimeoutMs));
@@ -360,7 +360,7 @@ public class NetworkClient implements KafkaClient {
      * prefer a node with an existing connection, but will potentially choose a node for which we don't yet have a
      * connection if all existing connections are in use. This method will never choose a node for which there is no
      * existing connection and from which we have disconnected within the reconnect backoff period.
-     * 选择未完成请求最少且至少符合连接条件的节点。此方法将首选具有现有连接的节点，但如果所有现有连接都在使用中，
+     * 选择一个未完成请求最少并且符合连接条件的节点。此方法将首选具有现有连接的节点，但如果所有现有连接都在使用中，
      * 则可能会选择尚未连接的节点。此方法永远不会选择不存在现有连接的节点，也不会选择在重新连接回退期间已断开连接的节点
      * @return The node with the fewest in-flight requests.
      */
@@ -376,11 +376,13 @@ public class NetworkClient implements KafkaClient {
             // 计算一个node下标并获取对应node
             int idx = (offset + i) % nodes.size();
             Node node = nodes.get(idx);
-            //
+            // 计算当前node节点已发生或正在发送没有收到响应的消息集合大小
             int currInflight = this.inFlightRequests.inFlightRequestCount(node.idString());
+            // 如果为0 && 当前节点可连接，那么返回该节点
             if (currInflight == 0 && this.connectionStates.isConnected(node.idString())) {
                 // if we find an established connection with no in-flight requests we can stop right away
                 return node;
+            //
             } else if (!this.connectionStates.isBlackedOut(node.idString(), now) && currInflight < inflight) {
                 // otherwise if this is the best we have found so far, record that
                 inflight = currInflight;

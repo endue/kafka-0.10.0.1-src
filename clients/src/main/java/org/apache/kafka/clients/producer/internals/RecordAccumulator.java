@@ -326,6 +326,7 @@ public final class RecordAccumulator {
      * </ul>
      * </ol>
      */
+    // 获取可发送的消息
     public ReadyCheckResult ready(Cluster cluster, long nowMs) {
         // 记录可发送消息记录的topic的leader节点
         Set<Node> readyNodes = new HashSet<>();
