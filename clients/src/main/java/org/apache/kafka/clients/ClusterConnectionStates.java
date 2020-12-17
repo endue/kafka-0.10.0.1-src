@@ -20,6 +20,7 @@ import java.util.Map;
  * 
  */
 final class ClusterConnectionStates {
+    // 重新建立连接所需等待的时间
     private final long reconnectBackoffMs;
     // key是node的id，value是对应的状态描述
     private final Map<String, NodeConnectionState> nodeState;

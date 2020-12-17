@@ -356,10 +356,11 @@ public class Sender implements Runnable {
 
     /**
      * Transfer the record batches into a list of produce requests on a per-node basis
+     * 将List<RecordBatch>转换为List<ClientRequest>
      */
     private List<ClientRequest> createProduceRequests(Map<Integer, List<RecordBatch>> collated, long now) {
         List<ClientRequest> requests = new ArrayList<ClientRequest>(collated.size());
-        // 遍历collated，key是node的ID，value是发往某个node的所有RecordBatch
+        // 遍历collated集合，key是broker的leader节点ID，value是发往某个broker的所有RecordBatch
         for (Map.Entry<Integer, List<RecordBatch>> entry : collated.entrySet())
             requests.add(produceRequest(now, entry.getKey(), acks, requestTimeout, entry.getValue()));
         return requests;
@@ -367,8 +368,11 @@ public class Sender implements Runnable {
 
     /**
      * Create a produce request from the given record batches
+     * 将List<RecordBatch>按照topic分为2组
+     * 一组value是ByteBuffer、另一组value是RecordBatch
      */
     private ClientRequest produceRequest(long now, int destination, short acks, int timeout, List<RecordBatch> batches) {
+        // 将batches集合按照topic进行分类
         Map<TopicPartition, ByteBuffer> produceRecordsByPartition = new HashMap<TopicPartition, ByteBuffer>(batches.size());
         final Map<TopicPartition, RecordBatch> recordsByPartition = new HashMap<TopicPartition, RecordBatch>(batches.size());
         for (RecordBatch batch : batches) {

@@ -32,20 +32,27 @@ import org.slf4j.LoggerFactory;
 public final class RecordBatch {
 
     private static final Logger log = LoggerFactory.getLogger(RecordBatch.class);
-
+    // 记录放入消息的数量
     public int recordCount = 0;
+    // 消息记录运行的最大大小
     public int maxRecordSize = 0;
     // 重试次数，在发送RecordBatch时使用
     public volatile int attempts = 0;
+    // 记录RecordBatch创建事件
     public final long createdMs;
     public long drainedMs;
     // 记录最后一次放入消息的时间戳
     public long lastAttemptMs;
+    // 记录真正保存消息的类
     public final MemoryRecords records;
+    // 记录RecordBatch对应的分区
     public final TopicPartition topicPartition;
+    //
     public final ProduceRequestResult produceFuture;
+    // 记录最后一个放入消息的时间戳
     public long lastAppendTime;
     private final List<Thunk> thunks;
+    // 记录当前最后放入消息的偏移量
     private long offsetCounter = 0L;
     private boolean retry;
 
@@ -62,6 +69,7 @@ public final class RecordBatch {
 
     /**
      * Append the record to the current record set and return the relative offset within that record set
+     * 将消息记录追加到当前消息记录集合中，同时返回该消息记录集合中的相对偏移量
      * 
      * @return The RecordSend corresponding to this record or null if there isn't sufficient room.
      */

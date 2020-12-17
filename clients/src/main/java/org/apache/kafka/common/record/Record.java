@@ -24,6 +24,7 @@ import org.apache.kafka.common.utils.Utils;
 
 /**
  * A record: a serialized key and value along with the associated CRC and other fields
+ * 消息记录，包括序列化的键和值，以及相关的CRC和其他字段
  */
 public final class Record {
 

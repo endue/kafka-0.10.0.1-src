@@ -24,6 +24,7 @@ import org.apache.kafka.common.utils.AbstractIterator;
 
 /**
  * A {@link Records} implementation backed by a ByteBuffer.
+ * 一个基于ByteBuffer来实现的
  */
 public class MemoryRecords implements Records {
 
@@ -50,28 +51,31 @@ public class MemoryRecords implements Records {
     private boolean writable;
 
     // Construct a writable memory records
+    // 构造方法
+    // 注意这里私有化了，只能自己内部调用，所以它肯定提供了static方法
     private MemoryRecords(ByteBuffer buffer, CompressionType type, boolean writable, int writeLimit) {
         this.writable = writable;
         this.writeLimit = writeLimit;
         this.initialCapacity = buffer.capacity();
         if (this.writable) {
             this.buffer = null;
+            // 将buffer传递给compressor
             this.compressor = new Compressor(buffer, type);
         } else {
             this.buffer = buffer;
             this.compressor = null;
         }
     }
-
+    // 构造方法
     public static MemoryRecords emptyRecords(ByteBuffer buffer, CompressionType type, int writeLimit) {
         return new MemoryRecords(buffer, type, true, writeLimit);
     }
-
+    // 构造方法，没有消息记录
     public static MemoryRecords emptyRecords(ByteBuffer buffer, CompressionType type) {
         // use the buffer capacity as the default write limit
         return emptyRecords(buffer, type, buffer.capacity());
     }
-
+    // 构造方法
     public static MemoryRecords readableRecords(ByteBuffer buffer) {
         return new MemoryRecords(buffer, CompressionType.NONE, false, WRITE_LIMIT_FOR_READABLE_ONLY);
     }
@@ -79,6 +83,7 @@ public class MemoryRecords implements Records {
     /**
      * Append the given record and offset to the buffer
      */
+    // 追加消息记录到指定的下标索引
     public void append(long offset, Record record) {
         if (!writable)
             throw new IllegalStateException("Memory records is not writable");
@@ -95,6 +100,7 @@ public class MemoryRecords implements Records {
      * Append a new record and offset to the buffer
      * @return crc of the record
      */
+    // 追加
     public long append(long offset, long timestamp, byte[] key, byte[] value) {
         if (!writable)
             throw new IllegalStateException("Memory records is not writable");
@@ -137,6 +143,7 @@ public class MemoryRecords implements Records {
      * the checking should be based on the capacity of the initialized buffer rather than the write limit in order
      * to accept this single record.
      */
+    // 判断是否还有足够的空间可以写入
     public boolean hasRoomFor(byte[] key, byte[] value) {
         // 判断是否可写
         if (!this.writable)
@@ -147,7 +154,9 @@ public class MemoryRecords implements Records {
             this.writeLimit >= this.compressor.estimatedBytesWritten() + Records.LOG_OVERHEAD + Record.recordSize(key, value);
     }
 
+    // 判断是否已满
     public boolean isFull() {
+        // 当前MemoryRecords不可写
         return !this.writable || this.writeLimit <= this.compressor.estimatedBytesWritten();
     }
 

@@ -85,9 +85,9 @@ public class Compressor {
     private final DataOutputStream appendStream;
     private final ByteBufferOutputStream bufferStream;
     private final int initPos;
-
+    // 记录未压缩消息的数量
     public long writtenUncompressed;
-    // 记录写记录的数量
+    // 记录已写消息的数量
     public long numRecords;
     public float compressionRate;
     public long maxTimestamp;

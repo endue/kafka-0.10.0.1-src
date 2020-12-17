@@ -193,21 +193,22 @@ public final class RecordAccumulator {
             // 获取size大小：取 batchSize(默认16KB)和消息 中最大值
             int size = Math.max(this.batchSize, Records.LOG_OVERHEAD + Record.recordSize(key, value));
             log.trace("Allocating a new {} byte message buffer for topic {} partition {}", size, tp.topic(), tp.partition());
-            // 基于size在BufferPool中申请一块buffer空间
+            // 基于size在BufferPool缓存池中申请一块buffer空间
             ByteBuffer buffer = free.allocate(size, maxTimeToBlock);
             synchronized (dq) {
                 // Need to check if producer is closed again after grabbing the dequeue lock.
                 if (closed)
                     throw new IllegalStateException("Cannot send after the producer is closed.");
-                // 再次尝试将消息放到RecordBatch中防止多线程时已被其他线程创建
+                // 再次尝试将消息放到Deque尾部的RecordBatch中，以防多线程时已被其他线程创建
                 RecordAppendResult appendResult = tryAppend(timestamp, key, value, callback, dq);
-                // 消息放置成功说明RecordBatch已被其他线程创建，释放申请的buffer
+                // 消息放置成功说明RecordBatch已被其他线程创建，之前申请的ByteBuffer需要释放
                 if (appendResult != null) {
                     // Somebody else found us a batch, return the one we waited for! Hopefully this doesn't happen often...
+                    // 释放ByteBuffer
                     free.deallocate(buffer);
                     return appendResult;
                 }
-                // 走到这一步说明当前线程已申请了一块buffer空间并且没有其他线程在相同的topic中创建RecordBatch
+                // 走到这一步说明当前线程已申请了一块ByteBuffer空间并且没有其他线程在相同的topic中创建RecordBatch
                 // 创建RecordBatch
                 MemoryRecords records = MemoryRecords.emptyRecords(buffer, compression, this.batchSize);
                 RecordBatch batch = new RecordBatch(tp, records, time.milliseconds());

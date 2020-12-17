@@ -80,7 +80,7 @@ public class Selector implements Selectable {
     private static final Logger log = LoggerFactory.getLogger(Selector.class);
     // java nio selector
     private final java.nio.channels.Selector nioSelector;
-    // key是node节点ID，value是对应的KafkaChannel
+    // 记录了与node节点的连接，key是node节点ID，value是对应的KafkaChannel
     private final Map<String, KafkaChannel> channels;
     // 记录每一次poll时，已发送的send
     private final List<Send> completedSends;
@@ -88,7 +88,7 @@ public class Selector implements Selectable {
     private final List<NetworkReceive> completedReceives;
     // 记录每一次poll时，KafkaChannel对应的响应
     private final Map<KafkaChannel, Deque<NetworkReceive>> stagedReceives;
-    // 保存建立连接的SelectionKey
+    // 保存已完成连接建立的SelectionKey
     private final Set<SelectionKey> immediatelyConnectedKeys;
     // 记录每一次poll时，断开的KafkaChannel连接
     private final List<String> disconnected;
@@ -102,6 +102,7 @@ public class Selector implements Selectable {
     private final ChannelBuilder channelBuilder;
     private final Map<String, Long> lruConnections;
     private final long connectionsMaxIdleNanos;
+    //
     private final int maxReceiveSize;
     private final boolean metricsPerConnection;
     private long currentTimeNanos;
@@ -155,23 +156,43 @@ public class Selector implements Selectable {
      * @param receiveBufferSize The receive buffer for the new connection
      * @throws IllegalStateException if there is already a connection for that id
      * @throws IOException if DNS resolution fails on the hostname or if the broker is down
+     *
+     * 开始连接到给定地址，并将连接添加到与给定id相关联的nioSelector
      */
     @Override
     public void connect(String id, InetSocketAddress address, int sendBufferSize, int receiveBufferSize) throws IOException {
+        // 如果针对某节点已建立连接则抛出异常，不需要重复建立
         if (this.channels.containsKey(id))
             throw new IllegalStateException("There is already a connection for id " + id);
-
+        // java nio建立socket连接N部曲
+        // 1.获取SocketChannel
         SocketChannel socketChannel = SocketChannel.open();
+        // 2.设置非阻塞
         socketChannel.configureBlocking(false);
+        // 2.1 获取socket并配置相关参数
         Socket socket = socketChannel.socket();
+        // 2.2 设置KeepAlive
+        /**
+         * java socket编程中有个keepalive选项，看到这个选项经常会误解为长连接，不设置则为短连接，实则不然。
+         *
+         * socket连接建立之后，只要双方均未主动关闭连接，那这个连接就是会一直保持的，就是持久的连接。
+         * keepalive只是为了防止连接的双方发生意外而通知不到对方，导致一方还持有连接，占用资源。
+         *
+         * 其实这个选项的意思是TCP连接空闲时是否需要向对方发送探测包，实际上是依赖于底层的TCP模块实现的，
+         * java中只能设置是否开启，不能设置其详细参数，只能依赖于系统配置。
+         */
         socket.setKeepAlive(true);
+        // 2.3 设置发送或接受缓存区
         if (sendBufferSize != Selectable.USE_DEFAULT_BUFFER_SIZE)
             socket.setSendBufferSize(sendBufferSize);
         if (receiveBufferSize != Selectable.USE_DEFAULT_BUFFER_SIZE)
             socket.setReceiveBufferSize(receiveBufferSize);
+        // 2.4 是否关闭Nagle's algorithm，默认开启
+        // 如果开启则要求一个TCP连接上最多只能有一个未被确认的小分组，在该小分组的确认到来之前，不能发送其他小分组
         socket.setTcpNoDelay(true);
         boolean connected;
         try {
+            // 3.与对应的IP地址建立连接
             connected = socketChannel.connect(address);
         } catch (UnresolvedAddressException e) {
             socketChannel.close();
@@ -180,13 +201,18 @@ public class Selector implements Selectable {
             socketChannel.close();
             throw e;
         }
+        // 4.注册监听OP_CONNECT事件
         SelectionKey key = socketChannel.register(nioSelector, SelectionKey.OP_CONNECT);
+        // 基于node节点的id和对应的SelectionKey，创建一个KafkaChannel
         KafkaChannel channel = channelBuilder.buildChannel(id, key, maxReceiveSize);
+        // SelectionKey同时绑定了KafkaChannel
         key.attach(channel);
+        // 记录
         this.channels.put(id, channel);
 
         if (connected) {
             // OP_CONNECT won't trigger for immediately connected channels
+            // 建立连接立即返回true，取消当前SelectionKey对任何事件的监听
             log.debug("Immediately connected to node {}", channel.id());
             immediatelyConnectedKeys.add(key);
             key.interestOps(0);

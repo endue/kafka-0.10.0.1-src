@@ -129,26 +129,40 @@ import org.slf4j.LoggerFactory;
 public class KafkaProducer<K, V> implements Producer<K, V> {
 
     private static final Logger log = LoggerFactory.getLogger(KafkaProducer.class);
+    // 用于生成clientId
     private static final AtomicInteger PRODUCER_CLIENT_ID_SEQUENCE = new AtomicInteger(1);
     private static final String JMX_PREFIX = "kafka.producer";
-
+    // clientId
     private String clientId;
+    // 分区器
     private final Partitioner partitioner;
+    // 每个请求的最大大小，默认1M
     private final int maxRequestSize;
+    // 缓冲区的内存大小，默认32M
     private final long totalMemorySize;
+    // 集群信息元数据
     private final Metadata metadata;
+    // 消息累加器
     private final RecordAccumulator accumulator;
+    // 后台发送消息的sender线程
     private final Sender sender;
     private final Metrics metrics;
+    // io线程，封装sender
     private final Thread ioThread;
+    // 消息压缩的类型，枚举类型
     private final CompressionType compressionType;
     private final Sensor errors;
     private final Time time;
+    // key、value的序列化
     private final Serializer<K> keySerializer;
     private final Serializer<V> valueSerializer;
+    // kafka producer的配置类
     private final ProducerConfig producerConfig;
+    // 发送消息的阻塞消耗时间(更新metadata时间 + 缓冲区填满之后的阻塞时间)，默认60s
     private final long maxBlockTimeMs;
+    // 请求超时时间，默认30s
     private final int requestTimeoutMs;
+    // 拦截器
     private final ProducerInterceptors<K, V> interceptors;
 
     /**
@@ -231,7 +245,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             long retryBackoffMs = config.getLong(ProducerConfig.RETRY_BACKOFF_MS_CONFIG);
             // metadata，其中参数metadata.max.age.ms默认是5分钟，默认每隔5分钟强制刷新一下
             this.metadata = new Metadata(retryBackoffMs, config.getLong(ProducerConfig.METADATA_MAX_AGE_CONFIG));
-            // max.request.size，每个请求的最大大小，默认1M(不是消息的大小,是batch的大小)
+            // max.request.size，每个请求的最大大小，默认1M
             this.maxRequestSize = config.getInt(ProducerConfig.MAX_REQUEST_SIZE_CONFIG);
             // buffer.memory，缓冲区的内存大小，默认32M
             this.totalMemorySize = config.getLong(ProducerConfig.BUFFER_MEMORY_CONFIG);
@@ -454,8 +468,10 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
     /**
      * Implementation of asynchronously send a record to a topic. Equivalent to <code>send(record, null)</code>.
      * See {@link #send(ProducerRecord, Callback)} for details.
+     * 发送消息实现
      */
     private Future<RecordMetadata> doSend(ProducerRecord<K, V> record, Callback callback) {
+        // 要发往的分区
         TopicPartition tp = null;
         try {
             // first make sure the metadata for the topic is available
@@ -479,7 +495,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
                         " to class " + producerConfig.getClass(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG).getName() +
                         " specified in value.serializer");
             }
-            // 计算record需要发送到哪个分区
+            // 计算record需要发送到哪个partition
             int partition = partition(record, serializedKey, serializedValue, metadata.fetch());
             // 计算消息长度
             // SIZE_LENGTH(4Byte) + OFFSET_LENGTH(8Byte) +
@@ -492,6 +508,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             ensureValidRecordSize(serializedSize);
             // 初始化TopicPartition(保存主题和分区)
             tp = new TopicPartition(record.topic(), partition);
+            // 生成时间戳
             long timestamp = record.timestamp() == null ? time.milliseconds() : record.timestamp();
             log.trace("Sending record {} with callback {} to topic {} partition {}", record, callback, record.topic(), partition);
             // producer callback will make sure to call both 'callback' and interceptor callback
@@ -749,9 +766,10 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
      * calls configured partitioner class to compute the partition.
      */
     private int partition(ProducerRecord<K, V> record, byte[] serializedKey , byte[] serializedValue, Cluster cluster) {
+        // 获取消息记录中用户指定的partition
         Integer partition = record.partition();
-        // 用户指定partition则使用用户指定的partition，同时校验topic的分区数量
         if (partition != null) {
+            // 获取当前主题的所有分区，验证用户指定的partition
             List<PartitionInfo> partitions = cluster.partitionsForTopic(record.topic());
             int lastPartition = partitions.size() - 1;
             // they have given us a partition, use it
