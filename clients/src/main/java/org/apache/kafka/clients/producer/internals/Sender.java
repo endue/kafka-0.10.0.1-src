@@ -73,18 +73,22 @@ public class Sender implements Runnable {
     private final boolean guaranteeMessageOrder;
 
     /* the maximum request size to attempt to send to the server */
+    // 消息最大请求大小 1M
     private final int maxRequestSize;
 
     /* the number of acknowledgements to request from the server */
+    // 记录发送消息的ack机制，默认1
     private final short acks;
 
     /* the number of times to retry a failed request before giving up */
+    // 重试次数，默认1
     private final int retries;
 
     /* the clock instance used for getting the time */
     private final Time time;
 
     /* true while the sender thread is still running */
+    // 计算当前Sender运行状态
     private volatile boolean running;
 
     /* true when the caller wants to ignore all unsent/inflight messages and force close.  */
@@ -142,11 +146,11 @@ public class Sender implements Runnable {
         }
 
         log.debug("Beginning shutdown of Kafka producer I/O thread, sending remaining records.");
-
+        /* 关闭Sender后执行到这里 */
         // okay we stopped accepting requests but there may still be
         // requests in the accumulator or waiting for acknowledgment,
         // wait until these are completed.
-        // 判断是否还存在未发送的消息
+        // 非强制关闭 && (还存在未发送的消息记录 || 有等待回复的消息记录)
         while (!forceClose && (this.accumulator.hasUnsent() || this.client.inFlightRequestCount() > 0)) {
             try {
                 run(time.milliseconds());
@@ -154,12 +158,14 @@ public class Sender implements Runnable {
                 log.error("Uncaught error in kafka producer I/O thread: ", e);
             }
         }
+        // 如果是强制关闭，则将消息累加器RecordAccumulator中的消息记录丢弃
         if (forceClose) {
             // We need to fail all the incomplete batches and wake up the threads waiting on
             // the futures.
             this.accumulator.abortIncompleteBatches();
         }
         try {
+            // 关闭客户端
             this.client.close();
         } catch (Exception e) {
             log.error("Failed to close network client", e);

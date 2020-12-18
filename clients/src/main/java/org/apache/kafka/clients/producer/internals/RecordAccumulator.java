@@ -385,6 +385,7 @@ public final class RecordAccumulator {
     }
 
     /**
+     * 判断RecordAccumulator中是否有未发送的消息记录
      * @return Whether there is any unsent record in the accumulator.
      */
     public boolean hasUnsent() {
@@ -545,6 +546,7 @@ public final class RecordAccumulator {
     /**
      * This function is only called when sender is closed forcefully. It will fail all the
      * incomplete batches and return.
+     *
      */
     public void abortIncompleteBatches() {
         // We need to keep aborting the incomplete batch until no thread is trying to append to
@@ -563,6 +565,7 @@ public final class RecordAccumulator {
 
     /**
      * Go through incomplete batches and abort them.
+     * 检查不完整的批次并中止它们，也就是检查待发送的消息记录，然后删除掉
      */
     private void abortBatches() {
         for (RecordBatch batch : incomplete.all()) {
