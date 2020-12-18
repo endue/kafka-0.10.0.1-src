@@ -21,11 +21,15 @@ import java.nio.channels.GatheringByteChannel;
  * A send backed by an array of byte buffers
  */
 public class ByteBufferSend implements Send {
-
+    // 目标
     private final String destination;
+    // buffers空间大小
     private final int size;
+    // 待写入到channel的数据
     protected final ByteBuffer[] buffers;
+    // buffers剩余空间
     private int remaining;
+    //
     private boolean pending = false;
 
     public ByteBufferSend(String destination, ByteBuffer... buffers) {
@@ -52,18 +56,26 @@ public class ByteBufferSend implements Send {
         return this.size;
     }
 
+    /**
+     * 写入消息到对应的channel
+     * @param channel The Channel to write to
+     * @return
+     * @throws IOException
+     */
     @Override
     public long writeTo(GatheringByteChannel channel) throws IOException {
+        // 写消息到channel并返回写入的字节数
         long written = channel.write(buffers);
         if (written < 0)
             throw new EOFException("Wrote negative bytes to channel. This shouldn't happen.");
+        // 计算剩余空间
         remaining -= written;
         // This is temporary workaround. As Send , Receive interfaces are being used by BlockingChannel.
         // Once BlockingChannel is removed we can make Send, Receive to work with transportLayer rather than
         // GatheringByteChannel or ScatteringByteChannel.
         if (channel instanceof TransportLayer)
             pending = ((TransportLayer) channel).hasPendingWrites();
-
+        // 返回写入的字节数
         return written;
     }
 }

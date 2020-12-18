@@ -381,7 +381,7 @@ public class Sender implements Runnable {
             recordsByPartition.put(tp, batch);
         }
         ProduceRequest request = new ProduceRequest(acks, timeout, produceRecordsByPartition);
-        // 后续发送消息时，发送的是RequestSend
+        // 后续发送消息时，发送的是RequestSend，继承了ByteBufferSend
         RequestSend send = new RequestSend(Integer.toString(destination),
                                            this.client.nextRequestHeader(ApiKeys.PRODUCE),
                                            request.toStruct());

@@ -46,9 +46,19 @@ public class PlaintextTransportLayer implements TransportLayer {
         return true;
     }
 
+    /**
+     * 判断是否完成连接(不同isConnected()),抛出异常
+     * 1.state为ST_CONNECTED(2)返回true
+     * 2.state不为ST_PENDING(1)抛出异常
+     * 3.其他看情况返回true或false
+     * @return
+     * @throws IOException
+     */
     @Override
     public boolean finishConnect() throws IOException {
+        // 校验正在进行套接字连接的SocketChannel是否已经完成连接
         boolean connected = socketChannel.finishConnect();
+        // 如果返回true，那么取消OP_CONNECT事件，然后增加OP_READ事件
         if (connected)
             key.interestOps(key.interestOps() & ~SelectionKey.OP_CONNECT | SelectionKey.OP_READ);
         return connected;
@@ -69,14 +79,19 @@ public class PlaintextTransportLayer implements TransportLayer {
         return socketChannel.isOpen();
     }
 
+    /**
+     * SocketChannel是否已经被连接(不同finishConnect()),不抛出异常
+     * 1.state为ST_CONNECTED(2)返回true,
+     * 2.state为其他状态返回false
+     */
     @Override
     public boolean isConnected() {
         return socketChannel.isConnected();
     }
 
     /**
+     * 关闭SocketChannel
      * Closes this channel
-     *
      * @throws IOException If I/O error occurs
      */
     @Override

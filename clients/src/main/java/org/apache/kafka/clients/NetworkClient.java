@@ -143,7 +143,7 @@ public class NetworkClient implements KafkaClient {
 
     /**
      * Begin connecting to the given node, return true if we are already connected and ready to send to that node.
-     *
+     * 开始连接到给定节点，如果已经连接并准备发送到该节点，则返回true
      * @param node The node to check
      * @param now The current timestamp
      * @return True if we are ready to send to the given node
@@ -247,6 +247,7 @@ public class NetworkClient implements KafkaClient {
         request.setSendTimeMs(now);
         // 这里又将request暂存到inFlightRequests的Map<String, Deque<ClientRequest>> requests中
         this.inFlightRequests.add(request);
+        // 将request保存到对应KafkaChannel的Send属性中并关注OP_WRITE事件
         selector.send(request.request());
     }
 
@@ -516,7 +517,7 @@ public class NetworkClient implements KafkaClient {
         String nodeConnectionId = node.idString();
         try {
             log.debug("Initiating connection to node {} at {}:{}.", node.id(), node.host(), node.port());
-            // 为当前节点封装一个connectionStates
+            // 为当前节点封装一个connectionStates，状态为CONNECTING
             this.connectionStates.connecting(nodeConnectionId, now);
             // 建立连接，底层基于SocketChannel实现
             selector.connect(nodeConnectionId,

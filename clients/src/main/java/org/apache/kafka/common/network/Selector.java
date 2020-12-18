@@ -82,7 +82,7 @@ public class Selector implements Selectable {
     private final java.nio.channels.Selector nioSelector;
     // 记录了与node节点的连接，key是node节点ID，value是对应的KafkaChannel
     private final Map<String, KafkaChannel> channels;
-    // 记录每一次poll时，已发送的send
+    // 记录每一次poll时，已发送的消息数据send(也就是底层存储在Bytebuffer中的数据)
     private final List<Send> completedSends;
     // 记录每一次poll时，接受到的响应
     private final List<NetworkReceive> completedReceives;
@@ -100,6 +100,7 @@ public class Selector implements Selectable {
     private final String metricGrpPrefix;
     private final Map<String, String> metricTags;
     private final ChannelBuilder channelBuilder;
+    // key是channel id
     private final Map<String, Long> lruConnections;
     private final long connectionsMaxIdleNanos;
     //
@@ -309,13 +310,16 @@ public class Selector implements Selectable {
 
         /* check ready keys */
         long startSelect = time.nanoseconds();
+        // select方法超时阻塞，返回就绪的SelectionKey的数量
         int readyKeys = select(timeout);
         long endSelect = time.nanoseconds();
         currentTimeNanos = endSelect;
         this.sensors.selectTime.record(endSelect - startSelect, time.milliseconds());
-
+        // 有就绪的SelectionKey && 有完成建立连接的SelectionKey
         if (readyKeys > 0 || !immediatelyConnectedKeys.isEmpty()) {
+            // 获取触发事件的相关SelectedKey
             pollSelectionKeys(this.nioSelector.selectedKeys(), false);
+            // 处理刚刚建立连接的SelectionKey
             pollSelectionKeys(immediatelyConnectedKeys, true);
         }
         // 处理stagedReceives中的消息到completedReceives中
@@ -326,11 +330,18 @@ public class Selector implements Selectable {
         maybeCloseOldestConnection();
     }
 
+    /**
+     * 参数isImmediatelyConnectedtrue，表示selectionKeys参数是否是刚刚建立连接
+     * @param selectionKeys
+     * @param isImmediatelyConnected
+     */
     private void pollSelectionKeys(Iterable<SelectionKey> selectionKeys, boolean isImmediatelyConnected) {
+        // 遍历SelectionKey，处理相关事件
         Iterator<SelectionKey> iterator = selectionKeys.iterator();
         while (iterator.hasNext()) {
             SelectionKey key = iterator.next();
             iterator.remove();
+            // 获取对应的kafka channel
             KafkaChannel channel = channel(key);
 
             // register all per-connection metrics at once
@@ -340,8 +351,13 @@ public class Selector implements Selectable {
             try {
 
                 /* complete any connections that have finished their handshake (either normally or immediately) */
+                // 1.参数isImmediatelyConnected == true成立,表示参数是刚刚建立连接的集合
+                // 2.SelectionKey是OP_CONNECT事件
                 if (isImmediatelyConnected || key.isConnectable()) {
+                    // 校验正在进行套接字连接的SocketChannel是否已经完成连接
+                    // 在判断的过程中如果已完成连接会取消OP_CONNECT同时增加OP_READ事件
                     if (channel.finishConnect()) {
+                        // 记录已完成连接的channel
                         this.connected.add(channel.id());
                         this.sensors.connectionCreated.record();
                     } else
@@ -353,7 +369,7 @@ public class Selector implements Selectable {
                     channel.prepare();
 
                 /* if channel is ready read from any connections that have readable data */
-                // 当前node的channel是可读的
+                // 当前SelectionKey对应的Kafkachannel是可读的
                 if (channel.ready() && key.isReadable() && !hasStagedReceive(channel)) {
                     NetworkReceive networkReceive;
                     // 读取响应
@@ -363,8 +379,9 @@ public class Selector implements Selectable {
                 }
 
                 /* if channel is ready write to any sockets that have space in their buffer and for which we have data */
-                // 当前node的channel是可写的
+                // 当前SelectionKey对应的Kafkachannel是可写的
                 if (channel.ready() && key.isWritable()) {
+                    // 获取KafkaChannel中的Send并写消息到channel中
                     Send send = channel.write();
                     // 当send不为空时，说明消息已全部发送完毕，否则需要等待下一次的执行
                     if (send != null) {
@@ -374,6 +391,7 @@ public class Selector implements Selectable {
                 }
 
                 /* cancel any defunct sockets */
+                // 如果SelectionKey被取消，记录
                 if (!key.isValid()) {
                     close(channel);
                     this.disconnected.add(channel.id());
@@ -582,6 +600,7 @@ public class Selector implements Selectable {
 
     /**
      * adds a receive to staged receives
+     * 接收到响应保存到stagedReceives中
      */
     private void addToStagedReceives(KafkaChannel channel, NetworkReceive receive) {
         if (!stagedReceives.containsKey(channel))

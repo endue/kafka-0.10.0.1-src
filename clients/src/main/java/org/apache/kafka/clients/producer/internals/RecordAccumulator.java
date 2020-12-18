@@ -415,7 +415,7 @@ public final class RecordAccumulator {
         if (nodes.isEmpty())
             return Collections.emptyMap();
         /**
-         * nodes已里是broker节点，下面遍历nodes之后再次获取node上的所有分区
+         * nodes是broker节点，下面遍历nodes之后再次获取node上的所有分区
          * 这么做的原因是attempts to avoid choosing the same topic-node over and over
          * 因为有可能存在多个主题如：topic1和topic2的主partition都在同一个node上
          */

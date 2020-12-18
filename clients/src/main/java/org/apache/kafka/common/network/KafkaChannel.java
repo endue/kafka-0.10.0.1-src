@@ -56,6 +56,7 @@ public class KafkaChannel {
 
     /**
      * Does handshake of transportLayer and authentication using configured authenticator
+     * 传输层握手和身份验证是否使用配置的身份验证器
      */
     public void prepare() throws IOException {
         if (!transportLayer.ready())
@@ -118,9 +119,15 @@ public class KafkaChannel {
         return socket.getInetAddress().toString();
     }
 
+    /**
+     * 发送数据
+     * 这里只是将数据传到给了send属性，然后关注OP_WRITE事件
+     * @param send
+     */
     public void setSend(Send send) {
         if (this.send != null)
             throw new IllegalStateException("Attempt to begin a send operation with prior send operation still in progress.");
+        // 赋值send
         this.send = send;
         // 关注OP_WRITE事件
         this.transportLayer.addInterestOps(SelectionKey.OP_WRITE);
@@ -142,6 +149,13 @@ public class KafkaChannel {
         return result;
     }
 
+    /**
+     * KafkaChannel写消息
+     * 返回null说明消息没有发生完毕
+     * 返回之前的send，并清空send说明消息发送完毕，等待下一轮消息
+     * @return
+     * @throws IOException
+     */
     public Send write() throws IOException {
         Send result = null;
         // 发送消息，当确认消息全部发送完毕后会将send置为null，否则不处理
@@ -149,6 +163,7 @@ public class KafkaChannel {
             result = send;
             send = null;
         }
+        // 返回null，说明消息没发送完
         return result;
     }
 
@@ -156,10 +171,16 @@ public class KafkaChannel {
         return receive.readFrom(transportLayer);
     }
 
+    /**
+     * 真正的写消息
+     * @param send
+     * @return
+     * @throws IOException
+     */
     private boolean send(Send send) throws IOException {
         // 发送消息transportLayer中记录了当前KafkaChannel对应的SocketChannel
         send.writeTo(transportLayer);
-        // 确认消息全部发送完毕，则取消对事件OP_WRITE的关注
+        // 确认消息全部发送完毕，则取消对事件OP_WRITE的关注，因为发送完了
         if (send.completed())
             transportLayer.removeInterestOps(SelectionKey.OP_WRITE);
         // 返回是否完成全部消息发送的判断值
