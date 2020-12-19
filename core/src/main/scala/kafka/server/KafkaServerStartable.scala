@@ -32,6 +32,7 @@ object KafkaServerStartable {
 class KafkaServerStartable(val serverConfig: KafkaConfig) extends Logging {
   private val server = new KafkaServer(serverConfig)
 
+  // 启动kafkaServer
   def startup() {
     try {
       server.startup()
@@ -44,6 +45,7 @@ class KafkaServerStartable(val serverConfig: KafkaConfig) extends Logging {
     }
   }
 
+  // kafkaServer启动时引用的钩子方法
   def shutdown() {
     try {
       server.shutdown()
@@ -60,10 +62,12 @@ class KafkaServerStartable(val serverConfig: KafkaConfig) extends Logging {
    * Allow setting broker state from the startable.
    * This is needed when a custom kafka server startable want to emit new states that it introduces.
    */
+  // 设置kafkaServer状态
   def setServerState(newState: Byte) {
     server.brokerState.newState(newState)
   }
 
+  // kafkaServer启动调用该方法阻塞
   def awaitShutdown() = 
     server.awaitShutdown
 

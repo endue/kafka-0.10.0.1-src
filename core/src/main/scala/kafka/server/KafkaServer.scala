@@ -89,10 +89,14 @@ object KafkaServer {
  * to start up and shutdown a single Kafka node.
  */
 class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePrefix: Option[String] = None) extends Logging with KafkaMetricsGroup {
+  // kafkaServer是否完成启动标识符
   private val startupComplete = new AtomicBoolean(false)
+  // kafkaServer是否关闭标识符
   private val isShuttingDown = new AtomicBoolean(false)
+  // kafkaServer是否正在启动标识符
   private val isStartingUp = new AtomicBoolean(false)
 
+  // 服务启动和关闭时使用
   private var shutdownLatch = new CountDownLatch(1)
 
   private val jmxPrefix: String = "kafka.server"
@@ -108,7 +112,7 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePr
   private val metricConfig: MetricConfig = new MetricConfig()
     .samples(config.metricNumSamples)
     .timeWindow(config.metricSampleWindowMs, TimeUnit.MILLISECONDS)
-
+  // kafkaServer的状态
   val brokerState: BrokerState = new BrokerState
 
   var apis: KafkaApis = null
@@ -156,50 +160,58 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePr
   /**
    * Start up API for bringing up a single instance of the Kafka server.
    * Instantiates the LogManager, the SocketServer and the request handlers - KafkaRequestHandlers
+   * 启动kafkaServer
    */
   def startup() {
     try {
       info("starting")
-
+      // 校验是否关闭
       if(isShuttingDown.get)
         throw new IllegalStateException("Kafka server is still shutting down, cannot re-start!")
-
+      // 校验是否完成启动
       if(startupComplete.get)
         return
 
       val canStartup = isStartingUp.compareAndSet(false, true)
       if (canStartup) {
         metrics = new Metrics(metricConfig, reporters, kafkaMetricsTime, true)
-
+        // 更新kafkaServer状态
         brokerState.newState(Starting)
 
         /* start scheduler */
+        // 启动相关定时任务
         kafkaScheduler.startup()
 
         /* setup zookeeper */
+        // 启动zk相关
         zkUtils = initZk()
 
         /* start log manager */
+        // 启动log相关
         logManager = createLogManager(zkUtils.zkClient, brokerState)
         logManager.startup()
 
         /* generate brokerId */
+        // 生成brokerID
         config.brokerId =  getBrokerId
         this.logIdent = "[Kafka Server " + config.brokerId + "], "
-        // 创建socker处理请求
+        // 创建socker处理请求,这里同时创建Acceptor和Processor
         socketServer = new SocketServer(config, metrics, kafkaMetricsTime)
         socketServer.startup()
 
         /* start replica manager */
+        // 启动复制管理
         replicaManager = new ReplicaManager(config, metrics, time, kafkaMetricsTime, zkUtils, kafkaScheduler, logManager,
           isShuttingDown)
         replicaManager.startup()
 
         /* start kafka controller */
+        // 启动kafka controller
         kafkaController = new KafkaController(config, zkUtils, brokerState, kafkaMetricsTime, metrics, threadNamePrefix)
         kafkaController.startup()
 
         /* start group coordinator */
+        //
         groupCoordinator = GroupCoordinator(config, zkUtils, replicaManager, kafkaMetricsTime)
         groupCoordinator.startup()
 
@@ -586,6 +598,7 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePr
   /**
    * After calling shutdown(), use this API to wait until the shutdown is complete
    */
+  // kafkaServer启动会调用这里，然后阻塞住
   def awaitShutdown(): Unit = shutdownLatch.await()
 
   def getLogManager(): LogManager = logManager

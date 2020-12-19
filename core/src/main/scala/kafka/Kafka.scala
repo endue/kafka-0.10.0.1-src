@@ -57,6 +57,7 @@ object Kafka extends Logging {
 
   /**
     * 启动方法
+    * kafkaServer也就是Broker
     * @param args
     */
   def main(args: Array[String]): Unit = {
@@ -66,6 +67,7 @@ object Kafka extends Logging {
       val kafkaServerStartable = KafkaServerStartable.fromProps(serverProps)
 
       // attach shutdown handler to catch control-c
+      // 在关闭java虚拟机时调用的钩子函数
       Runtime.getRuntime().addShutdownHook(new Thread() {
         override def run() = {
           kafkaServerStartable.shutdown
@@ -73,6 +75,7 @@ object Kafka extends Logging {
       })
       // 启动kafkaServer
       kafkaServerStartable.startup
+      // 启动kafkaServer后，底层调用shutdownLatch.await()方法，阻塞在这里，等待钩子函数执行时被唤醒
       kafkaServerStartable.awaitShutdown
     }
     catch {

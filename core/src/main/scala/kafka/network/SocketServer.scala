@@ -49,21 +49,27 @@ import scala.util.control.{ControlThrowable, NonFatal}
  *   M Handler threads that handle requests and produce responses back to the processor threads for writing.
  */
 class SocketServer(val config: KafkaConfig, val metrics: Metrics, val time: Time) extends Logging with KafkaMetricsGroup {
-
+  // 配置文件中的listeners列表节点
   private val endpoints = config.listeners
+  // 配置文件中的num.network.threads，工作线程数，默认3
   private val numProcessorThreads = config.numNetworkThreads
+  // 配置文件中的queued.max.requests，队列中最大请求数，默认500
   private val maxQueuedRequests = config.queuedMaxRequests
+  // 总的processor线程数量，一个监听端口默认对应3个
   private val totalProcessorThreads = numProcessorThreads * endpoints.size
-
+  // 配置文件中max.connections.per.ip，每个IP最大连接数，默认Int.MaxValue
   private val maxConnectionsPerIp = config.maxConnectionsPerIp
+  // 配置文件中max.connections.per.ip.overrides，指定IP最大连接数
   private val maxConnectionsPerIpOverrides = config.maxConnectionsPerIpOverrides
 
   this.logIdent = "[Socket Server on Broker " + config.brokerId + "], "
-
+  //
   val requestChannel = new RequestChannel(totalProcessorThreads, maxQueuedRequests)
+  // 记录Processor的数组
   private val processors = new Array[Processor](totalProcessorThreads)
-
+  // 记录Acceptor到map中，key是endpoint，value是Acceptor
   private[network] val acceptors = mutable.Map[EndPoint, Acceptor]()
+  // 连接配额？
   private var connectionQuotas: ConnectionQuotas = _
 
   private val allMetricNames = (0 until totalProcessorThreads).map { i =>
@@ -77,7 +83,7 @@ class SocketServer(val config: KafkaConfig, val metrics: Metrics, val time: Time
    */
   def startup() {
     this.synchronized {
-
+      // connectionQuotas 用于限制IP的最大连接数
       connectionQuotas = new ConnectionQuotas(maxConnectionsPerIp, maxConnectionsPerIpOverrides)
       // 默认100kb
       val sendBufferSize = config.socketSendBufferBytes
@@ -86,21 +92,24 @@ class SocketServer(val config: KafkaConfig, val metrics: Metrics, val time: Time
       val brokerId = config.brokerId
 
       var processorBeginIndex = 0
-      // listeners配置的服务列表
+      // 配置文件中的listeners服务列表
       endpoints.values.foreach { endpoint =>
+        // 获取请求类型
         val protocol = endpoint.protocolType
         // numProcessorThreads 默认为3
         val processorEndIndex = processorBeginIndex + numProcessorThreads
-        // 创建三个processor
+        // 创建三个Processor然后记录到processors数组中
         for (i <- processorBeginIndex until processorEndIndex)
           processors(i) = newProcessor(i, connectionQuotas, protocol)
-        // 创建一个acceptor，并将上述创建的三个processors传递进去
-        // 内部创建一个nioSelector并启动所有的processor
+        // 创建一个acceptor，并将上述创建的3个Processor传递进去
+        // 内部创建一个nioSelector并启动所有的Processor
         val acceptor = new Acceptor(endpoint, sendBufferSize, recvBufferSize, brokerId,
           processors.slice(processorBeginIndex, processorEndIndex), connectionQuotas)
+        // 记录acceptor和对应的endpoint
         acceptors.put(endpoint, acceptor)
         // 启动线程，执行acceptor的run方法
         Utils.newThread("kafka-socket-acceptor-%s-%d".format(protocol.toString, endpoint.port), acceptor, false).start()
+        // 阻塞等待
         acceptor.awaitStartup()
 
         processorBeginIndex = processorEndIndex
@@ -234,6 +243,7 @@ private[kafka] abstract class AbstractServerThread(connectionQuotas: ConnectionQ
 
 /**
  * Thread that accepts and configures new connections. There is one of these per endpoint.
+  * 负责接收和配置新的连接请求，每个endpoint对应一个
  */
 private[kafka] class Acceptor(val endPoint: EndPoint,
                               val sendBufferSize: Int,
@@ -245,7 +255,7 @@ private[kafka] class Acceptor(val endPoint: EndPoint,
   private val nioSelector = NSelector.open()
   // 建立socket连接
   val serverChannel = openServerSocket(endPoint.host, endPoint.port)
-  // 启动内部的processor
+  // 启动Acceptor内部的Processor
   this.synchronized {
     processors.foreach { processor =>
       Utils.newThread("kafka-network-thread-%d-%s-%d".format(brokerId, endPoint.protocolType.toString, processor.id), processor, false).start()
@@ -305,6 +315,7 @@ private[kafka] class Acceptor(val endPoint: EndPoint,
 
   /*
    * Create a server socket to listen for connections on.
+   * 创建一个serverSocket并绑定到对应的地址
    */
   private def openServerSocket(host: String, port: Int): ServerSocketChannel = {
     val socketAddress =
@@ -364,6 +375,7 @@ private[kafka] class Acceptor(val endPoint: EndPoint,
 /**
  * Thread that processes all requests from a single connection. There are N of these running in parallel
  * each of which has its own selector
+  * 处理所有的请求，多个同时运行并且每个都有自己独立的Selector
  */
 private[kafka] class Processor(val id: Int,
                                time: Time,
@@ -389,7 +401,7 @@ private[kafka] class Processor(val id: Int,
   private case class ConnectionId(localHost: String, localPort: Int, remoteHost: String, remotePort: Int) {
     override def toString: String = s"$localHost:$localPort-$remoteHost:$remotePort"
   }
-
+  // 连接请求
   private val newConnections = new ConcurrentLinkedQueue[SocketChannel]()
   private val inflightResponses = mutable.Map[String, RequestChannel.Response]()
   private val metricTags = Map("networkProcessor" -> id.toString).asJava
@@ -403,6 +415,7 @@ private[kafka] class Processor(val id: Int,
     metricTags.asScala
   )
 
+  // 初始化Processor
   private val selector = new KSelector(
     maxRequestSize,
     connectionsMaxIdleMs,
