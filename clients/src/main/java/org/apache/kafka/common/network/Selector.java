@@ -86,7 +86,7 @@ public class Selector implements Selectable {
     private final List<Send> completedSends;
     // 记录每一次poll时，接受到的响应
     private final List<NetworkReceive> completedReceives;
-    // 记录每一次poll时，KafkaChannel对应的响应
+    // 记录每一次poll时，OP_READ事件的数据，也就是KafkaChannel对应的响应
     private final Map<KafkaChannel, Deque<NetworkReceive>> stagedReceives;
     // 保存已完成连接建立的SelectionKey
     private final Set<SelectionKey> immediatelyConnectedKeys;
@@ -322,7 +322,7 @@ public class Selector implements Selectable {
             // 处理刚刚建立连接的SelectionKey
             pollSelectionKeys(immediatelyConnectedKeys, true);
         }
-        // 处理stagedReceives中的消息到completedReceives中
+        // 处理stagedReceives中接受到的响应消息到completedReceives中
         addToCompletedReceives();
 
         long endIo = time.nanoseconds();
@@ -614,6 +614,7 @@ public class Selector implements Selectable {
      * checks if there are any staged receives and adds to completedReceives
      */
     private void addToCompletedReceives() {
+        // 遍历响应，然后只处理一个，然后将响应消息保存到completedReceives中
         if (!this.stagedReceives.isEmpty()) {
             Iterator<Map.Entry<KafkaChannel, Deque<NetworkReceive>>> iter = this.stagedReceives.entrySet().iterator();
             while (iter.hasNext()) {

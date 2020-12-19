@@ -73,6 +73,7 @@ final class InFlightRequests {
 
     /**
      * Complete the last request that was sent to a particular node.
+     * 将发送到对应node节点的消息记录，从Deque<ClientRequest>出队
      * @param node The node the request was sent to
      * @return The request
      */
@@ -129,7 +130,7 @@ final class InFlightRequests {
 
     /**
      * Returns a list of nodes with pending inflight request, that need to be timed out
-     *
+     * 获取超时请求对应的node节点ID
      * @param now current time in milliseconds
      * @param requestTimeout max time to wait for the request to be completed
      * @return list of nodes

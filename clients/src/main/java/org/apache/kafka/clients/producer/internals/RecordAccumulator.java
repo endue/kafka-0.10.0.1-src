@@ -292,7 +292,7 @@ public final class RecordAccumulator {
 
     /**
      * Re-enqueue the given record batch in the accumulator to retry
-     * 消息重新进入RecordBatch
+     * 消息重新进入RecordBatch并且还是放到了队头
      */
     public void reenqueue(RecordBatch batch, long now) {
         batch.attempts++;
@@ -497,6 +497,7 @@ public final class RecordAccumulator {
 
     /**
      * Deallocate the record batch
+     * 释放消息累加器的已用空间
      */
     public void deallocate(RecordBatch batch) {
         incomplete.remove(batch);

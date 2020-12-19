@@ -231,6 +231,7 @@ public class NetworkClient implements KafkaClient {
 
     /**
      * Queue up the given request for sending. Requests can only be sent out to ready nodes.
+     * 发送消息，将消息赋值给对应的KafkaChannel上并关注OP_WRITE事件
      *
      * @param request The request
      * @param now The current timestamp
@@ -273,14 +274,14 @@ public class NetworkClient implements KafkaClient {
         // process completed actions
         long updatedNow = this.time.milliseconds();
         List<ClientResponse> responses = new ArrayList<>();
-        // 处理已完成的发送请求
+        // 处理不需要回调的发送请求，封装回调到responses中
         handleCompletedSends(responses, updatedNow);
-        // 处理接受到的响应
+        // 处理接受到的响应，
         handleCompletedReceives(responses, updatedNow);
         // 处理断开的链接
         handleDisconnections(responses, updatedNow);
         handleConnections();
-        // 处理请求超时的请求
+        // 处理inFlightRequests中已发送请求还未收到响应的超时请求
         handleTimedOutRequests(responses, updatedNow);
 
         // invoke callbacks
@@ -288,6 +289,7 @@ public class NetworkClient implements KafkaClient {
         for (ClientResponse response : responses) {
             if (response.request().hasCallback()) {
                 try {
+                    // 跳转到Sender.produceRequest里面创建的回调方法
                     response.request().callback().onComplete(response);
                 } catch (Exception e) {
                     log.error("Uncaught error in request completion:", e);
@@ -428,21 +430,25 @@ public class NetworkClient implements KafkaClient {
      * @param now The current time
      */
     private void handleTimedOutRequests(List<ClientResponse> responses, long now) {
+        // 获取超时请求的nodeId
         List<String> nodeIds = this.inFlightRequests.getNodesWithTimedOutRequests(now, this.requestTimeoutMs);
         for (String nodeId : nodeIds) {
             // close connection to the node
+            // 关闭与某个node节点的连接
             this.selector.close(nodeId);
             log.debug("Disconnecting from node {} due to request timeout.", nodeId);
             processDisconnection(responses, nodeId, now);
         }
 
         // we disconnected, so we should probably refresh our metadata
+        // 标记需要更新metadata元数据
         if (nodeIds.size() > 0)
             metadataUpdater.requestUpdate();
     }
 
     /**
      * Handle any completed request send. In particular if no response is expected consider the request complete.
+     * 处理任何已完成的请求发送。特别是在不需要响应的情况下，认为请求已完成
      *
      * @param responses The list of responses to update
      * @param now The current time
@@ -450,8 +456,9 @@ public class NetworkClient implements KafkaClient {
     private void handleCompletedSends(List<ClientResponse> responses, long now) {
         // if no response is expected then when the send is completed, return it
         for (Send send : this.selector.completedSends()) {
+            // 这里只是将发送到对应broker上的请求拿出来，此时还有没出队
             ClientRequest request = this.inFlightRequests.lastSent(send.destination());
-            // 判断是否需要执行回调
+            // 判断是否需要执行回调，如果不需要回调，那么将inFlightRequests中保存的对应的消息出队
             if (!request.expectResponse()) {
                 this.inFlightRequests.completeLastSent(send.destination());
                 responses.add(new ClientResponse(request, now, false, null));
@@ -470,6 +477,7 @@ public class NetworkClient implements KafkaClient {
             String source = receive.source();
             ClientRequest req = inFlightRequests.completeNext(source);
             Struct body = parseResponse(receive.payload(), req.request().header());
+            // 判断如果是更新元数据请求对应的响应，则不不进入if，否则进入if封装回调
             if (!metadataUpdater.maybeHandleCompletedReceive(req, now, body))
                 responses.add(new ClientResponse(req, now, false, body));
         }
@@ -598,6 +606,11 @@ public class NetworkClient implements KafkaClient {
             return metadataTimeout;
         }
 
+        /**
+         * 处理borker返回的断开连接的node响应信息
+         * @param request
+         * @return
+         */
         @Override
         public boolean maybeHandleDisconnection(ClientRequest request) {
             ApiKeys requestKey = ApiKeys.forId(request.request().header().apiKey());
@@ -618,6 +631,13 @@ public class NetworkClient implements KafkaClient {
             return false;
         }
 
+        /**
+         * 处理borker返回的元数据响应
+         * @param req
+         * @param now
+         * @param body
+         * @return
+         */
         @Override
         public boolean maybeHandleCompletedReceive(ClientRequest req, long now, Struct body) {
             short apiKey = req.request().header().apiKey();

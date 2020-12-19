@@ -141,6 +141,7 @@ public class KafkaChannel {
         }
         // 读取消息
         receive(receive);
+        // 消息读满，则还原receive为下次读取消息做准备
         if (receive.complete()) {
             receive.payload().rewind();
             result = receive;

@@ -283,6 +283,7 @@ public class Sender implements Runnable {
      */
     private void handleProduceResponse(ClientResponse response, Map<TopicPartition, RecordBatch> batches, long now) {
         int correlationId = response.request().request().header().correlationId();
+        // 处理断开连接的channel
         if (response.wasDisconnected()) {
             log.trace("Cancelled request {} due to node {} being disconnected", response, response.request()
                                                                                                   .request()
@@ -294,6 +295,7 @@ public class Sender implements Runnable {
                       response.request().request().destination(),
                       correlationId);
             // if we have a response, parse it
+            // 如果有响应
             if (response.hasResponse()) {
                 ProduceResponse produceResponse = new ProduceResponse(response.responseBody());
                 for (Map.Entry<TopicPartition, ProduceResponse.PartitionResponse> entry : produceResponse.responses().entrySet()) {
@@ -307,6 +309,7 @@ public class Sender implements Runnable {
                 this.sensors.recordThrottleTime(response.request().request().destination(),
                                                 produceResponse.getThrottleTime());
             } else {
+                // 没响应，此时acks == 0
                 // this is the acks = 0 case, just complete all requests
                 for (RecordBatch batch : batches.values())
                     completeBatch(batch, Errors.NONE, -1L, Record.NO_TIMESTAMP, correlationId, now);
@@ -325,6 +328,7 @@ public class Sender implements Runnable {
      * @param now The current POSIX time stamp in milliseconds
      */
     private void completeBatch(RecordBatch batch, Errors error, long baseOffset, long timestamp, long correlationId, long now) {
+        // 如果发生异常并且可以重试
         if (error != Errors.NONE && canRetry(batch, error)) {
             // retry
             log.warn("Got error produce response with correlation id {} on topic-partition {}, retrying ({} attempts left). Error: {}",
@@ -332,6 +336,7 @@ public class Sender implements Runnable {
                      batch.topicPartition,
                      this.retries - batch.attempts - 1,
                      error);
+            // 将消息重新添加到消息累加器中
             this.accumulator.reenqueue(batch, now);
             this.sensors.recordRetries(batch.topicPartition.topic(), batch.recordCount);
         } else {
@@ -342,6 +347,7 @@ public class Sender implements Runnable {
                 exception = error.exception();
             // tell the user the result of their request
             batch.done(baseOffset, timestamp, exception);
+            // 释放消息累加器的空间
             this.accumulator.deallocate(batch);
             if (error != Errors.NONE)
                 this.sensors.recordErrors(batch.topicPartition.topic(), batch.recordCount);
@@ -349,12 +355,14 @@ public class Sender implements Runnable {
         if (error.exception() instanceof InvalidMetadataException)
             metadata.requestUpdate();
         // Unmute the completed partition.
+        // 是否保证发生的有序性
         if (guaranteeMessageOrder)
             this.accumulator.unmutePartition(batch.topicPartition);
     }
 
     /**
      * We can retry a send if the error is transient and the number of attempts taken is fewer than the maximum allowed
+     * 判断是否可以重试
      */
     private boolean canRetry(RecordBatch batch, Errors error) {
         return batch.attempts < this.retries && error.exception() instanceof RetriableException;
@@ -391,12 +399,14 @@ public class Sender implements Runnable {
         RequestSend send = new RequestSend(Integer.toString(destination),
                                            this.client.nextRequestHeader(ApiKeys.PRODUCE),
                                            request.toStruct());
+        // 封装回调方法，在发送完消息后会回调这里
         RequestCompletionHandler callback = new RequestCompletionHandler() {
             public void onComplete(ClientResponse response) {
+                // 消息发送后的回调方法
                 handleProduceResponse(response, recordsByPartition, time.milliseconds());
             }
         };
-
+        // 返回ClientRequest里面封装了要发生的消息send和回调方法callback
         return new ClientRequest(now, acks != 0, send, callback);
     }
 
