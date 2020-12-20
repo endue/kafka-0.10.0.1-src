@@ -248,6 +248,7 @@ public final class RecordAccumulator {
     /**
      * Abort the batches that have been sitting in RecordAccumulator for more than the configured requestTimeout
      * due to metadata being unavailable
+     * 丢弃过期的RecordBatch
      */
     public List<RecordBatch> abortExpiredBatches(int requestTimeout, long now) {
         List<RecordBatch> expiredBatches = new ArrayList<>();
@@ -346,7 +347,7 @@ public final class RecordAccumulator {
                 unknownLeadersExist = true;
             } else if (!readyNodes.contains(leader) && !muted.contains(part)) {
                 synchronized (deque) {
-                    // 获取topic第一个RecordBatch
+                    // 获取topic第一个RecordBatch，这里每次调用只获取每个分区的第一个
                     RecordBatch batch = deque.peekFirst();
                     if (batch != null) {
                         // 记录当前RecordBatch是否为重试 并且 (最后一次重试时间 + 重试间隔 > 当前时间)
@@ -547,6 +548,7 @@ public final class RecordAccumulator {
     /**
      * This function is only called when sender is closed forcefully. It will fail all the
      * incomplete batches and return.
+     * while循环丢弃待发送的消息
      *
      */
     public void abortIncompleteBatches() {
@@ -613,13 +615,14 @@ public final class RecordAccumulator {
 
     /*
      * The set of nodes that have at least one complete record batch in the accumulator
+     * 在累加器中至少有一个完整的RecordBatch需要发送
      */
     public final static class ReadyCheckResult {
         // 可发送消息的topic的leader节点
         public final Set<Node> readyNodes;
         // 下次扫描可发送消息需要等待的时间
         public final long nextReadyCheckDelayMs;
-        // 未知leader节点的topic
+        // 是否有未知leader节点的topic
         public final boolean unknownLeadersExist;
 
         public ReadyCheckResult(Set<Node> readyNodes, long nextReadyCheckDelayMs, boolean unknownLeadersExist) {

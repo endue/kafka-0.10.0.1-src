@@ -281,6 +281,7 @@ public class NetworkClient implements KafkaClient {
         handleCompletedReceives(responses, updatedNow);
         // 处理断开的链接
         handleDisconnections(responses, updatedNow);
+        // 处理建立连接的节点，修改状态为CONNECTED
         handleConnections();
         // 处理inFlightRequests中已发送请求还未收到响应的超时请求
         handleTimedOutRequests(responses, updatedNow);
