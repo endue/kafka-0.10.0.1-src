@@ -176,6 +176,12 @@ object RequestChannel extends Logging {
   case object CloseConnectionAction extends ResponseAction
 }
 
+/**
+  * 初始化Processor的请求队列和响应队列
+  * 请求队列只有一个，而响应队列根据Processor的数量而创建
+  * @param numProcessors
+  * @param queueSize
+  */
 class RequestChannel(val numProcessors: Int, val queueSize: Int) extends KafkaMetricsGroup {
   private var responseListeners: List[(Int) => Unit] = Nil
   private val requestQueue = new ArrayBlockingQueue[RequestChannel.Request](queueSize)
@@ -204,11 +210,13 @@ class RequestChannel(val numProcessors: Int, val queueSize: Int) extends KafkaMe
   }
 
   /** Send a request to be handled, potentially blocking until there is room in the queue for the request */
+  // 发送一个要处理的请求，可能会阻塞，直到队列中有空间容纳该请求
   def sendRequest(request: RequestChannel.Request) {
     requestQueue.put(request)
   }
 
   /** Send a response back to the socket server to be sent over the network */
+  // 发送响应到对应Processor的队列
   def sendResponse(response: RequestChannel.Response) {
     responseQueues(response.processor).put(response)
     for(onResponse <- responseListeners)
@@ -216,6 +224,7 @@ class RequestChannel(val numProcessors: Int, val queueSize: Int) extends KafkaMe
   }
 
   /** No operation to take for the request, need to read more over the network */
+  //
   def noOperation(processor: Int, request: RequestChannel.Request) {
     responseQueues(processor).put(new RequestChannel.Response(processor, request, null, RequestChannel.NoOpAction))
     for(onResponse <- responseListeners)
@@ -223,6 +232,7 @@ class RequestChannel(val numProcessors: Int, val queueSize: Int) extends KafkaMe
   }
 
   /** Close the connection for the request */
+  //
   def closeConnection(processor: Int, request: RequestChannel.Request) {
     responseQueues(processor).put(new RequestChannel.Response(processor, request, null, RequestChannel.CloseConnectionAction))
     for(onResponse <- responseListeners)
@@ -230,14 +240,17 @@ class RequestChannel(val numProcessors: Int, val queueSize: Int) extends KafkaMe
   }
 
   /** Get the next request or block until specified time has elapsed */
+  // 阻塞等待，直到超时返回null或在等待期间被唤醒返回一个元素
   def receiveRequest(timeout: Long): RequestChannel.Request =
     requestQueue.poll(timeout, TimeUnit.MILLISECONDS)
 
   /** Get the next request or block until there is one */
+  // 阻塞等待，直到被唤醒返回一个元素
   def receiveRequest(): RequestChannel.Request =
     requestQueue.take()
 
   /** Get a response for the given processor if there is one */
+  // 不阻塞等待，有就返回，没有就返回null
   def receiveResponse(processor: Int): RequestChannel.Response = {
     // 基于processor获取对应processor的响应队列的头节点并返回
     val response = responseQueues(processor).poll()

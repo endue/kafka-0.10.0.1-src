@@ -224,11 +224,15 @@ public class Selector implements Selectable {
      * Register the nioSelector with an existing channel
      * Use this on server-side, when a connection is accepted by a different thread but processed by the Selector
      * Note that we are not checking if the connection id is valid - since the connection already exists
+     * OP_ACCEPT事件发生后，调用该方法监听OP_READ事件
      */
     public void register(String id, SocketChannel socketChannel) throws ClosedChannelException {
+        // 注册channel的OP_READ事件
         SelectionKey key = socketChannel.register(nioSelector, SelectionKey.OP_READ);
+        // 封装一个kafkaChannel并作为参数绑定到SelectionKey
         KafkaChannel channel = channelBuilder.buildChannel(id, key, maxReceiveSize);
         key.attach(channel);
+        // 记录连接
         this.channels.put(id, channel);
     }
 
