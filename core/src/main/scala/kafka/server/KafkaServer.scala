@@ -226,7 +226,7 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePr
         // KafkaApis封装了处理各种请求的业务逻辑
         apis = new KafkaApis(socketServer.requestChannel, replicaManager, groupCoordinator,
           kafkaController, zkUtils, config.brokerId, config, metadataCache, metrics, authorizer)
-        // 创建处理请求池，将KafkaApis传递进去
+        // 创建处理请求池，将KafkaApis传递进去，默认8个线程
         requestHandlerPool = new KafkaRequestHandlerPool(config.brokerId, socketServer.requestChannel, apis, config.numIoThreads)
         brokerState.newState(RunningAsBroker)
 

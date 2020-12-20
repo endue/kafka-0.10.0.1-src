@@ -49,6 +49,7 @@ import org.apache.kafka.common.requests.SaslHandshakeResponse
 
 /**
  * Logic to handle the various Kafka requests
+  * 处理各种各样的逻辑请求
  */
 class KafkaApis(val requestChannel: RequestChannel,
                 val replicaManager: ReplicaManager,
@@ -322,6 +323,7 @@ class KafkaApis(val requestChannel: RequestChannel,
 
   /**
    * Handle a produce request
+    * 处理Producer请求
    */
   def handleProducerRequest(request: RequestChannel.Request) {
     val produceRequest = request.body.asInstanceOf[ProduceRequest]
@@ -332,6 +334,7 @@ class KafkaApis(val requestChannel: RequestChannel,
     }
 
     // the callback for sending a produce response
+    // 用户发送响应的回调
     def sendResponseCallback(responseStatus: Map[TopicPartition, PartitionResponse]) {
 
       val mergedResponseStatus = responseStatus ++ unauthorizedRequestInfo.mapValues(_ =>
@@ -377,7 +380,7 @@ class KafkaApis(val requestChannel: RequestChannel,
             // updating this part of the code to handle it properly.
             case version => throw new IllegalArgumentException(s"Version `$version` of ProduceRequest is not handled. Code must be updated.")
           }
-
+          // 发送响应
           requestChannel.sendResponse(new RequestChannel.Response(request, new ResponseSend(request.connectionId, respHeader, respBody)))
         }
       }
@@ -402,6 +405,7 @@ class KafkaApis(val requestChannel: RequestChannel,
       }
 
       // call the replica manager to append messages to the replicas
+      // 调用replicaManager组件添加消息数据
       replicaManager.appendMessages(
         produceRequest.timeout.toLong,
         produceRequest.acks,

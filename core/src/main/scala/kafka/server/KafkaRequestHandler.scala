@@ -26,6 +26,7 @@ import org.apache.kafka.common.utils.Utils
 
 /**
  * A thread that answers kafka requests.
+  * 处理kafka request
  */
 class KafkaRequestHandler(id: Int,
                           brokerId: Int,
@@ -39,12 +40,14 @@ class KafkaRequestHandler(id: Int,
     while(true) {
       try {
         var req : RequestChannel.Request = null
+        // while循环带超时时间的阻塞等待获取请求
         while (req == null) {
           // We use a single meter for aggregate idle percentage for the thread pool.
           // Since meter is calculated as total_recorded_value / time_window and
           // time_window is independent of the number of threads, each recorded idle
           // time should be discounted by # threads.
           val startSelectTime = SystemTime.nanoseconds
+          // 获取请求
           req = requestChannel.receiveRequest(300)
           val idleTime = SystemTime.nanoseconds - startSelectTime
           aggregateIdleMeter.mark(idleTime / totalHandlerThreads)
@@ -67,6 +70,13 @@ class KafkaRequestHandler(id: Int,
   def shutdown(): Unit = requestChannel.sendRequest(RequestChannel.AllDone)
 }
 
+/**
+  * KafkaRequest处理线程池，默认初始化8个KafkaRequestHandler并启动
+  * @param brokerId
+  * @param requestChannel
+  * @param apis
+  * @param numThreads
+  */
 class KafkaRequestHandlerPool(val brokerId: Int,
                               val requestChannel: RequestChannel,
                               val apis: KafkaApis,

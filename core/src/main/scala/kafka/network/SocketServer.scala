@@ -451,7 +451,7 @@ private[kafka] class Processor(val id: Int,
         // 配置所有的新连接，并设置新的connnection的socketChannel关注OP_READ事件
         configureNewConnections()
         // register any new responses for writing
-        // 处理新的响应，并设置Response对应的socketChannel关注OP_WRITE事件
+        // 处理新的响应消息，并设置Response对应的socketChannel关注OP_WRITE事件
         processNewResponses()
         // 读或写消息，当新连接建立后，会调用wakeup方法唤醒
         poll()
@@ -479,6 +479,9 @@ private[kafka] class Processor(val id: Int,
     shutdownComplete()
   }
 
+  /**
+    * 处理响应消息
+    */
   private def processNewResponses() {
     // 基于processor的id获取响应队列responseQueues中对于的BlockingQueue的头节点并返回
     // 返回类型RequestChannel.Response
@@ -495,7 +498,7 @@ private[kafka] class Processor(val id: Int,
             selector.unmute(curr.request.connectionId)
           case RequestChannel.SendAction =>
             // 发送响应
-            // 保存记录到inflightResponses中
+            // 保存记录到inflightResponses中，并关注OP_WRITE事件
             sendResponse(curr)
           case RequestChannel.CloseConnectionAction =>
             curr.request.updateRequestMetrics
@@ -503,6 +506,7 @@ private[kafka] class Processor(val id: Int,
             close(selector, curr.request.connectionId)
         }
       } finally {
+        // 获取下一个响应消息
         curr = requestChannel.receiveResponse(id)
       }
     }
@@ -518,6 +522,7 @@ private[kafka] class Processor(val id: Int,
       response.request.updateRequestMetrics()
     }
     else {
+      // 准备发送消息并关系OP_WRITE事件
       selector.send(response.responseSend)
       inflightResponses += (response.request.connectionId -> response)
     }
