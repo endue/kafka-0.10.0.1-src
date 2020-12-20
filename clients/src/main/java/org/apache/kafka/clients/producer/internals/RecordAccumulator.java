@@ -631,6 +631,7 @@ public final class RecordAccumulator {
     
     /*
      * A threadsafe helper class to hold RecordBatches that haven't been ack'd yet
+     * 记录还没被ACK的消息
      */
     private final static class IncompleteRecordBatches {
         private final Set<RecordBatch> incomplete;

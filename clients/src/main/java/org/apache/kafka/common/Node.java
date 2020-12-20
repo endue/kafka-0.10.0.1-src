@@ -19,7 +19,8 @@ package org.apache.kafka.common;
 public class Node {
 
     private static final Node NO_NODE = new Node(-1, "", -1);
-
+    // 初始化int nodeId = -1;每创建一个node时，id传进来的为nodeId--
+    // 所以id从-2开始
     private final int id;
     private final String idString;
     private final String host;

@@ -266,6 +266,7 @@ public class NetworkClient implements KafkaClient {
         // 获取metadata当前时间距离上次刷新时的时间戳，如果可以将更新metadata
         long metadataTimeout = metadataUpdater.maybeUpdate(now);
         try {
+            // 处理OP_READ、OP_WRITE、OP_CONNECT事件
             this.selector.poll(Utils.min(timeout, metadataTimeout, requestTimeoutMs));
         } catch (IOException e) {
             log.error("Unexpected error during I/O", e);
