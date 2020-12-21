@@ -110,7 +110,9 @@ class ReplicaManager(val config: KafkaConfig,
                      val isShuttingDown: AtomicBoolean,
                      threadNamePrefix: Option[String] = None) extends Logging with KafkaMetricsGroup {
   /* epoch of the controller that last changed the leader */
+  // 记录leader发生变化是controller的epoch,epoch存储在zk中的/Controller_epoch中
   @volatile var controllerEpoch: Int = KafkaController.InitialControllerEpoch - 1
+  // 记录当前broker的ID
   private val localBrokerId = config.brokerId
   // 保存所有的partition
   private val allPartitions = new Pool[(String, Int), Partition](valueFactory = Some { case (t, p) =>
@@ -124,9 +126,11 @@ class ReplicaManager(val config: KafkaConfig,
   private var hwThreadInitialized = false
   this.logIdent = "[Replica Manager on Broker " + localBrokerId + "]: "
   val stateChangeLogger = KafkaController.stateChangeLogger
-  // ISR列表
+  // ISR变更列表
   private val isrChangeSet: mutable.Set[TopicAndPartition] = new mutable.HashSet[TopicAndPartition]()
+  // ISR列表最后变更时间戳
   private val lastIsrChangeMs = new AtomicLong(System.currentTimeMillis())
+  // ISR列表最后发布时间戳
   private val lastIsrPropagationMs = new AtomicLong(System.currentTimeMillis())
   // 延迟调度，用的时间轮
   val delayedProducePurgatory = DelayedOperationPurgatory[DelayedProduce](
@@ -178,16 +182,19 @@ class ReplicaManager(val config: KafkaConfig,
   /**
    * This function periodically runs to see if ISR needs to be propagated. It propagates ISR when:
    * 1. There is ISR change not propagated yet.
+    *   ISR列表发生变更但还没有被广播出去
    * 2. There is no ISR Change in the last five seconds, or it has been more than 60 seconds since the last ISR propagation.
+    *   在最近5秒内没有ISR变化，或者自上次ISR广播以来已经超过60秒
    * This allows an occasional ISR change to be propagated within a few seconds, and avoids overwhelming controller and
    * other brokers when large amount of ISR change occurs.
    */
   def maybePropagateIsrChanges() {
     val now = System.currentTimeMillis()
     isrChangeSet synchronized {
-      if (isrChangeSet.nonEmpty &&
-        (lastIsrChangeMs.get() + ReplicaManager.IsrChangePropagationBlackOut < now ||
-          lastIsrPropagationMs.get() + ReplicaManager.IsrChangePropagationInterval < now)) {
+      if (isrChangeSet.nonEmpty && // ISR列表发生变更但还没有被广播出去
+        (lastIsrChangeMs.get() + ReplicaManager.IsrChangePropagationBlackOut < now || // 最近5秒内没有ISR变化
+          lastIsrPropagationMs.get() + ReplicaManager.IsrChangePropagationInterval < now)) { // 自上次ISR传播以来已经超过60秒
+        // 广播到ZK
         ReplicationUtils.propagateIsrChanges(zkUtils, isrChangeSet)
         isrChangeSet.clear()
         lastIsrPropagationMs.set(now)
@@ -221,8 +228,10 @@ class ReplicaManager(val config: KafkaConfig,
 
   // 启动两个线程，维护ISR列表相关
   def startup() {
-    // start ISR expiration thread
+    // start ISR expiration thread 启动ISR过期线程
+    // ISR过期线程，配置replica.lag.time.max.ms，默认10000L，也就是10000ms
     scheduler.schedule("isr-expiration", maybeShrinkIsr, period = config.replicaLagTimeMaxMs, unit = TimeUnit.MILLISECONDS)
+    // 把isr的变化内容更新到zk中，执行时间写死，2500ms执行一次
     scheduler.schedule("isr-change-propagation", maybePropagateIsrChanges, period = 2500L, unit = TimeUnit.MILLISECONDS)
   }
 
@@ -324,6 +333,8 @@ class ReplicaManager(val config: KafkaConfig,
   }
 
   /**
+    * 将消息追加到分区的leader副本同时等待赋值到其他副本
+    * 当超时或所需的acks得到满足时，将触发回调函数
    * Append messages to leader replicas of the partition, and wait for them to be replicated to other replicas;
    * the callback function will be triggered either when timeout or the required acks are satisfied
    */
@@ -332,9 +343,10 @@ class ReplicaManager(val config: KafkaConfig,
                      internalTopicsAllowed: Boolean,
                      messagesPerPartition: Map[TopicPartition, MessageSet],
                      responseCallback: Map[TopicPartition, PartitionResponse] => Unit) {
-
+    // 验证acks配置
     if (isValidRequiredAcks(requiredAcks)) {
       val sTime = SystemTime.milliseconds
+      // 添加消息到本地文件
       val localProduceResults = appendToLocalLog(internalTopicsAllowed, messagesPerPartition, requiredAcks)
       debug("Produce to local log in %d ms".format(SystemTime.milliseconds - sTime))
 
@@ -413,6 +425,7 @@ class ReplicaManager(val config: KafkaConfig,
           val partitionOpt = getPartition(topicPartition.topic, topicPartition.partition)
           val info = partitionOpt match {
             case Some(partition) =>
+              // 拼接消息
               partition.appendMessagesToLeader(messages.asInstanceOf[ByteBufferMessageSet], requiredAcks)
             case None => throw new UnknownTopicOrPartitionException("Partition %s doesn't exist on %d"
               .format(topicPartition, localBrokerId))
@@ -861,6 +874,7 @@ class ReplicaManager(val config: KafkaConfig,
     partitionsToMakeFollower
   }
 
+  // 评估分区的ISR列表，查看哪些副本可以从ISR中删除
   private def maybeShrinkIsr(): Unit = {
     trace("Evaluating ISR list of partitions to see which replicas can be removed from the ISR")
     allPartitions.values.foreach(partition => partition.maybeShrinkIsr(config.replicaLagTimeMaxMs))

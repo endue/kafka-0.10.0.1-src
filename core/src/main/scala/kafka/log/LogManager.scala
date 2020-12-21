@@ -38,8 +38,8 @@ import java.util.concurrent.{ExecutionException, ExecutorService, Executors, Fut
  * A background thread handles log retention by periodically truncating excess log segments.
  */
 @threadsafe
-class LogManager(val logDirs: Array[File],
-                 val topicConfigs: Map[String, LogConfig],
+class LogManager(val logDirs: Array[File],// log文件目录
+                 val topicConfigs: Map[String, LogConfig],// log配置
                  val defaultConfig: LogConfig,
                  val cleanerConfig: CleanerConfig,
                  ioThreads: Int,

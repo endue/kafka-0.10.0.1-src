@@ -187,8 +187,9 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePr
         zkUtils = initZk()
 
         /* start log manager */
-        // 启动log相关
+        // 启动log管理任务
         logManager = createLogManager(zkUtils.zkClient, brokerState)
+        // 启动相关定时任务
         logManager.startup()
 
         /* generate brokerId */
@@ -200,7 +201,9 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePr
         socketServer.startup()
 
         /* start replica manager */
-        // 启动复制管理
+        // 启动副本管理任务
+        // 定时更新ISR和HW
+        // 定时广播ISR列表到zk
         replicaManager = new ReplicaManager(config, metrics, time, kafkaMetricsTime, zkUtils, kafkaScheduler, logManager,
           isShuttingDown)
         replicaManager.startup()
@@ -211,7 +214,7 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePr
         kafkaController.startup()
 
         /* start group coordinator */
-        // 消费者
+        // todo ?
         groupCoordinator = GroupCoordinator(config, zkUtils, replicaManager, kafkaMetricsTime)
         groupCoordinator.startup()
 
@@ -226,8 +229,9 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePr
         // KafkaApis封装了处理各种请求的业务逻辑
         apis = new KafkaApis(socketServer.requestChannel, replicaManager, groupCoordinator,
           kafkaController, zkUtils, config.brokerId, config, metadataCache, metrics, authorizer)
-        // 创建处理请求池，将KafkaApis传递进去，默认8个线程
+        // 创建处理请求线程池池，将KafkaApis传递进去，默认8个线程
         requestHandlerPool = new KafkaRequestHandlerPool(config.brokerId, socketServer.requestChannel, apis, config.numIoThreads)
+        // 设置broker状态为RunningAsBroker
         brokerState.newState(RunningAsBroker)
 
         Mx4jLoader.maybeLoad()
@@ -605,23 +609,28 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePr
 
   def boundPort(protocol: SecurityProtocol = SecurityProtocol.PLAINTEXT): Int = socketServer.boundPort(protocol)
 
+  // 创建logManager
   private def createLogManager(zkClient: ZkClient, brokerState: BrokerState): LogManager = {
+    // 加载kafkaConfig中对应LogConfig配置的配置属性值
     val defaultProps = KafkaServer.copyKafkaConfigToLog(config)
+    // 生成LogConfig配置
     val defaultLogConfig = LogConfig(defaultProps)
 
     val configs = AdminUtils.fetchAllTopicConfigs(zkUtils).map { case (topic, configs) =>
       topic -> LogConfig.fromProps(defaultProps, configs)
     }
     // read the log configurations from zookeeper
-    val cleanerConfig = CleanerConfig(numThreads = config.logCleanerThreads,
-                                      dedupeBufferSize = config.logCleanerDedupeBufferSize,
-                                      dedupeBufferLoadFactor = config.logCleanerDedupeBufferLoadFactor,
-                                      ioBufferSize = config.logCleanerIoBufferSize,
-                                      maxMessageSize = config.messageMaxBytes,
-                                      maxIoBytesPerSecond = config.logCleanerIoMaxBytesPerSecond,
-                                      backOffMs = config.logCleanerBackoffMs,
-                                      enableCleaner = config.logCleanerEnable)
-    new LogManager(logDirs = config.logDirs.map(new File(_)).toArray,
+    // 从zookeeper读取日志配置
+    val cleanerConfig = CleanerConfig(numThreads = config.logCleanerThreads,// 默认1
+                                      dedupeBufferSize = config.logCleanerDedupeBufferSize,// 默认128 * 1024 * 1024L
+                                      dedupeBufferLoadFactor = config.logCleanerDedupeBufferLoadFactor,// 默认0.9d
+                                      ioBufferSize = config.logCleanerIoBufferSize,// 默认 512 * 1024
+                                      maxMessageSize = config.messageMaxBytes,// 默认 1000000 + 8 + 4
+                                      maxIoBytesPerSecond = config.logCleanerIoMaxBytesPerSecond,// 默认 Double.MaxValue
+                                      backOffMs = config.logCleanerBackoffMs,// 默认 15 * 1000
+                                      enableCleaner = config.logCleanerEnable)// 默认 true
+    // 生成LogManager
+    new LogManager(logDirs = config.logDirs.map(new File(_)).toArray,// 读取log所在文件
                    topicConfigs = configs,
                    defaultConfig = defaultLogConfig,
                    cleanerConfig = cleanerConfig,

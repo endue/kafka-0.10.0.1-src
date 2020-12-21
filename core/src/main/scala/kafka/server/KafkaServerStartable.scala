@@ -45,7 +45,7 @@ class KafkaServerStartable(val serverConfig: KafkaConfig) extends Logging {
     }
   }
 
-  // kafkaServer启动时引用的钩子方法
+  // 关闭kafkaServer
   def shutdown() {
     try {
       server.shutdown()

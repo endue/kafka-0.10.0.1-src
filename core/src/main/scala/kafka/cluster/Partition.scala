@@ -115,6 +115,7 @@ class Partition(val topic: String,
       Some(replica)
   }
 
+  // 校验当前replica的leader是否为当前的broker
   def leaderReplicaIfLocal(): Option[Replica] = {
     leaderReplicaIdOpt match {
       case Some(leaderReplicaId) =>
@@ -348,10 +349,15 @@ class Partition(val topic: String,
    * Note There is no need to acquire the leaderIsrUpdate lock here
    * since all callers of this private API acquire that lock
    */
+  // 更新HW
   private def maybeIncrementLeaderHW(leaderReplica: Replica): Boolean = {
+    // 获取ISR列表中所有replica的LEO
     val allLogEndOffsets = inSyncReplicas.map(_.logEndOffset)
+    // 计算最小的LEO，就是新的HW
     val newHighWatermark = allLogEndOffsets.min(new LogOffsetMetadata.OffsetOrdering)
+    // 获取旧的HW
     val oldHighWatermark = leaderReplica.highWatermark
+    // 判断然后更新HW
     if (oldHighWatermark.messageOffset < newHighWatermark.messageOffset || oldHighWatermark.onOlderSegment(newHighWatermark)) {
       leaderReplica.highWatermark = newHighWatermark
       debug("High watermark for partition [%s,%d] updated to %s".format(topic, partitionId, newHighWatermark))
@@ -372,10 +378,13 @@ class Partition(val topic: String,
     replicaManager.tryCompleteDelayedProduce(requestKey)
   }
 
+  // 更新ISR列表，参数默认10000L
   def maybeShrinkIsr(replicaMaxLagTimeMs: Long) {
     val leaderHWIncremented = inWriteLock(leaderIsrUpdateLock) {
+      // 先检查当前replica的leader是否为当前的broker
       leaderReplicaIfLocal() match {
         case Some(leaderReplica) =>
+          // 获取超时的ISR列表
           val outOfSyncReplicas = getOutOfSyncReplicas(leaderReplica, replicaMaxLagTimeMs)
           if(outOfSyncReplicas.size > 0) {
             val newInSyncReplicas = inSyncReplicas -- outOfSyncReplicas
@@ -383,10 +392,11 @@ class Partition(val topic: String,
             info("Shrinking ISR for partition [%s,%d] from %s to %s".format(topic, partitionId,
               inSyncReplicas.map(_.brokerId).mkString(","), newInSyncReplicas.map(_.brokerId).mkString(",")))
             // update ISR in zk and in cache
+            // 替换ISR列表
             updateIsr(newInSyncReplicas)
             // we may need to increment high watermark since ISR could be down to 1
-
             replicaManager.isrShrinkRate.mark()
+            // 更新HW
             maybeIncrementLeaderHW(leaderReplica)
           } else {
             false
@@ -401,6 +411,7 @@ class Partition(val topic: String,
       tryCompleteDelayedRequests()
   }
 
+  // 从ISR列表获取超时的replica
   def getOutOfSyncReplicas(leaderReplica: Replica, maxLagMs: Long): Set[Replica] = {
     /**
      * there are two cases that will be handled here -
@@ -415,7 +426,7 @@ class Partition(val topic: String,
      **/
     val leaderLogEndOffset = leaderReplica.logEndOffset
     val candidateReplicas = inSyncReplicas - leaderReplica
-
+    // 当前时间 - lastCaughtUpTimeMs > replicaMaxLagTimeMs 的replica筛选出来
     val laggingReplicas = candidateReplicas.filter(r => (time.milliseconds - r.lastCaughtUpTimeMs) > maxLagMs)
     if(laggingReplicas.size > 0)
       debug("Lagging replicas for partition %s are %s".format(TopicAndPartition(topic, partitionId), laggingReplicas.map(_.brokerId).mkString(",")))
@@ -429,15 +440,19 @@ class Partition(val topic: String,
       leaderReplicaOpt match {
         case Some(leaderReplica) =>
           val log = leaderReplica.log.get
+          // 配置min.insync.replicas，默认1
           val minIsr = log.config.minInSyncReplicas
+          // ISR列表数量
           val inSyncSize = inSyncReplicas.size
 
           // Avoid writing to leader if there are not enough insync replicas to make it safe
+          // 如果ISR列表数量不满足minIsr 并且写入消息的acks配置为all时，抛出异常
           if (inSyncSize < minIsr && requiredAcks == -1) {
             throw new NotEnoughReplicasException("Number of insync replicas for partition [%s,%d] is [%d], below required minimum [%d]"
               .format(topic, partitionId, inSyncSize, minIsr))
           }
 
+          // 写入消息
           val info = log.append(messages, assignOffsets = true)
           // probably unblock some follower fetch requests since log end offset has been updated
           replicaManager.tryCompleteDelayedFetch(new TopicPartitionOperationKey(this.topic, this.partitionId))

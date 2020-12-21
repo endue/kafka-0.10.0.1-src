@@ -75,9 +75,9 @@ case class LogAppendInfo(var firstOffset: Long,
  *
  */
 @threadsafe
-class Log(val dir: File,
-          @volatile var config: LogConfig,
-          @volatile var recoveryPoint: Long = 0L,
+class Log(val dir: File,// 日志目录
+          @volatile var config: LogConfig,// 日志配置设置
+          @volatile var recoveryPoint: Long = 0L,// 开始恢复的偏移量——即尚未刷新到磁盘的第一个偏移量
           scheduler: Scheduler,
           time: Time = SystemTime) extends Logging with KafkaMetricsGroup {
 
@@ -316,6 +316,7 @@ class Log(val dir: File,
    *
    * @return Information about the appended messages including the first and last offset.
    */
+  // 写消息日志
   def append(messages: ByteBufferMessageSet, assignOffsets: Boolean = true): LogAppendInfo = {
     val appendInfo = analyzeAndValidateMessageSet(messages)
 
@@ -374,12 +375,14 @@ class Log(val dir: File,
         }
 
         // check messages set size may be exceed config.segmentSize
+        // 验证消息大小是否超过segmentSize(默认1 * 1024 * 1024 * 1024)
         if (validMessages.sizeInBytes > config.segmentSize) {
           throw new RecordBatchTooLargeException("Message set size is %d bytes which exceeds the maximum configured segment size of %d."
             .format(validMessages.sizeInBytes, config.segmentSize))
         }
 
         // maybe roll the log if this segment is full
+        // 如果当前segment无法放置当前消息，则新建
         val segment = maybeRoll(validMessages.sizeInBytes)
 
         // now append to the log
@@ -390,7 +393,7 @@ class Log(val dir: File,
 
         trace("Appended message set to log %s with first offset: %d, next offset: %d, and messages: %s"
           .format(this.name, appendInfo.firstOffset, nextOffsetMetadata.messageOffset, validMessages))
-
+        // 触发flush阈值Long.MaxValue
         if (unflushedMessages >= config.flushInterval)
           flush()
 
@@ -492,6 +495,7 @@ class Log(val dir: File,
    * @throws OffsetOutOfRangeException If startOffset is beyond the log end offset or before the base offset of the first segment.
    * @return The fetch data information including fetch starting offset metadata and messages read.
    */
+  // 读取消息
   def read(startOffset: Long, maxLength: Int, maxOffset: Option[Long] = None): FetchDataInfo = {
     trace("Reading %d bytes from offset %d in log %s of length %d bytes".format(maxLength, startOffset, name, size))
 
@@ -616,9 +620,9 @@ class Log(val dir: File,
    */
   private def maybeRoll(messagesSize: Int): LogSegment = {
     val segment = activeSegment
-    if (segment.size > config.segmentSize - messagesSize ||
-        segment.size > 0 && time.milliseconds - segment.created > config.segmentMs - segment.rollJitterMs ||
-        segment.index.isFull) {
+    if (segment.size > config.segmentSize - messagesSize || // 当前活跃segment空间不够
+        segment.size > 0 && time.milliseconds - segment.created > config.segmentMs - segment.rollJitterMs || //
+        segment.index.isFull) { // 索引文件满了
       debug("Rolling new log segment in %s (log_size = %d/%d, index_size = %d/%d, age_ms = %d/%d)."
             .format(name,
                     segment.size,
@@ -627,6 +631,7 @@ class Log(val dir: File,
                     segment.index.maxEntries,
                     time.milliseconds - segment.created,
                     config.segmentMs - segment.rollJitterMs))
+      // 新建segment
       roll()
     } else {
       segment
@@ -772,11 +777,13 @@ class Log(val dir: File,
   /**
    * The time this log is last known to have been fully flushed to disk
    */
+  // 最后一次执行flush操作的时间戳
   def lastFlushTime(): Long = lastflushedTime.get
 
   /**
    * The active segment that is currently taking appends
    */
+  // 当前活跃的segment
   def activeSegment = segments.lastEntry.getValue
 
   /**
@@ -901,6 +908,7 @@ class Log(val dir: File,
 
 /**
  * Helper functions for logs
+  * 日志的辅助函数,一些文件后缀
  */
 object Log {
 

@@ -78,12 +78,15 @@ class LogSegment(val log: FileMessageSet,
     if (messages.sizeInBytes > 0) {
       trace("Inserting %d bytes at offset %d at position %d".format(messages.sizeInBytes, offset, log.sizeInBytes()))
       // append an entry to the index (if needed)
+      // 判断是否更新index索引
       if(bytesSinceLastIndexEntry > indexIntervalBytes) {
         index.append(offset, log.sizeInBytes())
         this.bytesSinceLastIndexEntry = 0
       }
+      // 拼接消息
       // append the messages
       log.append(messages)
+      // 为下次更新index做准备
       this.bytesSinceLastIndexEntry += messages.sizeInBytes
     }
   }
