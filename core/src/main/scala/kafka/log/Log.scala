@@ -501,14 +501,17 @@ class Log(val dir: File,// 日志目录
 
     // Because we don't use lock for reading, the synchronization is a little bit tricky.
     // We create the local variables to avoid race conditions with updates to the log.
+    // 计算下一条消息的offset
     val currentNextOffsetMetadata = nextOffsetMetadata
     val next = currentNextOffsetMetadata.messageOffset
+    // 要读的startOffset = next，无数据可读
     if(startOffset == next)
       return FetchDataInfo(currentNextOffsetMetadata, MessageSet.Empty)
-
+    // 根据startOffset定位LogSegment
     var entry = segments.floorEntry(startOffset)
 
     // attempt to read beyond the log end offset is an error
+    // startOffset > next 或者 定位的LogSegment为null，抛出异常
     if(startOffset > next || entry == null)
       throw new OffsetOutOfRangeException("Request for offset %d but we only have log segments in the range %d to %d.".format(startOffset, segments.firstKey, next))
 
