@@ -411,39 +411,36 @@ public final class RecordAccumulator {
      * @return A list of {@link RecordBatch} for each node specified with total size less than the requested maxSize.
      */
     public Map<Integer, List<RecordBatch>> drain(Cluster cluster,
-                                                 Set<Node> nodes,
+                                                 Set<Node> nodes,// 待发送消息的leader节点
                                                  int maxSize,
                                                  long now) {
         if (nodes.isEmpty())
             return Collections.emptyMap();
-        /**
-         * nodes是broker节点，下面遍历nodes之后再次获取node上的所有分区
-         * 这么做的原因是attempts to avoid choosing the same topic-node over and over
-         * 因为有可能存在多个主题如：topic1和topic2的主partition都在同一个node上
-         */
+
         Map<Integer, List<RecordBatch>> batches = new HashMap<>();
-        // 遍历所有的节点
+        // 遍历所有传进来的leader节点
         for (Node node : nodes) {
             // 累加当前node中消息大小
             int size = 0;
-            // 获取节点上所有的分区
+            // 获取leader节点上所有的partition
             List<PartitionInfo> parts = cluster.partitionsForNode(node.id());
             List<RecordBatch> ready = new ArrayList<>();
             /* to make starvation less likely this loop doesn't start at 0 */
-            // drainIndex是全局遍历，记录了上次遍历nodes后停止的位置。当再次执行该方法时，可以继续往下遍历node
+            // drainIndex是全局遍历，记录了上次遍历leader节点后停止的位置
+            // 当再次执行该方法时，可以继续往下遍历其他partition，因为可能存在一个leader上存在多个partition的情况
             int start = drainIndex = drainIndex % parts.size();
-            // 遍历node下所有的分区
+            // 遍历leader节点下所有的partition，每次从start位置开始
             do {
                 PartitionInfo part = parts.get(drainIndex);
                 TopicPartition tp = new TopicPartition(part.topic(), part.partition());
                 // Only proceed if the partition has no in-flight batches.
                 // TODO:
                 if (!muted.contains(tp)) {
-                    // 获取当前topic的deque
+                    // 获取当前topic的Deque<RecordBatch>
                     Deque<RecordBatch> deque = getDeque(new TopicPartition(part.topic(), part.partition()));
                     if (deque != null) {
                         synchronized (deque) {
-                            // 获取第一个记录
+                            // 查看第一个RecordBatch，注意只是peek一下
                             RecordBatch first = deque.peekFirst();
                             if (first != null) {
                                 boolean backoff = first.attempts > 0 && first.lastAttemptMs + retryBackoffMs > now;
@@ -458,7 +455,7 @@ public final class RecordAccumulator {
                                         // request
                                         break;
                                     } else {
-                                        // 累加消息到batch中
+                                        // 累加消息到batch中，这里不是peek操作，而是poll操作，真正的出队
                                         RecordBatch batch = deque.pollFirst();
                                         batch.records.close();
                                         size += batch.records.sizeInBytes();
@@ -472,6 +469,8 @@ public final class RecordAccumulator {
                 }
                 this.drainIndex = (this.drainIndex + 1) % parts.size();
             } while (start != drainIndex);
+            // 记录每一次遍历leader节点后的List<RecordBatch>
+            // 一个leader节点上可能存在多个partition,每次只取对应partition对应的Deque<RecordBatch>中的pollFirst
             batches.put(node.id(), ready);
         }
         return batches;

@@ -463,6 +463,7 @@ public class NetworkClient implements KafkaClient {
             // 判断是否需要执行回调，如果不需要回调，那么将inFlightRequests中保存的对应的消息出队
             if (!request.expectResponse()) {
                 this.inFlightRequests.completeLastSent(send.destination());
+                // 封装一个响应消息
                 responses.add(new ClientResponse(request, now, false, null));
             }
         }

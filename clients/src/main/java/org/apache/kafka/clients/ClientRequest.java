@@ -16,14 +16,21 @@ import org.apache.kafka.common.requests.RequestSend;
 
 /**
  * A request being sent to the server. This holds both the network send as well as the client-level metadata.
+ * 要发送到服务器的请求
  */
 public final class ClientRequest {
-
+    // 创建时间戳
     private final long createdTimeMs;
+    // 是否期望恢复，根据acks != 0来判断
     private final boolean expectResponse;
+    // 发送的消息
     private final RequestSend request;
+    // 回调函数
     private final RequestCompletionHandler callback;
+    // 该消息是否有客户端来创建如果是则为true
+    // org.apache.kafka.clients.NetworkClient.DefaultMetadataUpdater.request该方法会设置为true
     private final boolean isInitiatedByNetworkClient;
+    // 发送时间戳
     private long sendTimeMs;
 
     /**

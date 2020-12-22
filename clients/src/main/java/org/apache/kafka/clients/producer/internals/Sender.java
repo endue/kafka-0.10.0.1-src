@@ -208,7 +208,7 @@ public class Sender implements Runnable {
         // create produce requests
         // 将nodes中的所有消息进行划分
         // 将原本<topic分区,Deque<ProducerBatch>>的保存形式转变成<Node,List<ProducerBatch>的形式
-        // node是kafka上的broker节点
+        // node是kafka上的leader节点
         // 对于网络连接来说，生产者客户端是与具体broker节点建立的连接，也就是向具体的broker节点发送消息，而并不关心消息属于哪一个分区
         Map<Integer, List<RecordBatch>> batches = this.accumulator.drain(cluster,
                                                                          result.readyNodes,
@@ -230,7 +230,8 @@ public class Sender implements Runnable {
             this.sensors.recordErrors(expiredBatch.topicPartition.topic(), expiredBatch.recordCount);
 
         sensors.updateProduceRequestMetrics(batches);
-        // 将待发送node和对应的List<RecordBatch>转为ClientRequest形式
+        // 将待发送leader节点和对应的List<RecordBatch>转为ClientRequest形式
+        // 一个ClientRequest就是一个leader节点上的数据
         List<ClientRequest> requests = createProduceRequests(batches, now);
         // If we have any nodes that are ready to send + have sendable data, poll with 0 timeout so this can immediately
         // loop and try sending more data. Otherwise, the timeout is determined by nodes that have partitions with data
@@ -370,7 +371,8 @@ public class Sender implements Runnable {
 
     /**
      * Transfer the record batches into a list of produce requests on a per-node basis
-     * 将List<RecordBatch>转换为List<ClientRequest>
+     * 将Map<Integer, List<RecordBatch>>转换为List<ClientRequest>
+     * 一个key<->value对，对应一个ClientRequest
      */
     private List<ClientRequest> createProduceRequests(Map<Integer, List<RecordBatch>> collated, long now) {
         List<ClientRequest> requests = new ArrayList<ClientRequest>(collated.size());
@@ -396,8 +398,8 @@ public class Sender implements Runnable {
         }
         ProduceRequest request = new ProduceRequest(acks, timeout, produceRecordsByPartition);
         // 后续发送消息时，发送的是RequestSend，继承了ByteBufferSend
-        RequestSend send = new RequestSend(Integer.toString(destination),
-                                           this.client.nextRequestHeader(ApiKeys.PRODUCE),
+        RequestSend send = new RequestSend(Integer.toString(destination),// leaderID
+                                           this.client.nextRequestHeader(ApiKeys.PRODUCE),// 消息类型
                                            request.toStruct());
         // 封装回调方法，在发送完消息后会回调这里
         RequestCompletionHandler callback = new RequestCompletionHandler() {
