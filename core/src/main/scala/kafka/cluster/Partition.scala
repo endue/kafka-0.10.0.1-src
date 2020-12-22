@@ -434,11 +434,18 @@ class Partition(val topic: String,
     laggingReplicas
   }
 
+  /**
+    * 拼接消息
+    * @param messages
+    * @param requiredAcks
+    * @return
+    */
   def appendMessagesToLeader(messages: ByteBufferMessageSet, requiredAcks: Int = 0) = {
     val (info, leaderHWIncremented) = inReadLock(leaderIsrUpdateLock) {
       val leaderReplicaOpt = leaderReplicaIfLocal()
       leaderReplicaOpt match {
         case Some(leaderReplica) =>
+          // 获取对应的LOG对象
           val log = leaderReplica.log.get
           // 配置min.insync.replicas，默认1
           val minIsr = log.config.minInSyncReplicas

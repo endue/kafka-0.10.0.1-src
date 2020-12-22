@@ -119,6 +119,7 @@ class ReplicaManager(val config: KafkaConfig,
     new Partition(t, p, time, this)
   })
   private val replicaStateChangeLock = new Object
+  // 负责消息副本拉取
   val replicaFetcherManager = new ReplicaFetcherManager(config, this, metrics, jTime, threadNamePrefix)
   // HW相关
   private val highWatermarkCheckPointThreadStarted = new AtomicBoolean(false)
@@ -406,6 +407,7 @@ class ReplicaManager(val config: KafkaConfig,
 
   /**
    * Append the messages to the local replica logs
+    * 将消息追加到本地副本日志文件
    */
   private def appendToLocalLog(internalTopicsAllowed: Boolean,
                                messagesPerPartition: Map[TopicPartition, MessageSet],
@@ -422,6 +424,7 @@ class ReplicaManager(val config: KafkaConfig,
           Some(new InvalidTopicException("Cannot append to internal topic %s".format(topicPartition.topic)))))
       } else {
         try {
+          // 基于主题和分区获取对应的Partition对象
           val partitionOpt = getPartition(topicPartition.topic, topicPartition.partition)
           val info = partitionOpt match {
             case Some(partition) =>

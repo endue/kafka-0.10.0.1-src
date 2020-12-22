@@ -386,9 +386,11 @@ class Log(val dir: File,// 日志目录
         val segment = maybeRoll(validMessages.sizeInBytes)
 
         // now append to the log
+        // 将消息拼接到对应的segment
         segment.append(appendInfo.firstOffset, validMessages)
 
         // increment the log end offset
+        // 更新LEO
         updateLogEndOffset(appendInfo.lastOffset + 1)
 
         trace("Appended message set to log %s with first offset: %d, next offset: %d, and messages: %s"
