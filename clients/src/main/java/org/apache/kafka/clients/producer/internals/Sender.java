@@ -281,6 +281,7 @@ public class Sender implements Runnable {
 
     /**
      * Handle a produce response
+     * 处理服务端的响应
      */
     private void handleProduceResponse(ClientResponse response, Map<TopicPartition, RecordBatch> batches, long now) {
         int correlationId = response.request().request().header().correlationId();

@@ -308,7 +308,7 @@ public class Selector implements Selectable {
             throw new IllegalArgumentException("timeout should be >= 0");
         // 清理上一次poll保存的记录
         clear();
-        // 判断是否有接受到的回复 || 创建的链接
+
         if (hasStagedReceives() || !immediatelyConnectedKeys.isEmpty())
             timeout = 0;
 
@@ -580,6 +580,8 @@ public class Selector implements Selectable {
      * Get the channel associated with selectionKey
      */
     private KafkaChannel channel(SelectionKey key) {
+        // 在创建KafkaChannel的时候，我们将KafkaChannel绑定到了对应的SelectionKey中
+        // 参考：connect()方法
         return (KafkaChannel) key.attachment();
     }
 

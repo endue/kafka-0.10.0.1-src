@@ -458,9 +458,9 @@ public class NetworkClient implements KafkaClient {
     private void handleCompletedSends(List<ClientResponse> responses, long now) {
         // if no response is expected then when the send is completed, return it
         for (Send send : this.selector.completedSends()) {
-            // 这里只是将发送到对应broker上的请求拿出来，此时还有没出队
+            // 这里只是将发送到对应broker上的请求拿出来，此时还有没出队，底层是peekFirst()
             ClientRequest request = this.inFlightRequests.lastSent(send.destination());
-            // 判断是否需要执行回调，如果不需要回调，那么将inFlightRequests中保存的对应的消息出队
+            // 判断是否需要等待服务器响应，如果不需要，那么将inFlightRequests中保存的对应的消息出队
             if (!request.expectResponse()) {
                 this.inFlightRequests.completeLastSent(send.destination());
                 // 封装一个响应消息
@@ -471,7 +471,9 @@ public class NetworkClient implements KafkaClient {
 
     /**
      * Handle any completed receives and update the response list with the responses received.
-     *
+     * 处理接收到的服务器响应消息，然后在inFlightRequests找到对应的客户端请求并出队
+     * 如果是元数据更新的响应消息，则maybeHandleCompletedReceive会处理并返回false
+     * 如果不是，封装一个回调到responses中
      * @param responses The list of responses to update
      * @param now The current time
      */
