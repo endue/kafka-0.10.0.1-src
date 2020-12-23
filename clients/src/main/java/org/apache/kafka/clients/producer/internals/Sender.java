@@ -218,6 +218,7 @@ public class Sender implements Runnable {
         // 注意：还需要设置max.in.flight.requests.per.connection = 1 （默认为5）才会保证消息的有序性
         if (guaranteeMessageOrder) {
             // Mute all the partitions drained
+            // 将本批次的消息涉及的partition添加到set集合中
             for (List<RecordBatch> batchList : batches.values()) {
                 for (RecordBatch batch : batchList)
                     this.accumulator.mutePartition(batch.topicPartition);
