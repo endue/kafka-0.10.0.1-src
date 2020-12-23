@@ -97,10 +97,12 @@ class Log(val dir: File,// 日志目录
   }
 
   /* the actual segments of the log */
+  // 记录所有的segments，是一个跳表
   private val segments: ConcurrentNavigableMap[java.lang.Long, LogSegment] = new ConcurrentSkipListMap[java.lang.Long, LogSegment]
   loadSegments()
 
   /* Calculate the offset of the next message */
+  // 计算下一条消息的偏移量,记录了当前segment下一个存储消息的位置、起始位置和当前大小
   @volatile var nextOffsetMetadata = new LogOffsetMetadata(activeSegment.nextOffset(), activeSegment.baseOffset, activeSegment.size.toInt)
 
   val topicAndPartition: TopicAndPartition = Log.parseTopicPartitionName(dir)
@@ -134,6 +136,7 @@ class Log(val dir: File,// 日志目录
     tags)
 
   /** The name of this log */
+  // segment文件在磁盘上对应位置的File对象
   def name  = dir.getName()
 
   /* Load the log segments from the log files on disk */
@@ -247,6 +250,7 @@ class Log(val dir: File,// 日志目录
 
   }
 
+  // 更新leo
   private def updateLogEndOffset(messageOffset: Long) {
     nextOffsetMetadata = new LogOffsetMetadata(messageOffset, activeSegment.baseOffset, activeSegment.size.toInt)
   }
@@ -334,6 +338,7 @@ class Log(val dir: File,// 日志目录
         if (assignOffsets) {
           // assign offsets to the message set
           val offset = new LongRef(nextOffsetMetadata.messageOffset)
+          // 下一条消息写入的位置
           appendInfo.firstOffset = offset.value
           val now = time.milliseconds
           val (validatedMessages, messageSizesMaybeChanged) = try {
@@ -509,7 +514,7 @@ class Log(val dir: File,// 日志目录
     // 要读的startOffset = next，无数据可读
     if(startOffset == next)
       return FetchDataInfo(currentNextOffsetMetadata, MessageSet.Empty)
-    // 根据startOffset定位LogSegment
+    // 根据startOffset定位LogSegment，segments是一个跳表
     var entry = segments.floorEntry(startOffset)
 
     // attempt to read beyond the log end offset is an error
