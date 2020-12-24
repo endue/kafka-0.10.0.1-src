@@ -113,7 +113,9 @@ object DelayedOperationPurgatory {
   def apply[T <: DelayedOperation](purgatoryName: String,
                                    brokerId: Int = 0,
                                    purgeInterval: Int = 1000): DelayedOperationPurgatory[T] = {
+    // 延迟功能定时器
     val timer = new SystemTimer(purgatoryName)
+    //
     new DelayedOperationPurgatory[T](purgatoryName, timer, brokerId, purgeInterval)
   }
 
@@ -157,7 +159,7 @@ class DelayedOperationPurgatory[T <: DelayedOperation](purgatoryName: String,
     },
     metricsTags
   )
-
+  // 执行
   if (reaperEnabled)
     expirationReaper.start()
 
@@ -346,6 +348,10 @@ class DelayedOperationPurgatory[T <: DelayedOperation](purgatoryName: String,
     }
   }
 
+  /**
+    * 推进时间轮指针的前进
+    * @param timeoutMs
+    */
   def advanceClock(timeoutMs: Long) {
     timeoutTimer.advanceClock(timeoutMs)
 
@@ -370,6 +376,7 @@ class DelayedOperationPurgatory[T <: DelayedOperation](purgatoryName: String,
     "ExpirationReaper-%d".format(brokerId),
     false) {
 
+    // 推荐时间轮
     override def doWork() {
       advanceClock(200L)
     }

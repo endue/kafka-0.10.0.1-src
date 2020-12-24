@@ -51,6 +51,13 @@ trait Timer {
   def shutdown(): Unit
 }
 
+/**
+  * 延迟功能的定时器
+  * @param executorName
+  * @param tickMs
+  * @param wheelSize
+  * @param startMs
+  */
 @threadsafe
 class SystemTimer(executorName: String,
                   tickMs: Long = 1,
@@ -63,8 +70,10 @@ class SystemTimer(executorName: String,
       Utils.newThread("executor-"+executorName, runnable, false)
   })
 
+  //
   private[this] val delayQueue = new DelayQueue[TimerTaskList]()
   private[this] val taskCounter = new AtomicInteger(0)
+  // 时间轮
   private[this] val timingWheel = new TimingWheel(
     tickMs = tickMs,
     wheelSize = wheelSize,
@@ -78,15 +87,24 @@ class SystemTimer(executorName: String,
   private[this] val readLock = readWriteLock.readLock()
   private[this] val writeLock = readWriteLock.writeLock()
 
+  /**
+    * 添加延迟任务
+    * @param timerTask the task to add
+    */
   def add(timerTask: TimerTask): Unit = {
     readLock.lock()
     try {
+      // 将任务封装为TimerTaskEntry
       addTimerTaskEntry(new TimerTaskEntry(timerTask, timerTask.delayMs + System.currentTimeMillis()))
     } finally {
       readLock.unlock()
     }
   }
 
+  /**
+    * 添加延迟任务
+    * @param timerTaskEntry
+    */
   private def addTimerTaskEntry(timerTaskEntry: TimerTaskEntry): Unit = {
     if (!timingWheel.add(timerTaskEntry)) {
       // Already expired or cancelled
@@ -100,6 +118,7 @@ class SystemTimer(executorName: String,
   /*
    * Advances the clock if there is an expired bucket. If there isn't any expired bucket when called,
    * waits up to timeoutMs before giving up.
+   * 推进时间轮指针的前进
    */
   def advanceClock(timeoutMs: Long): Boolean = {
     var bucket = delayQueue.poll(timeoutMs, TimeUnit.MILLISECONDS)

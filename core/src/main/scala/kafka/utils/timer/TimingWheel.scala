@@ -96,25 +96,37 @@ import java.util.concurrent.atomic.AtomicInteger
  * This class is not thread-safe. There should not be any add calls while advanceClock is executing.
  * It is caller's responsibility to enforce it. Simultaneous add calls are thread-safe.
  */
+/**
+  * 时间轮
+  * @param tickMs 一个槽所代表的时间范围，默认1ms
+  * @param wheelSize 当前时间轮中槽的数量
+  * @param startMs 当前时间轮开始时间
+  * @param taskCounter 当前时间轮任务数量
+  * @param queue TimerTaskList的队列
+  */
 @nonthreadsafe
 private[timer] class TimingWheel(tickMs: Long, wheelSize: Int, startMs: Long, taskCounter: AtomicInteger, queue: DelayQueue[TimerTaskList]) {
 
+  // 时间轮能表示的时间跨度
   private[this] val interval = tickMs * wheelSize
+  // 存放定时任务的数组槽，一个槽存放一个TimerTaskList，TimerTaskList里存放的是TimerTaskEntry
   private[this] val buckets = Array.tabulate[TimerTaskList](wheelSize) { _ => new TimerTaskList(taskCounter) }
-
+  // 当前指向的槽，表示刚好到期，那么就需要处理此时间格所对应的TimerTaskList的所有任务
   private[this] var currentTime = startMs - (startMs % tickMs) // rounding down to multiple of tickMs
 
   // overflowWheel can potentially be updated and read by two concurrent threads through add().
   // Therefore, it needs to be volatile due to the issue of Double-Checked Locking pattern with JVM
+  // 上层时间轮，默认为null
   @volatile private[this] var overflowWheel: TimingWheel = null
 
+  // 创建一个上层时间轮
   private[this] def addOverflowWheel(): Unit = {
     synchronized {
       if (overflowWheel == null) {
         overflowWheel = new TimingWheel(
           tickMs = interval,
           wheelSize = wheelSize,
-          startMs = currentTime,
+          startMs = currentTime,// 高层时间轮的起始时间(startMs)设置为创建此层时间轮时前面一轮的currentTime
           taskCounter = taskCounter,
           queue
         )
@@ -122,33 +134,50 @@ private[timer] class TimingWheel(tickMs: Long, wheelSize: Int, startMs: Long, ta
     }
   }
 
+  /**
+    * 添加任务
+    * @param timerTaskEntry
+    * @return
+    */
   def add(timerTaskEntry: TimerTaskEntry): Boolean = {
+    // 获取任务的延迟时间
     val expiration = timerTaskEntry.expirationMs
-
+    // TimerTaskEntry中没有任务
     if (timerTaskEntry.cancelled) {
       // Cancelled
       false
+    // 任务已到期(任务延迟时间 <  (当前时间 + 时间轮单个槽表示的时间))
+    // 也就是无法放入下一个立即槽
     } else if (expiration < currentTime + tickMs) {
       // Already expired
       false
+    // 任务未到期(当前时间 + 时间轮的阔度)
+    // 也就是当前任务的延迟时间未超过当前时间轮所能表示的时间跨度
     } else if (expiration < currentTime + interval) {
       // Put in its own bucket
+      // 计算所属的槽
       val virtualId = expiration / tickMs
+      // 获取所属槽对应的TimerTaskList
       val bucket = buckets((virtualId % wheelSize.toLong).toInt)
+      // 放入任务
       bucket.add(timerTaskEntry)
 
       // Set the bucket expiration time
+      // 设置TimerTaskList的过期时间
+      // 并且会比较设置前后的过期时间是否一致，如果不一致返回true
       if (bucket.setExpiration(virtualId * tickMs)) {
         // The bucket needs to be enqueued because it was an expired bucket
         // We only need to enqueue the bucket when its expiration time has changed, i.e. the wheel has advanced
         // and the previous buckets gets reused; further calls to set the expiration within the same wheel cycle
         // will pass in the same value and hence return false, thus the bucket with the same expiration will not
         // be enqueued multiple times.
+        //
         queue.offer(bucket)
       }
       true
     } else {
       // Out of the interval. Put it into the parent timer
+      // 超出当前时间轮所能表示的跨度，添加到上一层时间轮
       if (overflowWheel == null) addOverflowWheel()
       overflowWheel.add(timerTaskEntry)
     }
