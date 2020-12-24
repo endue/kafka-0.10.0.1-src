@@ -226,6 +226,7 @@ class ReplicaFetcherThread(name: String,
   }
 
   protected def fetch(fetchRequest: FetchRequest): Map[TopicAndPartition, PartitionData] = {
+    // 发送fetch请求并获取响应
     val clientResponse = sendRequest(ApiKeys.FETCH, Some(fetchRequestVersion), fetchRequest.underlying)
     new FetchResponse(clientResponse.responseBody).responseData.asScala.map { case (key, value) =>
       TopicAndPartition(key.topic, key.partition) -> new PartitionData(value)
@@ -267,14 +268,20 @@ class ReplicaFetcherThread(name: String,
     }
   }
 
+  /**
+    * 构建fetch request
+    * @param partitionMap
+    * @return
+    */
   protected def buildFetchRequest(partitionMap: Map[TopicAndPartition, PartitionFetchState]): FetchRequest = {
     val requestMap = mutable.Map.empty[TopicPartition, JFetchRequest.PartitionData]
 
     partitionMap.foreach { case ((TopicAndPartition(topic, partition), partitionFetchState)) =>
       if (partitionFetchState.isActive)
+        // 拉取的时候记录了从哪个offset开始拉取数据以及拉取的数据量，默认拉取1M
         requestMap(new TopicPartition(topic, partition)) = new JFetchRequest.PartitionData(partitionFetchState.offset, fetchSize)
     }
-
+    // 最少拉取1个字节，如果没有则等待maxWait = 500ms
     new FetchRequest(new JFetchRequest(replicaId, maxWait, minBytes, requestMap.asJava))
   }
 

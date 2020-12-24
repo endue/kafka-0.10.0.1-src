@@ -21,6 +21,14 @@ import kafka.cluster.BrokerEndPoint
 import org.apache.kafka.common.metrics.Metrics
 import org.apache.kafka.common.utils.Time
 
+/**
+  * 负责副本拉取的管理工具
+  * @param brokerConfig
+  * @param replicaMgr
+  * @param metrics
+  * @param time
+  * @param threadNamePrefix
+  */
 class ReplicaFetcherManager(brokerConfig: KafkaConfig, replicaMgr: ReplicaManager, metrics: Metrics, time: Time, threadNamePrefix: Option[String] = None)
         extends AbstractFetcherManager("ReplicaFetcherManager on broker " + brokerConfig.brokerId,
                                        "Replica", brokerConfig.numReplicaFetchers) {
@@ -36,6 +44,7 @@ class ReplicaFetcherManager(brokerConfig: KafkaConfig, replicaMgr: ReplicaManage
       replicaMgr, metrics, time)
   }
 
+  // 关闭
   def shutdown() {
     info("shutting down")
     closeAllFetchers()

@@ -240,6 +240,7 @@ class Partition(val topic: String,
         replica.updateLogReadResult(logReadResult)
         // check if we need to expand ISR to include this replica
         // if it is not in the ISR yet
+        // 如果没有当前副本，则加入进来
         maybeExpandIsr(replicaId)
 
         debug("Recorded replica %d log end offset (LEO) position %d for partition %s."
@@ -283,6 +284,7 @@ class Partition(val topic: String,
 
           // check if the HW of the partition can now be incremented
           // since the replica maybe now be in the ISR and its LEO has just incremented
+          // 更新HW
           maybeIncrementLeaderHW(leaderReplica)
 
         case None => false // nothing to do if no longer leader
@@ -417,8 +419,10 @@ class Partition(val topic: String,
      * there are two cases that will be handled here -
      * 1. Stuck followers: If the leo of the replica hasn't been updated for maxLagMs ms,
      *                     the follower is stuck and should be removed from the ISR
+      *                     如果超过maxLagMs(10s)没有发起fetch请求，则认为follower卡主了
      * 2. Slow followers: If the replica has not read up to the leo within the last maxLagMs ms,
      *                    then the follower is lagging and should be removed from the ISR
+      *                     如果超过maxLagMs(10s)没有更新到最近的LEO，则认为follower太慢了
      * Both these cases are handled by checking the lastCaughtUpTimeMs which represents
      * the last time when the replica was fully caught up. If either of the above conditions
      * is violated, that replica is considered to be out of sync
@@ -462,6 +466,8 @@ class Partition(val topic: String,
           // 写入消息
           val info = log.append(messages, assignOffsets = true)
           // probably unblock some follower fetch requests since log end offset has been updated
+          // 可能解除一些追随者获取请求，因为日志结束偏移量已经更新
+          // 唤醒在时间轮中等待某个分区数据的fetch任务
           replicaManager.tryCompleteDelayedFetch(new TopicPartitionOperationKey(this.topic, this.partitionId))
           // we may need to increment high watermark since ISR could be down to 1
           (info, maybeIncrementLeaderHW(leaderReplica))

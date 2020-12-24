@@ -423,6 +423,7 @@ class KafkaApis(val requestChannel: RequestChannel,
 
   /**
    * Handle a fetch request
+    * 处理fetch请求
    */
   def handleFetchRequest(request: RequestChannel.Request) {
     val fetchRequest = request.requestObj.asInstanceOf[FetchRequest]

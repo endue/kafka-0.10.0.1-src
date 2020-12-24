@@ -86,6 +86,7 @@ abstract class AbstractFetcherThread(name: String,
   override def doWork() {
 
     val fetchRequest = inLock(partitionMapLock) {
+      // 构建fetch请求
       val fetchRequest = buildFetchRequest(partitionMap)
       if (fetchRequest.isEmpty) {
         trace("There are no active partitions. Back off for %d ms before sending a fetch request".format(fetchBackOffMs))
@@ -95,6 +96,7 @@ abstract class AbstractFetcherThread(name: String,
     }
 
     if (!fetchRequest.isEmpty)
+      // 处理fetchRequest
       processFetchRequest(fetchRequest)
   }
 

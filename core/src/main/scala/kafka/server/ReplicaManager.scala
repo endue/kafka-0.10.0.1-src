@@ -119,7 +119,7 @@ class ReplicaManager(val config: KafkaConfig,
     new Partition(t, p, time, this)
   })
   private val replicaStateChangeLock = new Object
-  // 负责消息副本拉取
+  // 负责拉取副本的组件
   val replicaFetcherManager = new ReplicaFetcherManager(config, this, metrics, jTime, threadNamePrefix)
   // HW相关
   private val highWatermarkCheckPointThreadStarted = new AtomicBoolean(false)
@@ -369,6 +369,7 @@ class ReplicaManager(val config: KafkaConfig,
         // try to complete the request immediately, otherwise put it into the purgatory
         // this is because while the delayed produce operation is being created, new
         // requests may arrive and hence make this operation completable.
+        // 如果acks = all，则等待消息同步到其他副本，这里封装成一个任务，添加到时间轮中
         delayedProducePurgatory.tryCompleteElseWatch(delayedProduce, producerRequestKeys)
 
       } else {
@@ -488,10 +489,12 @@ class ReplicaManager(val config: KafkaConfig,
     val fetchOnlyCommitted: Boolean = ! Request.isValidBrokerId(replicaId)
 
     // read from local logs
+    // 从本地拉取消息日志返回给follower
     val logReadResults = readFromLocalLog(fetchOnlyFromLeader, fetchOnlyCommitted, fetchInfo)
 
     // if the fetch comes from the follower,
     // update its corresponding log end offset
+    // 更新自己记录的follower的LEO
     if(Request.isValidBrokerId(replicaId))
       updateFollowerLogReadResults(replicaId, logReadResults)
 
@@ -756,13 +759,19 @@ class ReplicaManager(val config: KafkaConfig,
   }
 
   /*
+   *
    * Make the current broker to become follower for a given set of partitions by:
    *
    * 1. Remove these partitions from the leader partitions set.
+   *
    * 2. Mark the replicas as followers so that no more data can be added from the producer clients.
+   *
    * 3. Stop fetchers for these partitions so that no more data can be added by the replica fetcher threads.
+   *
    * 4. Truncate the log and checkpoint offsets for these partitions.
+   *
    * 5. Clear the produce and fetch requests in the purgatory
+   *
    * 6. If the broker is not shutting down, add the fetcher to the new leaders.
    *
    * The ordering of doing these steps make sure that the replicas in transition will not
@@ -880,6 +889,7 @@ class ReplicaManager(val config: KafkaConfig,
   // 评估分区的ISR列表，查看哪些副本可以从ISR中删除
   private def maybeShrinkIsr(): Unit = {
     trace("Evaluating ISR list of partitions to see which replicas can be removed from the ISR")
+    // 遍历所有的分区
     allPartitions.values.foreach(partition => partition.maybeShrinkIsr(config.replicaLagTimeMaxMs))
   }
 
@@ -892,6 +902,7 @@ class ReplicaManager(val config: KafkaConfig,
 
           // for producer requests with ack > 1, we need to check
           // if they can be unblocked after some follower's log end offsets have moved
+          // 尝试执行producer的消息回调
           tryCompleteDelayedProduce(new TopicPartitionOperationKey(topicAndPartition))
         case None =>
           warn("While recording the replica LEO, the partition %s hasn't been created.".format(topicAndPartition))
