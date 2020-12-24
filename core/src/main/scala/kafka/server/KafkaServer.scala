@@ -179,7 +179,7 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePr
         brokerState.newState(Starting)
 
         /* start scheduler */
-        // 启动相关定时任务
+        // 定时任务线程池，用来执行定时任务
         kafkaScheduler.startup()
 
         /* setup zookeeper */
@@ -214,11 +214,12 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePr
         kafkaController.startup()
 
         /* start group coordinator */
-        // todo ?
+        // 消费者相关
         groupCoordinator = GroupCoordinator(config, zkUtils, replicaManager, kafkaMetricsTime)
         groupCoordinator.startup()
 
         /* Get the authorizer and initialize it if one is specified.*/
+        // 认证授权相关
         authorizer = Option(config.authorizerClassName).filter(_.nonEmpty).map { authorizerClassName =>
           val authZ = CoreUtils.createObject[Authorizer](authorizerClassName)
           authZ.configure(config.originals())
