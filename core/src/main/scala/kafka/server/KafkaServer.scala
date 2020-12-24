@@ -616,7 +616,7 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePr
     val defaultProps = KafkaServer.copyKafkaConfigToLog(config)
     // 生成LogConfig配置
     val defaultLogConfig = LogConfig(defaultProps)
-
+    // 加载zk上的topic相关信息,路径：/brokers/topics
     val configs = AdminUtils.fetchAllTopicConfigs(zkUtils).map { case (topic, configs) =>
       topic -> LogConfig.fromProps(defaultProps, configs)
     }
@@ -636,9 +636,9 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePr
                    defaultConfig = defaultLogConfig,
                    cleanerConfig = cleanerConfig,
                    ioThreads = config.numRecoveryThreadsPerDataDir,
-                   flushCheckMs = config.logFlushSchedulerIntervalMs,
-                   flushCheckpointMs = config.logFlushOffsetCheckpointIntervalMs,
-                   retentionCheckMs = config.logCleanupIntervalMs,
+                   flushCheckMs = config.logFlushSchedulerIntervalMs,// Long.MaxValue
+                   flushCheckpointMs = config.logFlushOffsetCheckpointIntervalMs,// 60000
+                   retentionCheckMs = config.logCleanupIntervalMs,// 5 * 60 * 1000L
                    scheduler = kafkaScheduler,
                    brokerState = brokerState,
                    time = time)

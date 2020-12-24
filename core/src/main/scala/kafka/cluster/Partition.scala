@@ -46,6 +46,7 @@ class Partition(val topic: String,
   private val localBrokerId = replicaManager.config.brokerId
   private val logManager = replicaManager.logManager
   private val zkUtils = replicaManager.zkUtils
+  // 记录的副本信息
   private val assignedReplicaMap = new Pool[Int, Replica]
   // The read lock is only required when multiple reads are executed and needs to be in a consistent manner
   private val leaderIsrUpdateLock = new ReentrantReadWriteLock()
@@ -115,7 +116,7 @@ class Partition(val topic: String,
       Some(replica)
   }
 
-  // 校验当前replica的leader是否为当前的broker
+  // 获取副本
   def leaderReplicaIfLocal(): Option[Replica] = {
     leaderReplicaIdOpt match {
       case Some(leaderReplicaId) =>
@@ -233,14 +234,16 @@ class Partition(val topic: String,
 
   /**
    * Update the log end offset of a certain replica of this partition
+    * 更新副本的leo
    */
   def updateReplicaLogReadResult(replicaId: Int, logReadResult: LogReadResult) {
     getReplica(replicaId) match {
       case Some(replica) =>
+        // 更新副本的一些信息
         replica.updateLogReadResult(logReadResult)
         // check if we need to expand ISR to include this replica
         // if it is not in the ISR yet
-        // 如果没有当前副本，则加入进来
+        // 如果没有当前副本，则加入进来，里面会再次尝试更新leader的HW
         maybeExpandIsr(replicaId)
 
         debug("Recorded replica %d log end offset (LEO) position %d for partition %s."
@@ -268,8 +271,11 @@ class Partition(val topic: String,
       // check if this replica needs to be added to the ISR
       leaderReplicaIfLocal() match {
         case Some(leaderReplica) =>
+          // 获取对应的副本
           val replica = getReplica(replicaId).get
+          // 获取leader的HW
           val leaderHW = leaderReplica.highWatermark
+          // 如果不包含则将当前副本加入到ISR列表
           if(!inSyncReplicas.contains(replica) &&
              assignedReplicas.map(_.brokerId).contains(replicaId) &&
                   replica.logEndOffset.offsetDiff(leaderHW) >= 0) {
@@ -343,9 +349,11 @@ class Partition(val topic: String,
   /**
    * Check and maybe increment the high watermark of the partition;
    * this function can be triggered when
-   *
+   * 以下情况会尝试更新HW
    * 1. Partition ISR changed
+    *   partiton的ISR发送变动
    * 2. Any replica's LEO changed
+    *   某个副本的LEO发生改变，副本fetch请求
    *
    * Returns true if the HW was incremented, and false otherwise.
    * Note There is no need to acquire the leaderIsrUpdate lock here

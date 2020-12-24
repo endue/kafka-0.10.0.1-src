@@ -30,6 +30,7 @@ import org.apache.kafka.common.utils.Utils
 abstract class AbstractFetcherManager(protected val name: String, clientId: String, numFetchers: Int = 1)
   extends Logging with KafkaMetricsGroup {
   // map of (source broker_id, fetcher_id per source broker) => fetcher
+  // 记录所有的fetch线程，因为当前broker上的partiton的leader可能在不同的leader上
   private val fetcherThreadMap = new mutable.HashMap[BrokerAndFetcherId, AbstractFetcherThread]
   private val mapLock = new Object
   this.logIdent = "[" + name + "] "
@@ -78,6 +79,7 @@ abstract class AbstractFetcherManager(protected val name: String, clientId: Stri
         BrokerAndFetcherId(brokerAndInitialOffset.broker, getFetcherId(topicAndPartition.topic, topicAndPartition.partition))}
       for ((brokerAndFetcherId, partitionAndOffsets) <- partitionsPerFetcher) {
         var fetcherThread: AbstractFetcherThread = null
+        // 记录到fetcherThreadMap
         fetcherThreadMap.get(brokerAndFetcherId) match {
           case Some(f) => fetcherThread = f
           case None =>
@@ -118,6 +120,9 @@ abstract class AbstractFetcherManager(protected val name: String, clientId: Stri
     }
   }
 
+  /**
+    * 关闭所有的fetch线程
+    */
   def closeAllFetchers() {
     mapLock synchronized {
       for ( (_, fetcher) <- fetcherThreadMap) {

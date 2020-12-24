@@ -38,14 +38,14 @@ import java.util.concurrent.{ExecutionException, ExecutorService, Executors, Fut
  * A background thread handles log retention by periodically truncating excess log segments.
  */
 @threadsafe
-class LogManager(val logDirs: Array[File],// log文件目录
+class LogManager(val logDirs: Array[File],// log.dirs配置的文件目录
                  val topicConfigs: Map[String, LogConfig],// log配置
                  val defaultConfig: LogConfig,
                  val cleanerConfig: CleanerConfig,
                  ioThreads: Int,
-                 val flushCheckMs: Long,
-                 val flushCheckpointMs: Long,
-                 val retentionCheckMs: Long,
+                 val flushCheckMs: Long,// Long.MaxValue
+                 val flushCheckpointMs: Long,// 60000
+                 val retentionCheckMs: Long,// 5 * 60 * 1000L
                  scheduler: Scheduler,
                  val brokerState: BrokerState,
                  private val time: Time) extends Logging {
@@ -54,10 +54,13 @@ class LogManager(val logDirs: Array[File],// log文件目录
   val InitialTaskDelayMs = 30*1000
   private val logCreationOrDeletionLock = new Object
   private val logs = new Pool[TopicAndPartition, Log]()
-
+  // 检查日志目录
   createAndValidateLogDirs(logDirs)
+  // 对所有的目录生成对应的FileLock
   private val dirLocks = lockLogDirs(logDirs)
+  // 恢复日志检查点
   private val recoveryPointCheckpoints = logDirs.map(dir => (dir, new OffsetCheckpoint(new File(dir, RecoveryPointCheckpointFile)))).toMap
+  // 加载日志
   loadLogs()
 
   // public, so we can access this from kafka.admin.DeleteTopicTest
@@ -69,22 +72,30 @@ class LogManager(val logDirs: Array[File],// log文件目录
   
   /**
    * Create and check validity of the given directories, specifically:
+    * 检查日志目录
    * <ol>
    * <li> Ensure that there are no duplicates in the directory list
+    * 确保目录列表中没有重复项
    * <li> Create each directory if it doesn't exist
-   * <li> Check that each path is a readable directory 
+    * 如果每个目录不存在，就创建它
+   * <li> Check that each path is a readable directory
+    * 检查每个路径是否是一个可读的目录
    * </ol>
    */
   private def createAndValidateLogDirs(dirs: Seq[File]) {
     if(dirs.map(_.getCanonicalPath).toSet.size < dirs.size)
       throw new KafkaException("Duplicate log directory found: " + logDirs.mkString(", "))
+    // 遍历
     for(dir <- dirs) {
+      // 如果目录不存在
       if(!dir.exists) {
         info("Log directory '" + dir.getAbsolutePath + "' not found, creating it.")
+        // 创建
         val created = dir.mkdirs()
         if(!created)
           throw new KafkaException("Failed to create data directory " + dir.getAbsolutePath)
       }
+      // 非文件夹或不可读抛出异常
       if(!dir.isDirectory || !dir.canRead)
         throw new KafkaException(dir.getAbsolutePath + " is not a readable log directory.")
     }
@@ -105,6 +116,7 @@ class LogManager(val logDirs: Array[File],// log文件目录
   
   /**
    * Recover and load all logs in the given data directories
+    * 恢复并加载给定数据目录中的所有日志
    */
   private def loadLogs(): Unit = {
     info("Loading logs.")
@@ -188,23 +200,27 @@ class LogManager(val logDirs: Array[File],// log文件目录
     /* Schedule the cleanup task to delete old logs */
     if(scheduler != null) {
       info("Starting log cleanup with a period of %d ms.".format(retentionCheckMs))
+      // 旧的日志段删除任务,延迟30s执行，之后每5分钟执行一次
       scheduler.schedule("kafka-log-retention", 
                          cleanupLogs, 
-                         delay = InitialTaskDelayMs, 
+                         delay = InitialTaskDelayMs, //  30*1000
                          period = retentionCheckMs, 
                          TimeUnit.MILLISECONDS)
       info("Starting log flusher with a default period of %d ms.".format(flushCheckMs))
+      // 刷盘任务
       scheduler.schedule("kafka-log-flusher", 
                          flushDirtyLogs, 
-                         delay = InitialTaskDelayMs, 
+                         delay = InitialTaskDelayMs, // 30*1000
                          period = flushCheckMs, 
                          TimeUnit.MILLISECONDS)
+      // 检查点任务，记录了最后一次刷新的offset，表示多少日志已经落盘到磁盘上
       scheduler.schedule("kafka-recovery-point-checkpoint",
                          checkpointRecoveryPointOffsets,
                          delay = InitialTaskDelayMs,
                          period = flushCheckpointMs,
                          TimeUnit.MILLISECONDS)
     }
+    //
     if(cleanerConfig.enableCleaner)
       cleaner.startup()
   }
@@ -448,6 +464,7 @@ class LogManager(val logDirs: Array[File],// log文件目录
 
   /**
    * Delete any eligible logs. Return the number of segments deleted.
+    * 删除所有符合条件的日志。返回删除的段数
    */
   def cleanupLogs() {
     debug("Beginning log cleanup...")

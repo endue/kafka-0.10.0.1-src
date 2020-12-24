@@ -45,11 +45,13 @@ class Replica(val brokerId: Int,
     }
   }
 
+  // 副表拉取信息后更新该时间戳
   private[this] val lastCaughtUpTimeMsUnderlying = new AtomicLong(time.milliseconds)
 
   def lastCaughtUpTimeMs = lastCaughtUpTimeMsUnderlying.get()
 
   def updateLogReadResult(logReadResult : LogReadResult) {
+    // 更新副本的leo
     logEndOffset = logReadResult.info.fetchOffsetMetadata
 
     /* If the request read up to the log end offset snapshot when the read was initiated,

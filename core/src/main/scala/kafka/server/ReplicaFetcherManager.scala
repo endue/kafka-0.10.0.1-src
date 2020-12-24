@@ -22,7 +22,8 @@ import org.apache.kafka.common.metrics.Metrics
 import org.apache.kafka.common.utils.Time
 
 /**
-  * 负责副本拉取的管理工具
+  * 负责不断往leader发送FETCH请求拉取数据
+  * 这里继承了AbstractFetcherManager
   * @param brokerConfig
   * @param replicaMgr
   * @param metrics
