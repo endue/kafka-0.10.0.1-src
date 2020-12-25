@@ -49,6 +49,7 @@ import com.yammer.metrics.core.Gauge
  */
 abstract class DelayedOperation(override val delayMs: Long) extends TimerTask with Logging {
 
+  // 任务完成标识符
   private val completed = new AtomicBoolean(false)
 
   /*
@@ -76,17 +77,20 @@ abstract class DelayedOperation(override val delayMs: Long) extends TimerTask wi
 
   /**
    * Check if the delayed operation is already completed
+    * 检查任务是否已经完成
    */
   def isCompleted(): Boolean = completed.get()
 
   /**
    * Call-back to execute when a delayed operation gets expired and hence forced to complete.
+    * 任务过期后执行的具体逻辑
    */
   def onExpiration(): Unit
 
   /**
    * Process for completing an operation; This function needs to be defined
    * in subclasses and will be called exactly once in forceComplete()
+    * 在complete之后怎么做
    */
   def onComplete(): Unit
 
@@ -96,11 +100,13 @@ abstract class DelayedOperation(override val delayMs: Long) extends TimerTask wi
    * forceComplete() and return true iff forceComplete returns true; otherwise return false
    *
    * This function needs to be defined in subclasses
+   * 检查任务条件是否已经满足，满足的话就执行一些操作
    */
   def tryComplete(): Boolean
 
   /*
    * run() method defines a task that is executed on timeout
+   * 任务到期后执行的方法
    */
   override def run(): Unit = {
     if (forceComplete())
@@ -140,6 +146,7 @@ class DelayedOperationPurgatory[T <: DelayedOperation](purgatoryName: String,
   private[this] val estimatedTotalOperations = new AtomicInteger(0)
 
   /* background thread expiring operations that have timed out */
+  // 推动时间轮前进的后台线程
   private val expirationReaper = new ExpiredOperationReaper()
 
   private val metricsTags = Map("delayedOperation" -> purgatoryName)
@@ -159,7 +166,7 @@ class DelayedOperationPurgatory[T <: DelayedOperation](purgatoryName: String,
     },
     metricsTags
   )
-  // 执行
+  // 启动后台线程
   if (reaperEnabled)
     expirationReaper.start()
 
@@ -353,6 +360,7 @@ class DelayedOperationPurgatory[T <: DelayedOperation](purgatoryName: String,
     * @param timeoutMs
     */
   def advanceClock(timeoutMs: Long) {
+
     timeoutTimer.advanceClock(timeoutMs)
 
     // Trigger a purge if the number of completed but still being watched operations is larger than
@@ -371,13 +379,15 @@ class DelayedOperationPurgatory[T <: DelayedOperation](purgatoryName: String,
 
   /**
    * A background reaper to expire delayed operations that have timed out
+    * 后台工作线程，推荐时间轮的前进
    */
   private class ExpiredOperationReaper extends ShutdownableThread(
     "ExpirationReaper-%d".format(brokerId),
     false) {
 
-    // 推荐时间轮
+    // 覆盖ShutdownableThread中的方法，推荐时间轮
     override def doWork() {
+      // 每次前继阻塞200ms
       advanceClock(200L)
     }
   }

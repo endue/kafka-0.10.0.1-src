@@ -72,6 +72,7 @@ class SystemTimer(executorName: String,
 
   //
   private[this] val delayQueue = new DelayQueue[TimerTaskList]()
+  // 任务数
   private[this] val taskCounter = new AtomicInteger(0)
   // 时间轮
   private[this] val timingWheel = new TimingWheel(
@@ -106,8 +107,10 @@ class SystemTimer(executorName: String,
     * @param timerTaskEntry
     */
   private def addTimerTaskEntry(timerTaskEntry: TimerTaskEntry): Unit = {
+    // 返回false表示任务已过期和已取消
     if (!timingWheel.add(timerTaskEntry)) {
       // Already expired or cancelled
+      // 任务没有取消但是已过期，那么需要立即执行当前任务
       if (!timerTaskEntry.cancelled)
         taskExecutor.submit(timerTaskEntry.timerTask)
     }
@@ -121,13 +124,18 @@ class SystemTimer(executorName: String,
    * 推进时间轮指针的前进
    */
   def advanceClock(timeoutMs: Long): Boolean = {
+    // 阻塞200ms，获取超时的TimerTaskList
     var bucket = delayQueue.poll(timeoutMs, TimeUnit.MILLISECONDS)
+    // 不为null，准备处理超时的TimerTaskList
     if (bucket != null) {
       writeLock.lock()
       try {
         while (bucket != null) {
+          // 修改时间轮的currentTime为当前槽的过期时间
           timingWheel.advanceClock(bucket.getExpiration())
+          // 处理TimerTaskList中的任务
           bucket.flush(reinsert)
+          // 继续处理超时的TimerTaskList，非阻塞
           bucket = delayQueue.poll()
         }
       } finally {

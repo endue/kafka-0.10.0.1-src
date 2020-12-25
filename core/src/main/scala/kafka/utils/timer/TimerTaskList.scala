@@ -116,7 +116,13 @@ private[timer] class TimerTaskList(taskCounter: AtomicInteger) extends Delayed {
     }
   }
 
+  /**
+    * 获取超时时间
+    * @param unit
+    * @return
+    */
   def getDelay(unit: TimeUnit): Long = {
+    // 过期时间 - 当前时间
     unit.convert(max(getExpiration - SystemTime.milliseconds, 0), TimeUnit.MILLISECONDS)
   }
 

@@ -142,7 +142,7 @@ private[timer] class TimingWheel(tickMs: Long, wheelSize: Int, startMs: Long, ta
   def add(timerTaskEntry: TimerTaskEntry): Boolean = {
     // 获取任务的延迟时间
     val expiration = timerTaskEntry.expirationMs
-    // TimerTaskEntry中没有任务
+    // TimerTaskEntry任务被取消
     if (timerTaskEntry.cancelled) {
       // Cancelled
       false
@@ -184,11 +184,13 @@ private[timer] class TimingWheel(tickMs: Long, wheelSize: Int, startMs: Long, ta
   }
 
   // Try to advance the clock
+  // 前继时间轮
   def advanceClock(timeMs: Long): Unit = {
     if (timeMs >= currentTime + tickMs) {
       currentTime = timeMs - (timeMs % tickMs)
 
       // Try to advance the clock of the overflow wheel if present
+      // 尝试前继上层时间轮
       if (overflowWheel != null) overflowWheel.advanceClock(currentTime)
     }
   }
