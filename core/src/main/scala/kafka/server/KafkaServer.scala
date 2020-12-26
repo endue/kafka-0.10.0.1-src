@@ -131,7 +131,8 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePr
 
   var kafkaController: KafkaController = null
 
-  val kafkaScheduler = new KafkaScheduler(config.backgroundThreads)
+  // 执行定时任务线程池
+  val kafkaScheduler = new KafkaScheduler(config.backgroundThreads)// 默认10
 
   var kafkaHealthcheck: KafkaHealthcheck = null
   val metadataCache: MetadataCache = new MetadataCache(config.brokerId)
@@ -258,6 +259,7 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePr
           else
             (protocol, endpoint)
         }
+        //
         kafkaHealthcheck = new KafkaHealthcheck(config.brokerId, listeners, zkUtils, config.rack,
           config.interBrokerProtocolVersion)
         kafkaHealthcheck.startup()
@@ -621,7 +623,7 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePr
       topic -> LogConfig.fromProps(defaultProps, configs)
     }
     // read the log configurations from zookeeper
-    // 从zookeeper读取日志配置
+    // 加载日志清理工具的配置参数
     val cleanerConfig = CleanerConfig(numThreads = config.logCleanerThreads,// 默认1
                                       dedupeBufferSize = config.logCleanerDedupeBufferSize,// 默认128 * 1024 * 1024L
                                       dedupeBufferLoadFactor = config.logCleanerDedupeBufferLoadFactor,// 默认0.9d
@@ -631,11 +633,11 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePr
                                       backOffMs = config.logCleanerBackoffMs,// 默认 15 * 1000
                                       enableCleaner = config.logCleanerEnable)// 默认 true
     // 生成LogManager
-    new LogManager(logDirs = config.logDirs.map(new File(_)).toArray,// 读取log所在文件
-                   topicConfigs = configs,
+    new LogManager(logDirs = config.logDirs.map(new File(_)).toArray,// 读取log所在文件，首先加载的是"log.dirs"配置项，如果为空则加载"log.dir"
+                   topicConfigs = configs,//
                    defaultConfig = defaultLogConfig,
                    cleanerConfig = cleanerConfig,
-                   ioThreads = config.numRecoveryThreadsPerDataDir,
+                   ioThreads = config.numRecoveryThreadsPerDataDir,// 默认1
                    flushCheckMs = config.logFlushSchedulerIntervalMs,// Long.MaxValue
                    flushCheckpointMs = config.logFlushOffsetCheckpointIntervalMs,// 60000
                    retentionCheckMs = config.logCleanupIntervalMs,// 5 * 60 * 1000L

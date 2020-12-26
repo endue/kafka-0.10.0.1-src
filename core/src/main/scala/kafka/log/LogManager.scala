@@ -38,34 +38,38 @@ import java.util.concurrent.{ExecutionException, ExecutorService, Executors, Fut
  * A background thread handles log retention by periodically truncating excess log segments.
  */
 @threadsafe
-class LogManager(val logDirs: Array[File],// log.dirs配置的文件目录
+class LogManager(val logDirs: Array[File],// 读取log所在文件，首先加载的是"log.dirs"配置项，如果为空则加载"log.dir"
                  val topicConfigs: Map[String, LogConfig],// log配置
                  val defaultConfig: LogConfig,
                  val cleanerConfig: CleanerConfig,
-                 ioThreads: Int,
+                 ioThreads: Int,// 默认1
                  val flushCheckMs: Long,// Long.MaxValue
                  val flushCheckpointMs: Long,// 60000
                  val retentionCheckMs: Long,// 5 * 60 * 1000L
-                 scheduler: Scheduler,
+                 scheduler: Scheduler,// 任务调度线程池
                  val brokerState: BrokerState,
                  private val time: Time) extends Logging {
   val RecoveryPointCheckpointFile = "recovery-point-offset-checkpoint"
   val LockFile = ".lock"
   val InitialTaskDelayMs = 30*1000
   private val logCreationOrDeletionLock = new Object
+  // 底层基于ConcurrentHashMap,key是TopicAndPartition，value是log
+  // 初始化记录主题分区对应<-->log关系的map
   private val logs = new Pool[TopicAndPartition, Log]()
   // 检查日志目录
   createAndValidateLogDirs(logDirs)
   // 对所有的目录生成对应的FileLock
   private val dirLocks = lockLogDirs(logDirs)
-  // 恢复日志检查点
+  // 生成日志检查点
   private val recoveryPointCheckpoints = logDirs.map(dir => (dir, new OffsetCheckpoint(new File(dir, RecoveryPointCheckpointFile)))).toMap
   // 加载日志
   loadLogs()
 
   // public, so we can access this from kafka.admin.DeleteTopicTest
   val cleaner: LogCleaner =
+    // 是否启动清理调度任务
     if(cleanerConfig.enableCleaner)
+      // 生成清理调度任务
       new LogCleaner(cleanerConfig, logDirs, logs, time = time)
     else
       null
@@ -85,17 +89,18 @@ class LogManager(val logDirs: Array[File],// log.dirs配置的文件目录
   private def createAndValidateLogDirs(dirs: Seq[File]) {
     if(dirs.map(_.getCanonicalPath).toSet.size < dirs.size)
       throw new KafkaException("Duplicate log directory found: " + logDirs.mkString(", "))
-    // 遍历
+    // 遍历目录
     for(dir <- dirs) {
       // 如果目录不存在
       if(!dir.exists) {
         info("Log directory '" + dir.getAbsolutePath + "' not found, creating it.")
         // 创建
         val created = dir.mkdirs()
+        // 创建失败
         if(!created)
           throw new KafkaException("Failed to create data directory " + dir.getAbsolutePath)
       }
-      // 非文件夹或不可读抛出异常
+      // 路径目录不是文件夹或不可读抛出异常
       if(!dir.isDirectory || !dir.canRead)
         throw new KafkaException(dir.getAbsolutePath + " is not a readable log directory.")
     }
@@ -103,10 +108,15 @@ class LogManager(val logDirs: Array[File],// log.dirs配置的文件目录
   
   /**
    * Lock all the given directories
+    * 锁住所有的文件目录
+    *
    */
   private def lockLogDirs(dirs: Seq[File]): Seq[FileLock] = {
+    // 遍历目录然后生成
     dirs.map { dir =>
+      // 将目录转为FileLock
       val lock = new FileLock(new File(dir, LockFile))
+      // 尝试加锁并返回
       if(!lock.tryLock())
         throw new KafkaException("Failed to acquire lock on file .lock in " + lock.file.getParentFile.getAbsolutePath + 
                                ". A Kafka instance in another process or thread is using this directory.")
@@ -195,6 +205,7 @@ class LogManager(val logDirs: Array[File],// log.dirs配置的文件目录
 
   /**
    *  Start the background threads to flush logs and do log cleanup
+    *  启动logManager
    */
   def startup() {
     /* Schedule the cleanup task to delete old logs */
@@ -220,7 +231,7 @@ class LogManager(val logDirs: Array[File],// log.dirs配置的文件目录
                          period = flushCheckpointMs,
                          TimeUnit.MILLISECONDS)
     }
-    //
+    // 启动清理log后台线程
     if(cleanerConfig.enableCleaner)
       cleaner.startup()
   }

@@ -49,9 +49,9 @@ object LogAppendInfo {
  * @param validBytes The number of valid bytes
  * @param offsetsMonotonic Are the offsets in this message set monotonically increasing
  */
-case class LogAppendInfo(var firstOffset: Long,
-                         var lastOffset: Long,
-                         var timestamp: Long,
+case class LogAppendInfo(var firstOffset: Long,// 消息集起始位置
+                         var lastOffset: Long,// 消息集结束位置
+                         var timestamp: Long,// 时间戳
                          sourceCodec: CompressionCodec,
                          targetCodec: CompressionCodec,
                          shallowCount: Int,
@@ -74,6 +74,7 @@ case class LogAppendInfo(var firstOffset: Long,
  * @param time The time instance used for checking the clock
  *
  */
+// 日志对应logs配置
 @threadsafe
 class Log(val dir: File,// 日志目录
           @volatile var config: LogConfig,// 日志配置设置
@@ -97,12 +98,12 @@ class Log(val dir: File,// 日志目录
   }
 
   /* the actual segments of the log */
-  // 记录所有的segments，是一个跳表
+  // 记录所有的segments，是一个跳表，key是segment的名
   private val segments: ConcurrentNavigableMap[java.lang.Long, LogSegment] = new ConcurrentSkipListMap[java.lang.Long, LogSegment]
   loadSegments()
 
   /* Calculate the offset of the next message */
-  // 计算下一条消息的偏移量,记录了当前segment下一个存储消息的位置、起始位置和当前大小
+  // 记录了当前segment下一个消息存储的位置、起始位置和当前大小
   @volatile var nextOffsetMetadata = new LogOffsetMetadata(activeSegment.nextOffset(), activeSegment.baseOffset, activeSegment.size.toInt)
 
   val topicAndPartition: TopicAndPartition = Log.parseTopicPartitionName(dir)
@@ -250,7 +251,7 @@ class Log(val dir: File,// 日志目录
 
   }
 
-  // 更新leo
+  // 更新nextOffsetMetadata
   private def updateLogEndOffset(messageOffset: Long) {
     nextOffsetMetadata = new LogOffsetMetadata(messageOffset, activeSegment.baseOffset, activeSegment.size.toInt)
   }
@@ -322,6 +323,7 @@ class Log(val dir: File,// 日志目录
    */
   // 写消息日志
   def append(messages: ByteBufferMessageSet, assignOffsets: Boolean = true): LogAppendInfo = {
+    // 获取消息
     val appendInfo = analyzeAndValidateMessageSet(messages)
 
     // if we have any valid messages, append them to the log
@@ -334,13 +336,15 @@ class Log(val dir: File,// 日志目录
     try {
       // they are valid, insert them in the log
       lock synchronized {
-
+        // 判断是否需要当前消息分配offset
         if (assignOffsets) {
           // assign offsets to the message set
+          // 计算下一条消息的offset
           val offset = new LongRef(nextOffsetMetadata.messageOffset)
-          // 下一条消息写入的位置
+          // 记录消息写入的位置到appendInfo
           appendInfo.firstOffset = offset.value
           val now = time.milliseconds
+          // 验证
           val (validatedMessages, messageSizesMaybeChanged) = try {
             validMessages.validateMessagesAndAssignOffsets(offset,
                                                            now,
@@ -354,7 +358,9 @@ class Log(val dir: File,// 日志目录
             case e: IOException => throw new KafkaException("Error in validating messages while appending to log '%s'".format(name), e)
           }
           validMessages = validatedMessages
+          // 记录消息结尾的位置到appendInfo
           appendInfo.lastOffset = offset.value - 1
+          // 加上时间戳
           if (config.messageTimestampType == TimestampType.LOG_APPEND_TIME)
             appendInfo.timestamp = now
 
@@ -395,7 +401,7 @@ class Log(val dir: File,// 日志目录
         segment.append(appendInfo.firstOffset, validMessages)
 
         // increment the log end offset
-        // 更新LEO
+        // 更新nextOffset也是LEO
         updateLogEndOffset(appendInfo.lastOffset + 1)
 
         trace("Appended message set to log %s with first offset: %d, next offset: %d, and messages: %s"
@@ -427,6 +433,7 @@ class Log(val dir: File,// 日志目录
    * <li> Whether the offsets are monotonically increasing
    * <li> Whether any compression codec is used (if many are used, then the last one is given)
    * </ol>
+    * 验证并解析消息
    */
   private def analyzeAndValidateMessageSet(messages: ByteBufferMessageSet): LogAppendInfo = {
     var shallowMessageCount = 0
@@ -657,8 +664,11 @@ class Log(val dir: File,// 日志目录
     val start = time.nanoseconds
     lock synchronized {
       val newOffset = logEndOffset
+      // 创建log文件，文件名是newOffset
       val logFile = logFilename(dir, newOffset)
+      // 创建index文件，文件名也是newOffset
       val indexFile = indexFilename(dir, newOffset)
+      // 如果已经存则删除
       for(file <- List(logFile, indexFile); if file.exists) {
         warn("Newly rolled segment file " + file.getName + " already exists; deleting it first")
         file.delete()
@@ -671,6 +681,7 @@ class Log(val dir: File,// 日志目录
           entry.getValue.log.trim()
         }
       }
+      // 创建
       val segment = new LogSegment(dir,
                                    startOffset = newOffset,
                                    indexIntervalBytes = config.indexInterval,
@@ -680,11 +691,15 @@ class Log(val dir: File,// 日志目录
                                    fileAlreadyExists = false,
                                    initFileSize = initFileSize,
                                    preallocate = config.preallocate)
+      // 记录segments到segments中
       val prev = addSegment(segment)
+      // 不为null，说明已经存在
       if(prev != null)
         throw new KafkaException("Trying to roll a new log segment for topic partition %s with start offset %d while it already exists.".format(name, newOffset))
       // We need to update the segment base offset and append position data of the metadata when log rolls.
       // The next offset should not change.
+      // 更新nextOffsetMetadata，也是leo
+      // 因为新创建了segment
       updateLogEndOffset(nextOffsetMetadata.messageOffset)
       // schedule an asynchronous flush of the old segment
       scheduler.schedule("flush-log", () => flush(newOffset), delay = 0L)

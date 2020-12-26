@@ -63,6 +63,7 @@ import scala.collection._
  * @param logs The pool of logs
  * @param time A way to control the passage of time
  */
+// 清理日志
 class LogCleaner(val config: CleanerConfig,
                  val logDirs: Array[File],
                  val logs: Pool[TopicAndPartition, Log], 
@@ -210,6 +211,7 @@ class LogCleaner(val config: CleanerConfig,
 
     /**
      * The main loop for the cleaner thread
+      * 不断循环清理log
      */
     override def doWork() {
       cleanOrSleep()

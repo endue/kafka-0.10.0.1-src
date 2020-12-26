@@ -41,6 +41,10 @@ class OffsetCheckpoint(val file: File) extends Logging {
   private val lock = new Object()
   file.createNewFile() // in case the file doesn't exist
 
+  /**
+    * 写检查点
+    * @param offsets
+    */
   def write(offsets: Map[TopicAndPartition, Long]) {
     lock synchronized {
       // write to temp file and then swap with the existing file
@@ -75,6 +79,10 @@ class OffsetCheckpoint(val file: File) extends Logging {
     }
   }
 
+  /**
+    * 读取检查点
+    * @return
+    */
   def read(): Map[TopicAndPartition, Long] = {
 
     def malformedLineException(line: String) =

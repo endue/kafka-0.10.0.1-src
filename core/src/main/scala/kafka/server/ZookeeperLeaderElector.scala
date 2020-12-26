@@ -45,6 +45,7 @@ class ZookeeperLeaderElector(controllerContext: ControllerContext,
   val leaderChangeListener = new LeaderChangeListener
 
   def startup {
+    // 在/controller节点上注册一个监听器
     inLock(controllerContext.controllerLock) {
       controllerContext.zkUtils.zkClient.subscribeDataChanges(electionPath, leaderChangeListener)
       elect

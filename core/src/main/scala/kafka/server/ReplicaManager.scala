@@ -114,7 +114,7 @@ class ReplicaManager(val config: KafkaConfig,
   @volatile var controllerEpoch: Int = KafkaController.InitialControllerEpoch - 1
   // 记录当前broker的ID
   private val localBrokerId = config.brokerId
-  // 保存所有的partition
+  // 保存所有的topic <--> partition映射关系
   private val allPartitions = new Pool[(String, Int), Partition](valueFactory = Some { case (t, p) =>
     new Partition(t, p, time, this)
   })
@@ -300,6 +300,12 @@ class ReplicaManager(val config: KafkaConfig,
     allPartitions.getAndMaybePut((topic, partitionId))
   }
 
+  /**
+    * 获取某个主题下某个分区号对应的分区元数据
+    * @param topic 主题
+    * @param partitionId 分区号
+    * @return
+    */
   def getPartition(topic: String, partitionId: Int): Option[Partition] = {
     val partition = allPartitions.get((topic, partitionId))
     if (partition == null)
@@ -425,13 +431,14 @@ class ReplicaManager(val config: KafkaConfig,
       BrokerTopicStats.getBrokerAllTopicsStats().totalProduceRequestRate.mark()
 
       // reject appending to internal topics if it is not allowed
+      // 验证是否将消息添加到内部队列并且还不允许添加，那么需要返回给客户端异常
       if (Topic.isInternal(topicPartition.topic) && !internalTopicsAllowed) {
         (topicPartition, LogAppendResult(
           LogAppendInfo.UnknownLogAppendInfo,
           Some(new InvalidTopicException("Cannot append to internal topic %s".format(topicPartition.topic)))))
       } else {
         try {
-          // 基于主题和分区获取对应的Partition对象
+          // 基于主题和分区号获取对应的Partition对象
           val partitionOpt = getPartition(topicPartition.topic, topicPartition.partition)
           val info = partitionOpt match {
             case Some(partition) =>
@@ -500,7 +507,7 @@ class ReplicaManager(val config: KafkaConfig,
 
     // if the fetch comes from the follower,
     // update its corresponding log end offset
-    // 如果请求是从follow发出的，则更新本地对应replica的LEO，并推进HW
+    // 如果请求是从follow发出的，则更新本地follower副本的LEO，并推进HW
     if(Request.isValidBrokerId(replicaId))
       updateFollowerLogReadResults(replicaId, logReadResults)
 
@@ -516,6 +523,7 @@ class ReplicaManager(val config: KafkaConfig,
     // 返回请求
     if(timeout <= 0 || fetchInfo.size <= 0 || bytesReadable >= fetchMinBytes || errorReadingData) {
       val fetchPartitionData = logReadResults.mapValues(result =>
+        // 返回了自身当前的HW
         FetchResponsePartitionData(result.errorCode, result.hw, result.info.messageSet))
       responseCallback(fetchPartitionData)
     // 没有数据，等待

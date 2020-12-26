@@ -44,7 +44,7 @@ import java.io.{IOException, File}
 class LogSegment(val log: FileMessageSet,
                  val index: OffsetIndex,
                  val baseOffset: Long,
-                 val indexIntervalBytes: Int,
+                 val indexIntervalBytes: Int,// 默认10 * 1024 * 1024
                  val rollJitterMs: Long,
                  time: Time) extends Logging {
 
@@ -73,6 +73,7 @@ class LogSegment(val log: FileMessageSet,
    * @param offset The first offset in the message set.
    * @param messages The messages to append.
    */
+  // 拼接给定的消息
   @nonthreadsafe
   def append(offset: Long, messages: ByteBufferMessageSet) {
     if (messages.sizeInBytes > 0) {
@@ -80,6 +81,7 @@ class LogSegment(val log: FileMessageSet,
       // append an entry to the index (if needed)
       // 判断是否更新index索引
       if(bytesSinceLastIndexEntry > indexIntervalBytes) {
+        // 消息的起始位置，消息大小
         index.append(offset, log.sizeInBytes())
         this.bytesSinceLastIndexEntry = 0
       }
