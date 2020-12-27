@@ -96,6 +96,17 @@ class GroupCoordinator(val brokerId: Int,
     info("Shutdown complete.")
   }
 
+  /**
+    * 处理JOIN_GROUP请求
+    * @param groupId
+    * @param memberId
+    * @param clientId
+    * @param clientHost
+    * @param sessionTimeoutMs
+    * @param protocolType
+    * @param protocols
+    * @param responseCallback
+    */
   def handleJoinGroup(groupId: String,
                       memberId: String,
                       clientId: String,
@@ -119,15 +130,16 @@ class GroupCoordinator(val brokerId: Int,
       // only try to create the group if the group is not unknown AND
       // the member id is UNKNOWN, if member is specified but group does not
       // exist we should reject the request
+      // 找到对应的组
       var group = groupManager.getGroup(groupId)
-      if (group == null) {
+      if (group == null) {// 组不存在
         if (memberId != JoinGroupRequest.UNKNOWN_MEMBER_ID) {
           responseCallback(joinError(memberId, Errors.UNKNOWN_MEMBER_ID.code))
         } else {
           group = groupManager.addGroup(new GroupMetadata(groupId, protocolType))
           doJoinGroup(group, memberId, clientId, clientHost, sessionTimeoutMs, protocolType, protocols, responseCallback)
         }
-      } else {
+      } else {// 组已经存在
         doJoinGroup(group, memberId, clientId, clientHost, sessionTimeoutMs, protocolType, protocols, responseCallback)
       }
     }

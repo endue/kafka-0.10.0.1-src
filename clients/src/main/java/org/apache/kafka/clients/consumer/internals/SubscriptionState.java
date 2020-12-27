@@ -52,21 +52,26 @@ public class SubscriptionState {
     };
 
     /* the type of subscription */
+    // 订阅类型
     private SubscriptionType subscriptionType;
 
     /* the pattern user has requested */
     private Pattern subscribedPattern;
 
     /* the list of topics the user has requested */
+    // 用户订阅的主题
     private final Set<String> subscription;
 
     /* the list of topics the group has subscribed to (set only for the leader on join group completion) */
+    // 消费者订阅的主题
     private final Set<String> groupSubscription;
 
     /* the list of partitions the user has requested */
+    // 用户分配的分区
     private final Set<TopicPartition> userAssignment;
 
     /* the list of partitions currently assigned */
+    // 记录当前分配的分区以及对应的状态
     private final Map<TopicPartition, TopicPartitionState> assignment;
 
     /* do we need to request a partition assignment from the coordinator? */
@@ -378,10 +383,15 @@ public class SubscriptionState {
         return listener;
     }
 
+    // 分区状态
     private static class TopicPartitionState {
+        // 拉取偏移量
         private Long position; // last consumed position
+        // 消费偏移量也就是提交偏移量
         private OffsetAndMetadata committed;  // last committed position
+        // 分区是否被暂停拉取
         private boolean paused;  // whether this partition has been paused by the user
+        // 重置策略
         private OffsetResetStrategy resetStrategy;  // the strategy to use if the offset needs resetting
 
         public TopicPartitionState() {

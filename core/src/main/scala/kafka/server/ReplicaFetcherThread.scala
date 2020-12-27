@@ -229,6 +229,11 @@ class ReplicaFetcherThread(name: String,
     delayPartitions(partitions, brokerConfig.replicaFetchBackoffMs.toLong)
   }
 
+  /**
+    * 发送fetch请求
+    * @param fetchRequest
+    * @return
+    */
   protected def fetch(fetchRequest: FetchRequest): Map[TopicAndPartition, PartitionData] = {
     // 发送fetch请求并获取响应
     val clientResponse = sendRequest(ApiKeys.FETCH, Some(fetchRequestVersion), fetchRequest.underlying)
@@ -237,6 +242,13 @@ class ReplicaFetcherThread(name: String,
     }
   }
 
+  /**
+    * 发送fetch请求
+    * @param apiKey
+    * @param apiVersion
+    * @param request
+    * @return
+    */
   private def sendRequest(apiKey: ApiKeys, apiVersion: Option[Short], request: AbstractRequest): ClientResponse = {
     import kafka.utils.NetworkClientBlockingOps._
     val header = apiVersion.fold(networkClient.nextRequestHeader(apiKey))(networkClient.nextRequestHeader(apiKey, _))
