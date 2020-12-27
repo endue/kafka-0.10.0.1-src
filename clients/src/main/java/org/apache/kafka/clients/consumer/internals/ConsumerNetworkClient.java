@@ -44,10 +44,11 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 public class ConsumerNetworkClient implements Closeable {
     private static final Logger log = LoggerFactory.getLogger(ConsumerNetworkClient.class);
-
+    // 通信组件
     private final KafkaClient client;
     private final AtomicBoolean wakeup = new AtomicBoolean(false);
     private final DelayedTaskQueue delayedTasks = new DelayedTaskQueue();
+    // 记录node和对应要发送的消息
     private final Map<Node, List<ClientRequest>> unsent = new HashMap<>();
     private final Metadata metadata;
     private final Time time;
@@ -61,8 +62,8 @@ public class ConsumerNetworkClient implements Closeable {
     public ConsumerNetworkClient(KafkaClient client,
                                  Metadata metadata,
                                  Time time,
-                                 long retryBackoffMs,
-                                 long requestTimeoutMs) {
+                                 long retryBackoffMs,// 100
+                                 long requestTimeoutMs) {// 40 * 1000
         this.client = client;
         this.metadata = metadata;
         this.time = time;
@@ -100,6 +101,7 @@ public class ConsumerNetworkClient implements Closeable {
      * @param api The Kafka API call
      * @param request The request payload
      * @return A future which indicates the result of the send.
+     * 发送一个请求，但是请求并没有被时间发送而是等待poll()操作
      */
     public RequestFuture<ClientResponse> send(Node node,
                                               ApiKeys api,
@@ -112,6 +114,11 @@ public class ConsumerNetworkClient implements Closeable {
         return future;
     }
 
+    /**
+     * 记录要发送的消息和对应的node
+     * @param node
+     * @param request
+     */
     private void put(Node node, ClientRequest request) {
         List<ClientRequest> nodeUnsent = unsent.get(node);
         if (nodeUnsent == null) {
@@ -138,6 +145,7 @@ public class ConsumerNetworkClient implements Closeable {
     /**
      * Ensure our metadata is fresh (if an update is expected, this will block
      * until it has completed).
+     * 确保元数据是最新的，如果正在更新则阻塞
      */
     public void ensureFreshMetadata() {
         if (this.metadata.updateRequested() || this.metadata.timeToNextUpdate(time.milliseconds()) == 0)
@@ -327,10 +335,17 @@ public class ConsumerNetworkClient implements Closeable {
         }
     }
 
+    /**
+     * 清理node节点未发送的消息
+     * @param node
+     * @param e
+     */
     protected void failUnsentRequests(Node node, RuntimeException e) {
         // clear unsent requests to node and fail their corresponding futures
+        // 清理node节点未发生的消息
         List<ClientRequest> unsentRequests = unsent.remove(node);
         if (unsentRequests != null) {
+            // 如果存在未发送的消息则执行对应消息的回调方法
             for (ClientRequest request : unsentRequests) {
                 RequestFutureCompletionHandler handler = (RequestFutureCompletionHandler) request.callback();
                 handler.raise(e);

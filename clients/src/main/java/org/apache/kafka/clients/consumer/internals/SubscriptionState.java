@@ -81,6 +81,7 @@ public class SubscriptionState {
     private boolean needsFetchCommittedOffsets;
 
     /* Default offset reset strategy */
+    // 偏移量重置策略
     private final OffsetResetStrategy defaultResetStrategy;
 
     /* Listener to be invoked when assignment changes */
@@ -294,6 +295,10 @@ public class SubscriptionState {
         return fetchable;
     }
 
+    /**
+     * 判断是否为自动分配分区
+     * @return
+     */
     public boolean partitionsAutoAssigned() {
         return this.subscriptionType == SubscriptionType.AUTO_TOPICS || this.subscriptionType == SubscriptionType.AUTO_PATTERN;
     }

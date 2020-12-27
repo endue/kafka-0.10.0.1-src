@@ -60,6 +60,7 @@ class GroupMetadataManager(val brokerId: Int,
   private val offsetsCache = new Pool[GroupTopicPartition, OffsetAndMetadata]
 
   /* group metadata cache */
+  // 组集合缓存，key是group.id
   private val groupsCache = new Pool[String, GroupMetadata]
 
   /* partitions of consumer groups that are being loaded, its lock should be always called BEFORE offsetExpireLock and the group lock if needed */
@@ -75,6 +76,7 @@ class GroupMetadataManager(val brokerId: Int,
   private val shuttingDown = new AtomicBoolean(false)
 
   /* number of partitions for the consumer metadata topic */
+  // "__consumer_offsets"的分区数量
   private val groupMetadataTopicPartitionCount = getOffsetsTopicPartitionCount
 
   /* Single-thread scheduler to handling offset/group metadata cache loading and unloading */
@@ -119,6 +121,7 @@ class GroupMetadataManager(val brokerId: Int,
 
   /**
    * Add a group or get the group associated with the given groupId if it already exists
+    * 创建组
    */
   def addGroup(group: GroupMetadata): GroupMetadata = {
     val currentGroup = groupsCache.putIfNotExists(group.groupId, group)
@@ -617,7 +620,8 @@ class GroupMetadataManager(val brokerId: Int,
   /**
    * Gets the partition count of the offsets topic from ZooKeeper.
    * If the topic does not exist, the configured partition count is returned.
-   */
+    * 从ZooKeeper获取"__consumer_offsets"的分区计数
+    **/
   private def getOffsetsTopicPartitionCount = {
     val topic = TopicConstants.GROUP_METADATA_TOPIC_NAME
     val topicData = zkUtils.getPartitionAssignmentForTopics(Seq(topic))

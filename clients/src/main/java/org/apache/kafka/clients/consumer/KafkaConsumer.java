@@ -501,22 +501,30 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
 
     private static final Logger log = LoggerFactory.getLogger(KafkaConsumer.class);
     private static final long NO_CURRENT_THREAD = -1L;
+    // clientID递增序号
     private static final AtomicInteger CONSUMER_CLIENT_ID_SEQUENCE = new AtomicInteger(1);
     private static final String JMX_PREFIX = "kafka.consumer";
-
+    // 客户端ID
     private final String clientId;
+    // 消费者Coordinator
     private final ConsumerCoordinator coordinator;
+    // key/value序列化组件
     private final Deserializer<K> keyDeserializer;
     private final Deserializer<V> valueDeserializer;
+    // 拉取消息组件
     private final Fetcher<K, V> fetcher;
+    // 拦截器
     private final ConsumerInterceptors<K, V> interceptors;
 
     private final Time time;
+    // 网络通信组件
     private final ConsumerNetworkClient client;
     private final Metrics metrics;
+    // 订阅状态
     private final SubscriptionState subscriptions;
     private final Metadata metadata;
     private final long retryBackoffMs;
+    // 请求等待超时时间，默认40 * 1000,
     private final long requestTimeoutMs;
     private boolean closed = false;
 
@@ -595,14 +603,19 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
                           Deserializer<V> valueDeserializer) {
         try {
             log.debug("Starting the Kafka consumer");
-            this.requestTimeoutMs = config.getInt(ConsumerConfig.REQUEST_TIMEOUT_MS_CONFIG);
-            int sessionTimeOutMs = config.getInt(ConsumerConfig.SESSION_TIMEOUT_MS_CONFIG);
+            // 请求超时时间
+            this.requestTimeoutMs = config.getInt(ConsumerConfig.REQUEST_TIMEOUT_MS_CONFIG);// 默认 40 * 1000,
+            // 回话超时时间
+            int sessionTimeOutMs = config.getInt(ConsumerConfig.SESSION_TIMEOUT_MS_CONFIG);// 默认 30000
+            // fetch等待超时时间500
             int fetchMaxWaitMs = config.getInt(ConsumerConfig.FETCH_MAX_WAIT_MS_CONFIG);
+            // 验证参数
             if (this.requestTimeoutMs <= sessionTimeOutMs || this.requestTimeoutMs <= fetchMaxWaitMs)
                 throw new ConfigException(ConsumerConfig.REQUEST_TIMEOUT_MS_CONFIG + " should be greater than " + ConsumerConfig.SESSION_TIMEOUT_MS_CONFIG + " and " + ConsumerConfig.FETCH_MAX_WAIT_MS_CONFIG);
             this.time = new SystemTime();
-
+            // 获取“client.id”配置
             String clientId = config.getString(ConsumerConfig.CLIENT_ID_CONFIG);
+            // 不存在就生成一个默认的clientId
             if (clientId.length() <= 0)
                 clientId = "consumer-" + CONSUMER_CLIENT_ID_SEQUENCE.getAndIncrement();
             this.clientId = clientId;
@@ -615,13 +628,17 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
                     MetricsReporter.class);
             reporters.add(new JmxReporter(JMX_PREFIX));
             this.metrics = new Metrics(metricConfig, reporters, time);
+            // 消息重试等待时间间隔，默认 100
             this.retryBackoffMs = config.getLong(ConsumerConfig.RETRY_BACKOFF_MS_CONFIG);
             this.metadata = new Metadata(retryBackoffMs, config.getLong(ConsumerConfig.METADATA_MAX_AGE_CONFIG));
+            // 解析“bootstrap.servers”配置
             List<InetSocketAddress> addresses = ClientUtils.parseAndValidateAddresses(config.getList(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG));
             this.metadata.update(Cluster.bootstrap(addresses), 0);
             String metricGrpPrefix = "consumer";
             ChannelBuilder channelBuilder = ClientUtils.createChannelBuilder(config.values());
+            // 网络通信组件
             NetworkClient netClient = new NetworkClient(
+                    // selector
                     new Selector(config.getLong(ConsumerConfig.CONNECTIONS_MAX_IDLE_MS_CONFIG), metrics, time, metricGrpPrefix, channelBuilder),
                     this.metadata,
                     clientId,
@@ -630,8 +647,10 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
                     config.getInt(ConsumerConfig.SEND_BUFFER_CONFIG),
                     config.getInt(ConsumerConfig.RECEIVE_BUFFER_CONFIG),
                     config.getInt(ConsumerConfig.REQUEST_TIMEOUT_MS_CONFIG), time);
+            // 网络通信组件
             this.client = new ConsumerNetworkClient(netClient, metadata, time, retryBackoffMs,
                     config.getInt(ConsumerConfig.REQUEST_TIMEOUT_MS_CONFIG));
+            // 消息重置策略
             OffsetResetStrategy offsetResetStrategy = OffsetResetStrategy.valueOf(config.getString(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG).toUpperCase(Locale.ROOT));
             // 订阅状态
             this.subscriptions = new SubscriptionState(offsetResetStrategy);
@@ -658,8 +677,8 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
                     this.time,
                     retryBackoffMs,
                     new ConsumerCoordinator.DefaultOffsetCommitCallback(),
-                    config.getBoolean(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG),
-                    config.getLong(ConsumerConfig.AUTO_COMMIT_INTERVAL_MS_CONFIG),
+                    config.getBoolean(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG),// 自动提交offset，默认true
+                    config.getLong(ConsumerConfig.AUTO_COMMIT_INTERVAL_MS_CONFIG),// 自动提交offset频率，默认5000
                     this.interceptors,
                     config.getBoolean(ConsumerConfig.EXCLUDE_INTERNAL_TOPICS_CONFIG));
             if (keyDeserializer == null) {
@@ -940,7 +959,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
             long start = time.milliseconds();
             long remaining = timeout;
             do {
-                // 拉取分区对应的消息
+                // 拉取分区对应的消息记录
                 Map<TopicPartition, List<ConsumerRecord<K, V>>> records = pollOnce(remaining);
                 if (!records.isEmpty()) {
                     // before returning the fetched records, we can send off the next round of fetches
@@ -950,6 +969,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
                     // NOTE: since the consumed position has already been updated, we must not allow
                     // wakeups or any other errors to be triggered prior to returning the fetched records.
                     // Additionally, pollNoWakeup does not allow automatic commits to get triggered.
+                    // 发送fetch请求
                     fetcher.sendFetches();
                     client.pollNoWakeup();
 
@@ -977,10 +997,14 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
      */
     private Map<TopicPartition, List<ConsumerRecord<K, V>>> pollOnce(long timeout) {
         // TODO: Sub-requests should take into account the poll timeout (KAFKA-1894)
+        // 确保broker集群中有可用的Coordinator并获取一个Coordinator
+        // 然后与Coordinator建立连接，接下来就要申请加入组
         coordinator.ensureCoordinatorReady();
 
         // ensure we have partitions assigned if we expect to
+        // 判断订阅状态是否为自动分区
         if (subscriptions.partitionsAutoAssigned())
+            // 确保获得了可用的分区
             coordinator.ensurePartitionAssignment();
 
         // fetch positions if we have partitions we're subscribed to that we

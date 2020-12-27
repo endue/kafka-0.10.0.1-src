@@ -66,10 +66,14 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
     private final List<PartitionAssignor> assignors;
     private final Metadata metadata;
     private final ConsumerCoordinatorMetrics sensors;
+    // 订阅状态
     private final SubscriptionState subscriptions;
     private final OffsetCommitCallback defaultOffsetCommitCallback;
+    // 自动提交offset，默认true
     private final boolean autoCommitEnabled;
+    // 自动提交task，默认5000一次
     private final AutoCommitTask autoCommitTask;
+    // 连接器
     private final ConsumerInterceptors<?, ?> interceptors;
     private final boolean excludeInternalTopics;
 
@@ -91,8 +95,8 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
                                Time time,
                                long retryBackoffMs,
                                OffsetCommitCallback defaultOffsetCommitCallback,
-                               boolean autoCommitEnabled,
-                               long autoCommitIntervalMs,
+                               boolean autoCommitEnabled,// 自动提交offset，默认true
+                               long autoCommitIntervalMs,// 自动提交offset频率，默认5000
                                ConsumerInterceptors<?, ?> interceptors,
                                boolean excludeInternalTopics) {
         super(client,
@@ -217,6 +221,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
         subscriptions.needRefreshCommits();
 
         // update partition assignment
+        // 更新获取的分区
         subscriptions.assignFromSubscribed(assignment.partitions());
 
         // give the assignor a chance to update internal state based on the received assignment
@@ -240,15 +245,24 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
         }
     }
 
+    /**
+     * 执行分配
+     * @param leaderId The id of the leader (which is this member)
+     * @param assignmentStrategy 分配策略
+     * @param allSubscriptions 组中所有成员的元数据
+     * @return
+     */
     @Override
     protected Map<String, ByteBuffer> performAssignment(String leaderId,
                                                         String assignmentStrategy,
                                                         Map<String, ByteBuffer> allSubscriptions) {
+        // 获取分配策略
         PartitionAssignor assignor = lookupAssignor(assignmentStrategy);
         if (assignor == null)
             throw new IllegalStateException("Coordinator selected invalid assignment protocol: " + assignmentStrategy);
-
+        // 获取定义的所有topic
         Set<String> allSubscribedTopics = new HashSet<>();
+        // 获取成员和对应定义的topic
         Map<String, Subscription> subscriptions = new HashMap<>();
         for (Map.Entry<String, ByteBuffer> subscriptionEntry : allSubscriptions.entrySet()) {
             Subscription subscription = ConsumerProtocol.deserializeSubscription(subscriptionEntry.getValue());
@@ -268,7 +282,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
 
         log.debug("Performing assignment for group {} using strategy {} with subscriptions {}",
                 groupId, assignor.name(), subscriptions);
-
+        // 对定义的topic进行分区分配
         Map<String, Assignment> assignment = assignor.assign(metadata.fetch(), subscriptions);
 
         log.debug("Finished assignment for group {}: {}", groupId, assignment);
@@ -282,6 +296,11 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
         return groupAssignment;
     }
 
+    /**
+     *
+     * @param generation The previous generation or -1 if there was none
+     * @param memberId The identifier of this member in the previous group or "" if there was none
+     */
     @Override
     protected void onJoinPrepare(int generation, String memberId) {
         // commit offsets prior to rebalance if auto-commit enabled
@@ -351,6 +370,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
 
     /**
      * Ensure that we have a valid partition assignment from the coordinator.
+     * 获得有效分区
      */
     public void ensurePartitionAssignment() {
         if (subscriptions.partitionsAutoAssigned()) {
@@ -360,9 +380,10 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
             // track of the fact that we need to rebalance again to reflect the change to the topic subscription. Without
             // ensuring that the metadata is fresh, any metadata update that changes the topic subscriptions and arrives with a
             // rebalance in progress will essentially be ignored. See KAFKA-3949 for the complete description of the problem.
+            // 确保元数据是最新的
             if (subscriptions.hasPatternSubscription())
                 client.ensureFreshMetadata();
-
+            // 确保group是可用的
             ensureActiveGroup();
         }
     }

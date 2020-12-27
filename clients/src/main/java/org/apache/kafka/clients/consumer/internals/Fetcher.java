@@ -123,8 +123,10 @@ public class Fetcher<K, V> {
     /**
      * Set-up a fetch request for any node that we have assigned partitions for which doesn't already have
      * an in-flight fetch or pending fetch data.
+     * 发送fetch请求
      */
     public void sendFetches() {
+        //
         for (Map.Entry<Node, FetchRequest> fetchEntry: createFetchRequests().entrySet()) {
             final FetchRequest request = fetchEntry.getValue();
             client.send(fetchEntry.getKey(), ApiKeys.FETCH, request)
@@ -680,6 +682,7 @@ public class Fetcher<K, V> {
         }
     }
 
+    // 每次fetch操作生成的对象
     private static class CompletedFetch {
         private final TopicPartition partition;
         private final long fetchedOffset;

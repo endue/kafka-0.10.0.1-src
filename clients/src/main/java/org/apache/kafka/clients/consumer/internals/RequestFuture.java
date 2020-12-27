@@ -111,6 +111,7 @@ public class RequestFuture<T> {
      * Raise an exception. The request will be marked as failed, and the caller can either
      * handle the exception or throw it.
      * @param e corresponding exception to be passed to caller
+     * 引发异常然后标记任务完成，
      */
     public void raise(RuntimeException e) {
         if (isDone)
