@@ -117,7 +117,9 @@ public abstract class AbstractCoordinator implements Closeable {
         this.groupId = groupId;
         this.coordinator = null;
         this.sessionTimeoutMs = sessionTimeoutMs;
+        // 初始化心跳任务
         this.heartbeat = new Heartbeat(this.sessionTimeoutMs, heartbeatIntervalMs, time.milliseconds());
+        // 创建心跳任务
         this.heartbeatTask = new HeartbeatTask();
         this.sensors = new GroupCoordinatorMetrics(metrics, metricGrpPrefix);
         this.retryBackoffMs = retryBackoffMs;
@@ -265,6 +267,9 @@ public abstract class AbstractCoordinator implements Closeable {
         }
     }
 
+    /**
+     * 心跳任务
+     */
     private class HeartbeatTask implements DelayedTask {
 
         private boolean requestInFlight = false;
@@ -533,7 +538,9 @@ public abstract class AbstractCoordinator implements Closeable {
                 client.tryConnect(coordinator);
 
                 // start sending heartbeats only if we have a valid generation
+                // 判断是否为有效的"代"
                 if (generation > 0)
+                    // 重置心跳任务
                     heartbeatTask.reset();
                 future.complete(null);
             } else if (error == Errors.GROUP_AUTHORIZATION_FAILED) {

@@ -459,6 +459,9 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
         }
     }
 
+    /**
+     * 自动提交offset延迟任务
+     */
     private class AutoCommitTask implements DelayedTask {
         private final long interval;
 
