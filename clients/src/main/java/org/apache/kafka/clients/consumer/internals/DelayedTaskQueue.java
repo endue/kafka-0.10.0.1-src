@@ -41,6 +41,7 @@ public class DelayedTaskQueue {
      * Remove a task from the queue if it is present
      * @param task the task to be removed
      * @returns true if a task was removed as a result of this call
+     * 删除所有task类型的任务
      */
     public boolean remove(DelayedTask task) {
         boolean wasRemoved = false;
@@ -71,16 +72,23 @@ public class DelayedTaskQueue {
      * Run any ready tasks.
      *
      * @param now the current time
+     * 执行已到期的任务
      */
     public void poll(long now) {
+        // 队列不为空 && 有到期的任务
         while (!tasks.isEmpty() && tasks.peek().timeout <= now) {
+            // 获取任务
             Entry entry = tasks.poll();
+            // 执行
             entry.task.run(now);
         }
     }
 
+    // 延迟队列中记录的一个个包装延迟任务的对象
     private static class Entry implements Comparable<Entry> {
+        // 延迟任务
         DelayedTask task;
+        // 超时时间
         long timeout;
 
         public Entry(DelayedTask task, long timeout) {

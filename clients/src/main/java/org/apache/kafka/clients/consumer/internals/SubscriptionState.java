@@ -26,17 +26,31 @@ import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
- * A class for tracking the topics, partitions, and offsets for the consumer. A partition
- * is "assigned" either directly with {@link #assignFromUser(Collection)} (manual assignment)
+ * A class for tracking the topics, partitions, and offsets for the consumer.
+ * 一个跟踪记录消费者的主题、分区以及偏移量的类
+ *
+ * A partition is "assigned" either directly with {@link #assignFromUser(Collection)} (manual assignment)
  * or with {@link #assignFromSubscribed(Collection)} (automatic assignment from subscription).
+ * 一个分区可以通过“assignFromUser(Collection)”的方式手动分配，也可用通过assignFromSubscribed(Collection)的方式自动分配
  *
  * Once assigned, the partition is not considered "fetchable" until its initial position has
- * been set with {@link #seek(TopicPartition, long)}. Fetchable partitions track a fetch
- * position which is used to set the offset of the next fetch, and a consumed position
- * which is the last offset that has been returned to the user. You can suspend fetching
- * from a partition through {@link #pause(TopicPartition)} without affecting the fetched/consumed
- * offsets. The partition will remain unfetchable until the {@link #resume(TopicPartition)} is
- * used. You can also query the pause state independently with {@link #isPaused(TopicPartition)}.
+ * been set with {@link #seek(TopicPartition, long)}.
+ * 分区被分配后，在调用“seek(TopicPartition, long)”方法初始化它的拉取位置之前，会一直被认为是不可读的
+ *
+ * Fetchable partitions track a fetch position which is used to set the offset of the next fetch,
+ * and a consumed position which is the last offset that has been returned to the user.
+ * 可读的分区，会有一个读取位置，该位置用于记录下一个读取位置的偏移量，
+ * 还有一个被消耗的位置，用来记录当前consumer消耗的位置，也就是返回给用户的最后一个偏移量
+ *
+ * You can suspend fetching from a partition through {@link #pause(TopicPartition)} without
+ * affecting the fetched/consumed offsets.
+ * 可以通过“pause(TopicPartition)”方法暂停从某个分区的抓取，这样不会影响所获取的、消耗的偏移量
+ *
+ * The partition will remain unfetchable until the {@link #resume(TopicPartition)} is used.
+ * 该分区会一直暂停从某个分区的抓取，直到调用“resume(TopicPartition)”方法
+ *
+ * You can also query the pause state independently with {@link #isPaused(TopicPartition)}.
+ * 也可以查看某个分区抓取的暂停状态是否为true或false,通过“isPaused(TopicPartition)”
  *
  * Note that pause state as well as fetch/consumed positions are not preserved when partition
  * assignment is changed whether directly by the user or through a group rebalance.
@@ -52,22 +66,22 @@ public class SubscriptionState {
     };
 
     /* the type of subscription */
-    // 订阅类型
+    // 记录订阅类型
     private SubscriptionType subscriptionType;
 
     /* the pattern user has requested */
     private Pattern subscribedPattern;
 
     /* the list of topics the user has requested */
-    // 用户订阅的主题
+    // 记录用户订阅的主题
     private final Set<String> subscription;
 
     /* the list of topics the group has subscribed to (set only for the leader on join group completion) */
-    // 消费者订阅的主题
+    // 记录消费者所在组订阅的主题
     private final Set<String> groupSubscription;
 
     /* the list of partitions the user has requested */
-    // 用户分配的分区
+    // 记录用户分配的分区
     private final Set<TopicPartition> userAssignment;
 
     /* the list of partitions currently assigned */
@@ -75,9 +89,11 @@ public class SubscriptionState {
     private final Map<TopicPartition, TopicPartitionState> assignment;
 
     /* do we need to request a partition assignment from the coordinator? */
+    // 记录当前consumer是否需要获取分区
     private boolean needsPartitionAssignment;
 
     /* do we need to request the latest committed offsets from the coordinator? */
+    //
     private boolean needsFetchCommittedOffsets;
 
     /* Default offset reset strategy */
@@ -85,6 +101,7 @@ public class SubscriptionState {
     private final OffsetResetStrategy defaultResetStrategy;
 
     /* Listener to be invoked when assignment changes */
+    // 分区重分配后的回调监听
     private ConsumerRebalanceListener listener;
 
     private static final String SUBSCRIPTION_EXCEPTION_MESSAGE =
@@ -115,10 +132,16 @@ public class SubscriptionState {
         this.subscriptionType = SubscriptionType.NONE;
     }
 
+    /**
+     * 订阅主题
+     * @param topics 主题集合
+     * @param listener 重分配时的回调
+     */
     public void subscribe(Collection<String> topics, ConsumerRebalanceListener listener) {
+        // 这里订阅主题一定要有listener
         if (listener == null)
             throw new IllegalArgumentException("RebalanceListener cannot be null");
-
+        // 设置订阅类型
         setSubscriptionType(SubscriptionType.AUTO_TOPICS);
 
         this.listener = listener;
@@ -126,14 +149,21 @@ public class SubscriptionState {
         changeSubscription(topics);
     }
 
+    /**
+     * 修改订阅的主题
+     * @param topicsToSubscribe
+     */
     public void changeSubscription(Collection<String> topicsToSubscribe) {
         if (!this.subscription.equals(new HashSet<>(topicsToSubscribe))) {
+            // 清空用户订阅的所有主题
             this.subscription.clear();
+            // 添加新主题到用户订阅的主题和消费者组订阅的主题
             this.subscription.addAll(topicsToSubscribe);
             this.groupSubscription.addAll(topicsToSubscribe);
             this.needsPartitionAssignment = true;
 
             // Remove any assigned partitions which are no longer subscribed to
+            // 删除不再订阅的主题所已分配的分区
             for (Iterator<TopicPartition> it = assignment.keySet().iterator(); it.hasNext(); ) {
                 TopicPartition tp = it.next();
                 if (!subscription.contains(tp.topic()))
@@ -146,6 +176,7 @@ public class SubscriptionState {
      * Add topics to the current group subscription. This is used by the group leader to ensure
      * that it receives metadata updates for all topics that the group is interested in.
      * @param topics The topics to add to the group subscription
+     *  添加消费者的主题，确保group leader能接收到所在组感兴趣的所有的topic的元数据
      */
     public void groupSubscribe(Collection<String> topics) {
         if (this.subscriptionType == SubscriptionType.USER_ASSIGNED)
@@ -207,6 +238,7 @@ public class SubscriptionState {
         return this.subscriptionType == SubscriptionType.AUTO_PATTERN;
     }
 
+    // 取消订阅
     public void unsubscribe() {
         this.subscription.clear();
         this.userAssignment.clear();

@@ -85,6 +85,7 @@ public class ConsumerNetworkClient implements Closeable {
      * Unschedule a task. This will remove all instances of the task from the task queue.
      * This is a no-op if the task is not scheduled.
      * @param task The task to be unscheduled.
+     * 删除DelayedTask的所有实例
      */
     public void unschedule(DelayedTask task) {
         delayedTasks.remove(task);

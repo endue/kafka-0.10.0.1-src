@@ -520,18 +520,21 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
     // 网络通信组件
     private final ConsumerNetworkClient client;
     private final Metrics metrics;
-    // 订阅状态
+    // 订阅相关信息
     private final SubscriptionState subscriptions;
     private final Metadata metadata;
     private final long retryBackoffMs;
     // 请求等待超时时间，默认40 * 1000,
     private final long requestTimeoutMs;
+    // consumer是否关闭
     private boolean closed = false;
 
     // currentThread holds the threadId of the current thread accessing KafkaConsumer
     // and is used to prevent multi-threaded access
+    // 标记当前访问kafkaConsumer的线程ID
     private final AtomicLong currentThread = new AtomicLong(NO_CURRENT_THREAD);
     // refcount is used to allow reentrant access by the thread who has acquired currentThread
+    // refcount用于允许获得currentThread的线程重入访问
     private final AtomicInteger refcount = new AtomicInteger(0);
 
     /**
@@ -818,12 +821,16 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
     public void subscribe(Collection<String> topics, ConsumerRebalanceListener listener) {
         acquire();
         try {
+            // topic为空
             if (topics.isEmpty()) {
                 // treat subscribing to empty topic list as the same as unsubscribing
+                // 取消订阅
                 this.unsubscribe();
             } else {
                 log.debug("Subscribed to topic(s): {}", Utils.join(topics, ", "));
+                // 定义主题
                 this.subscriptions.subscribe(topics, listener);
+                // 注意这里会清空之前订阅的主题
                 metadata.setTopics(subscriptions.groupSubscription());
             }
         } finally {
@@ -848,6 +855,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
      *
      * @param topics The list of topics to subscribe to
      */
+    // 订阅主题
     @Override
     public void subscribe(Collection<String> topics) {
         subscribe(topics, new NoOpConsumerRebalanceListener());
@@ -885,6 +893,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
     /**
      * Unsubscribe from topics currently subscribed with {@link #subscribe(Collection)}. This
      * also clears any partitions directly assigned through {@link #assign(Collection)}.
+     * 取消订阅
      */
     public void unsubscribe() {
         acquire();
@@ -1441,6 +1450,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
 
     /*
      * Check that the consumer hasn't been closed.
+     * 检查消费者还没有被关闭
      */
     private void ensureNotClosed() {
         if (this.closed)
@@ -1453,6 +1463,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
      * supported).
      * @throws IllegalStateException if the consumer has been closed
      * @throws ConcurrentModificationException if another thread already has the lock
+     * 获取kafkaConsumer的锁，防止多线程并入
      */
     private void acquire() {
         ensureNotClosed();
@@ -1464,6 +1475,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
 
     /**
      * Release the light lock protecting the consumer from multi-threaded access.
+     * 释放kafkaConsumer的锁
      */
     private void release() {
         if (refcount.decrementAndGet() == 0)

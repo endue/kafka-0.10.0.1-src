@@ -235,6 +235,7 @@ public final class Metadata {
     /**
      * Set state to indicate if metadata for all topics in Kafka cluster is required or not.
      * @param needMetadataForAllTopics boolean indicating need for metadata of all topics in cluster.
+     * 设置state来指示是否需要Kafka集群中所有主题的元数据
      */
     public synchronized void needMetadataForAllTopics(boolean needMetadataForAllTopics) {
         this.needMetadataForAllTopics = needMetadataForAllTopics;

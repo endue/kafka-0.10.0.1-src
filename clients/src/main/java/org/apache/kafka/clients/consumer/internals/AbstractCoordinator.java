@@ -81,8 +81,9 @@ import java.util.concurrent.TimeUnit;
 public abstract class AbstractCoordinator implements Closeable {
 
     private static final Logger log = LoggerFactory.getLogger(AbstractCoordinator.class);
-
+    // 心跳类
     private final Heartbeat heartbeat;
+    // 心跳任务
     private final HeartbeatTask heartbeatTask;
     private final int sessionTimeoutMs;
     private final GroupCoordinatorMetrics sensors;
@@ -593,6 +594,7 @@ public abstract class AbstractCoordinator implements Closeable {
 
     /**
      * Leave the current group and reset local generation/memberId.
+     * 离开当前所处的group，重置本地generation/memberId
      */
     public void maybeLeaveGroup() {
         client.unschedule(heartbeatTask);
