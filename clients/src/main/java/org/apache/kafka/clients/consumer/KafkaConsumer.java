@@ -657,7 +657,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
             OffsetResetStrategy offsetResetStrategy = OffsetResetStrategy.valueOf(config.getString(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG).toUpperCase(Locale.ROOT));
             // 订阅状态
             this.subscriptions = new SubscriptionState(offsetResetStrategy);
-            // 分区分配
+            // 分区分配策略
             List<PartitionAssignor> assignors = config.getConfiguredInstances(
                     ConsumerConfig.PARTITION_ASSIGNMENT_STRATEGY_CONFIG,// 分区策略
                     PartitionAssignor.class);
@@ -1001,7 +1001,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
     /**
      * Do one round of polling. In addition to checking for new data, this does any needed
      * heart-beating, auto-commits, and offset updates.
-     * @param timeout The maximum time to block in the underlying poll
+     * @param timeout The maximum time to block in the unpollderlying
      * @return The fetched records (may be empty)
      */
     private Map<TopicPartition, List<ConsumerRecord<K, V>>> pollOnce(long timeout) {
@@ -1018,22 +1018,26 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
 
         // fetch positions if we have partitions we're subscribed to that we
         // don't know the offset for
+        // 是否有分区不知道拉取消息的偏移量
         if (!subscriptions.hasAllFetchPositions())
+            // 更新偏移量
             updateFetchPositions(this.subscriptions.missingFetchPositions());
 
         long now = time.milliseconds();
 
         // execute delayed tasks (e.g. autocommits and heartbeats) prior to fetching records
+        // 在获取记录之前执行延迟的任务(例如自动提交和心跳)
         client.executeDelayedTasks(now);
 
         // init any new fetches (won't resend pending fetches)
+        // 获取每个分区获取的消息记录
         Map<TopicPartition, List<ConsumerRecord<K, V>>> records = fetcher.fetchedRecords();
 
         // if data is available already, e.g. from a previous network client poll() call to commit,
         // then just return it immediately
         if (!records.isEmpty())
             return records;
-
+        // 发送fetch请求
         fetcher.sendFetches();
         client.poll(timeout, now);
         return fetcher.fetchedRecords();
@@ -1442,9 +1446,11 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
      */
     private void updateFetchPositions(Set<TopicPartition> partitions) {
         // refresh commits for all assigned partitions
+        // 提交当前coordinator已消费消息的偏移量
         coordinator.refreshCommittedOffsetsIfNeeded();
 
         // then do any offset lookups in case some positions are not known
+        // 重置拉取消息的偏移量
         fetcher.updateFetchPositions(partitions);
     }
 

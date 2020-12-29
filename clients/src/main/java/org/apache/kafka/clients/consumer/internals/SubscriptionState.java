@@ -61,6 +61,7 @@ import java.util.regex.Pattern;
  */
 public class SubscriptionState {
 
+    // 定义类型
     private enum SubscriptionType {
         NONE, AUTO_TOPICS, AUTO_PATTERN, USER_ASSIGNED
     };
@@ -380,6 +381,10 @@ public class SubscriptionState {
         return true;
     }
 
+    /**
+     * 获取不知道拉取消息偏移量的分区
+     * @return
+     */
     public Set<TopicPartition> missingFetchPositions() {
         Set<TopicPartition> missing = new HashSet<>();
         for (Map.Entry<TopicPartition, TopicPartitionState> entry : assignment.entrySet())

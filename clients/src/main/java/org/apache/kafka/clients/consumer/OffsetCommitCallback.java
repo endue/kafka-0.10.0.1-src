@@ -19,6 +19,7 @@ import java.util.Map;
 
 /**
  * A callback interface that the user can implement to trigger custom actions when a commit request completes. The callback
+ * 用户可以实现该接口自定义一个回调类
  * may be executed in any thread calling {@link Consumer#poll(long) poll()}.
  */
 public interface OffsetCommitCallback {
@@ -26,6 +27,7 @@ public interface OffsetCommitCallback {
     /**
      * A callback method the user can implement to provide asynchronous handling of commit request completion.
      * This method will be called when the commit request sent to the server has been acknowledged.
+     * 当发送到服务器的提交请求得到确认后，将调用此方法
      *
      * @param offsets A map of the offsets and associated metadata that this callback applies to
      * @param exception The exception thrown during processing of the request, or null if the commit completed successfully

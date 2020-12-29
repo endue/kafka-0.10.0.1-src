@@ -85,17 +85,20 @@ public abstract class AbstractCoordinator implements Closeable {
     private final Heartbeat heartbeat;
     // 心跳任务
     private final HeartbeatTask heartbeatTask;
+    // 会话超时时间，超过这个时间没有心跳没有数据交换就关闭连接
     private final int sessionTimeoutMs;
     private final GroupCoordinatorMetrics sensors;
     protected final String groupId;
     protected final ConsumerNetworkClient client;
     protected final Time time;
+    // GroupCoordinator重试阻塞时间
     protected final long retryBackoffMs;
 
     private boolean needsJoinPrepare = true;
     private boolean rejoinNeeded = true;
     // GroupCoordinator
     protected Node coordinator;
+    // 成员ID，默认UNKNOWN_MEMBER_ID
     protected String memberId;
     protected String protocol;
     protected int generation;
@@ -106,7 +109,7 @@ public abstract class AbstractCoordinator implements Closeable {
     public AbstractCoordinator(ConsumerNetworkClient client,
                                String groupId,
                                int sessionTimeoutMs,
-                               int heartbeatIntervalMs,
+                               int heartbeatIntervalMs,// 心跳间隔时间
                                Metrics metrics,
                                String metricGrpPrefix,
                                Time time,
@@ -181,19 +184,26 @@ public abstract class AbstractCoordinator implements Closeable {
     public void ensureCoordinatorReady() {
         // while循环直到Coordinator可用
         while (coordinatorUnknown()) {
-            // 发送消息到配置的“bootstrap.servers”上的任一节点
+            // 发送“GROUP_COORDINATOR”消息到配置的“bootstrap.servers”上的任一节点
+            // 返回一个异步请求结果
             RequestFuture<Void> future = sendGroupCoordinatorRequest();
-            // 发送请求
+            // 阻塞直到future执行完毕
             client.poll(future);
+            // 判断异步请求结果是否成功
 
+            // 失败
             if (future.failed()) {
+                // 判断请求是否可以重试
                 if (future.isRetriable())
+                    // 等待元数据更新
                     client.awaitMetadataUpdate();
                 else
                     throw future.exception();
+            // coordinator不为null && 建立连接失败
             } else if (coordinator != null && client.connectionFailed(coordinator)) {
                 // we found the coordinator, but the connection has failed, so mark
                 // it dead and backoff before retrying discovery
+                // 清空coordinator之后睡眠等待重试
                 coordinatorDead();
                 time.sleep(retryBackoffMs);
             }
@@ -214,7 +224,7 @@ public abstract class AbstractCoordinator implements Closeable {
      * 确保group是可用的
      */
     public void ensureActiveGroup() {
-        //
+        // 是否需要重写加入组
         if (!needRejoin())
             return;
 
@@ -229,6 +239,7 @@ public abstract class AbstractCoordinator implements Closeable {
 
             // ensure that there are no pending requests to the coordinator. This is important
             // in particular to avoid resending a pending JoinGroup request.
+            // 如果对当前coordinator有未发送的消息则等待消息发送完毕
             if (client.pendingRequestCount(this.coordinator) > 0) {
                 client.awaitPendingRequests(this.coordinator);
                 continue;
@@ -503,6 +514,7 @@ public abstract class AbstractCoordinator implements Closeable {
                     .compose(new RequestFutureAdapter<ClientResponse, Void>() {
                         @Override
                         public void onSuccess(ClientResponse response, RequestFuture<Void> future) {
+                            // 处理响应
                             handleGroupMetadataResponse(response, future);
                         }
                     });
@@ -572,7 +584,7 @@ public abstract class AbstractCoordinator implements Closeable {
 
     /**
      * Mark the current coordinator as dead.
-     * 清空GroupCoordinator
+     * Coordinator已失效，清空GroupCoordinator
      */
     protected void coordinatorDead() {
         if (this.coordinator != null) {

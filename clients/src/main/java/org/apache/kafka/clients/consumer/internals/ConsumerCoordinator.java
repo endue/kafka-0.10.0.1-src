@@ -62,12 +62,13 @@ import java.util.Set;
 public final class ConsumerCoordinator extends AbstractCoordinator {
 
     private static final Logger log = LoggerFactory.getLogger(ConsumerCoordinator.class);
-
+    // 分区策略
     private final List<PartitionAssignor> assignors;
     private final Metadata metadata;
     private final ConsumerCoordinatorMetrics sensors;
     // 订阅状态
     private final SubscriptionState subscriptions;
+    //
     private final OffsetCommitCallback defaultOffsetCommitCallback;
     // 自动提交offset，默认true
     private final boolean autoCommitEnabled;
@@ -84,9 +85,9 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
      * Initialize the coordination manager.
      */
     public ConsumerCoordinator(ConsumerNetworkClient client,
-                               String groupId,
+                               String groupId,// groupID
                                int sessionTimeoutMs,
-                               int heartbeatIntervalMs,
+                               int heartbeatIntervalMs,// 心跳间隔时间
                                List<PartitionAssignor> assignors,
                                Metadata metadata,
                                SubscriptionState subscriptions,
@@ -331,6 +332,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
 
     /**
      * Refresh the committed offsets for provided partitions.
+     * 是否需要提交消费消息的偏移量
      */
     public void refreshCommittedOffsetsIfNeeded() {
         if (subscriptions.refreshCommitsNeeded()) {

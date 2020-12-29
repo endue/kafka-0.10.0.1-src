@@ -65,9 +65,11 @@ public class NetworkClient implements KafkaClient {
     private final InFlightRequests inFlightRequests;
 
     /* the socket send buffer size in bytes */
+    // 发送缓冲区
     private final int socketSendBuffer;
 
     /* the socket receive size buffer in bytes */
+    // 接收缓冲器
     private final int socketReceiveBuffer;
 
     /* the client id used to identify this client in requests to the server */
@@ -77,6 +79,7 @@ public class NetworkClient implements KafkaClient {
     private int correlation;
 
     /* max time in ms for the producer to wait for acknowledgement from server*/
+    // 请求超时时间
     private final int requestTimeoutMs;
 
     private final Time time;

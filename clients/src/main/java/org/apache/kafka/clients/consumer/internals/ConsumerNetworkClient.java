@@ -47,12 +47,14 @@ public class ConsumerNetworkClient implements Closeable {
     // 通信组件
     private final KafkaClient client;
     private final AtomicBoolean wakeup = new AtomicBoolean(false);
+    // 调度任务
     private final DelayedTaskQueue delayedTasks = new DelayedTaskQueue();
     // 记录node和对应要发送的消息
     private final Map<Node, List<ClientRequest>> unsent = new HashMap<>();
     private final Metadata metadata;
     private final Time time;
     private final long retryBackoffMs;
+    // 消息过期时间：request.createdTimeMs() < now - unsentExpiryMs
     private final long unsentExpiryMs;
 
     // this count is only accessed from the consumer's main thread
@@ -225,28 +227,34 @@ public class ConsumerNetworkClient implements Closeable {
 
     private void poll(long timeout, long now, boolean executeDelayedTasks) {
         // send all the requests we can send now
+        // 发送消息只是缓存到对应kafkachannel中
         trySend(now);
 
         // ensure we don't poll any longer than the deadline for
         // the next scheduled task
         timeout = Math.min(timeout, delayedTasks.nextTimeout(now));
+        // 真正的发送消息以及处理响应
         clientPoll(timeout, now);
         now = time.milliseconds();
 
         // handle any disconnects by failing the active requests. note that disconnects must
         // be checked immediately following poll since any subsequent call to client.ready()
         // will reset the disconnect status
+        // 处理断开的连接
         checkDisconnects(now);
 
         // execute scheduled tasks
+        // 执行调度任务
         if (executeDelayedTasks)
             delayedTasks.poll(now);
 
         // try again to send requests since buffer space may have been
         // cleared or a connect finished in the poll
+        // 发送消息只是缓存到对应kafkachannel中
         trySend(now);
 
         // fail requests that couldn't be sent if they have expired
+        // 处理过期未发送的消息
         failExpiredRequests(now);
     }
 
@@ -293,19 +301,27 @@ public class ConsumerNetworkClient implements Closeable {
         return total + client.inFlightRequestCount();
     }
 
+    /**
+     * 检查是否与节点断开连接。
+     * 如果已断开连接，对还未发送的请求全部做onComplete处理
+     * @param now
+     */
     private void checkDisconnects(long now) {
         // any disconnects affecting requests that have already been transmitted will be handled
         // by NetworkClient, so we just need to check whether connections for any of the unsent
         // requests have been disconnected; if they have, then we complete the corresponding future
         // and set the disconnect flag in the ClientResponse
+        // 遍历未发送的消息
         Iterator<Map.Entry<Node, List<ClientRequest>>> iterator = unsent.entrySet().iterator();
         while (iterator.hasNext()) {
             Map.Entry<Node, List<ClientRequest>> requestEntry = iterator.next();
             Node node = requestEntry.getKey();
+            // 如果消息发送节点已经断开连接
             if (client.connectionFailed(node)) {
                 // Remove entry before invoking request callback to avoid callbacks handling
                 // coordinator failures traversing the unsent list again.
                 iterator.remove();
+                // 遍历消息执行回调对应handler.onComplete()方法
                 for (ClientRequest request : requestEntry.getValue()) {
                     RequestFutureCompletionHandler handler =
                             (RequestFutureCompletionHandler) request.callback();
@@ -315,6 +331,10 @@ public class ConsumerNetworkClient implements Closeable {
         }
     }
 
+    /**
+     * 处理过期未发送的消息
+     * @param now
+     */
     private void failExpiredRequests(long now) {
         // clear all expired unsent requests and fail their corresponding futures
         Iterator<Map.Entry<Node, List<ClientRequest>>> iterator = unsent.entrySet().iterator();
@@ -354,6 +374,11 @@ public class ConsumerNetworkClient implements Closeable {
         }
     }
 
+    /**
+     * 尝试发送unsent中的消息记录
+     * @param now
+     * @return
+     */
     private boolean trySend(long now) {
         // send any requests that can be sent now
         boolean requestsSent = false;

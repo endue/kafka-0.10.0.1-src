@@ -126,11 +126,12 @@ public class Fetcher<K, V> {
      * 发送fetch请求
      */
     public void sendFetches() {
-        //
+        // 首先调用createFetchRequests创建fetch请求
         for (Map.Entry<Node, FetchRequest> fetchEntry: createFetchRequests().entrySet()) {
             final FetchRequest request = fetchEntry.getValue();
             client.send(fetchEntry.getKey(), ApiKeys.FETCH, request)
                     .addListener(new RequestFutureListener<ClientResponse>() {
+                        // 处理fetch消息响应到completedFetches中
                         @Override
                         public void onSuccess(ClientResponse resp) {
                             FetchResponse response = new FetchResponse(resp.responseBody());
@@ -412,7 +413,7 @@ public class Fetcher<K, V> {
      * Fetch a single offset before the given timestamp for the partition.
      *
      * @param topicPartition The partition that needs fetching offset.
-     * @param timestamp The timestamp for fetching offset.
+     * @param timestamp The timestamp for fetching offset. 用于获取偏移量的时间戳
      * @return A response which can be polled to obtain the corresponding offset.
      */
     private RequestFuture<Long> sendListOffsetRequest(final TopicPartition topicPartition, long timestamp) {

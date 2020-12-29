@@ -512,6 +512,8 @@ class KafkaApis(val requestChannel: RequestChannel,
 
   /**
    * Handle an offset request
+    *
+    * 处理LIST_OFFSETS请求
    */
   def handleOffsetRequest(request: RequestChannel.Request) {
     val correlationId = request.header.correlationId
@@ -530,11 +532,14 @@ class KafkaApis(val requestChannel: RequestChannel,
       val (topicPartition, partitionData) = elem
       try {
         // ensure leader exists
+        // 获取leader
         val localReplica = if (offsetRequest.replicaId != ListOffsetRequest.DEBUGGING_REPLICA_ID)
           replicaManager.getLeaderReplicaIfLocal(topicPartition.topic, topicPartition.partition)
         else
           replicaManager.getReplicaOrException(topicPartition.topic, topicPartition.partition)
+        // 获取偏移量
         val offsets = {
+          // 拉取偏移量
           val allOffsets = fetchOffsets(replicaManager.logManager,
                                         topicPartition,
                                         partitionData.timestamp,
@@ -820,7 +825,7 @@ class KafkaApis(val requestChannel: RequestChannel,
   def handleGroupCoordinatorRequest(request: RequestChannel.Request) {
     val groupCoordinatorRequest = request.body.asInstanceOf[GroupCoordinatorRequest]
     val responseHeader = new ResponseHeader(request.header.correlationId)
-
+    // 验证权限
     if (!authorize(request.session, Describe, new Resource(Group, groupCoordinatorRequest.groupId))) {
       val responseBody = new GroupCoordinatorResponse(Errors.GROUP_AUTHORIZATION_FAILED.code, Node.noNode)
       requestChannel.sendResponse(new RequestChannel.Response(request, new ResponseSend(request.connectionId, responseHeader, responseBody)))
