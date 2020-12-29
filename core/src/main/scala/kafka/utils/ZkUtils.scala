@@ -470,6 +470,13 @@ class ZkUtils(val zkClient: ZkClient,
    * Conditional update the persistent path data, return (true, newVersion) if it succeeds, otherwise (the current
    * version is not the expected version, etc.) return (false, -1). If path doesn't exist, throws ZkNoNodeException
    */
+  /**
+    * 更新持久节点
+    * @param path 路径
+    * @param data 数据
+    * @param expectVersion 期待版本
+    * @return
+    */
   def conditionalUpdatePersistentPathIfExists(path: String, data: String, expectVersion: Int): (Boolean, Int) = {
     try {
       val stat = zkClient.writeDataReturnStat(path, data, expectVersion)
@@ -1024,6 +1031,9 @@ class ZKCheckedEphemeral(path: String,
       }
   }
 
+  /**
+    * 创建临时节点
+    */
   private def createEphemeral() {
     zkHandle.create(path,
                     ZKStringSerializer.serialize(data),

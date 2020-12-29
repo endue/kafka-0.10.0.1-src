@@ -49,10 +49,13 @@ import kafka.common.TopicAndPartition
 class ControllerContext(val zkUtils: ZkUtils,
                         val zkSessionTimeout: Int) {
   var controllerChannelManager: ControllerChannelManager = null
+
   val controllerLock: ReentrantLock = new ReentrantLock()
   var shuttingDownBrokerIds: mutable.Set[Int] = mutable.Set.empty
   val brokerShutdownLock: Object = new Object
+  // 当前epoch，默认0
   var epoch: Int = KafkaController.InitialControllerEpoch - 1
+  // 当前epoch版本，默认0
   var epochZkVersion: Int = KafkaController.InitialControllerEpochZkVersion - 1
   var allTopics: Set[String] = Set.empty
   var partitionReplicaAssignment: mutable.Map[TopicAndPartition, Seq[Int]] = mutable.Map.empty
@@ -158,26 +161,33 @@ object KafkaController extends Logging {
 
 class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerState: BrokerState, time: Time, metrics: Metrics, threadNamePrefix: Option[String] = None) extends Logging with KafkaMetricsGroup {
   this.logIdent = "[Controller " + config.brokerId + "]: "
+  // 当前brokerController的状态
   private var isRunning = true
   private val stateChangeLogger = KafkaController.stateChangeLogger
+  // 实例化上下文
   val controllerContext = new ControllerContext(zkUtils, config.zkSessionTimeoutMs)
+  // 实例化partition状态机
   val partitionStateMachine = new PartitionStateMachine(this)
+  // 实例化replica状态机
   val replicaStateMachine = new ReplicaStateMachine(this)
-  // 选举相关
+  // 初始化ZookeeperLeaderElector对象，
+  // 为ZookeeperLeaderElector设置两个回调方法，onControllerFailover和onControllerResignation
   private val controllerElector = new ZookeeperLeaderElector(controllerContext, ZkUtils.ControllerPath, onControllerFailover,
     onControllerResignation, config.brokerId)
   // have a separate scheduler for the controller to be able to start and stop independently of the
   // kafka server
   private val autoRebalanceScheduler = new KafkaScheduler(1)
+  // topic删除管理器
   var deleteTopicManager: TopicDeletionManager = null
   val offlinePartitionSelector = new OfflinePartitionLeaderSelector(controllerContext, config)
   private val reassignedPartitionLeaderSelector = new ReassignedPartitionLeaderSelector(controllerContext)
   private val preferredReplicaPartitionLeaderSelector = new PreferredReplicaPartitionLeaderSelector(controllerContext)
   private val controlledShutdownPartitionLeaderSelector = new ControlledShutdownLeaderSelector(controllerContext)
   private val brokerRequestBatch = new ControllerBrokerRequestBatch(this)
-
+  // 重分配监听器
   private val partitionReassignedListener = new PartitionsReassignedListener(this)
   private val preferredReplicaElectionListener = new PreferredReplicaElectionListener(this)
+  // ISR列表变更通知器
   private val isrChangeNotificationListener = new IsrChangeNotificationListener(this)
 
   newGauge(
@@ -307,7 +317,10 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
 
   /**
    * This callback is invoked by the zookeeper leader elector on electing the current broker as the new controller.
+    * 这个回调是由zookeeper leader elector在选举当前broker为新的controller时调用的
+    * 当成为新的leader后，要初始化leader所依赖的功能模块
    * It does the following things on the become-controller state change -
+    * 当controller节点状态发生变化时，当前controller会执行如下操作
    * 1. Register controller epoch changed listener
    * 2. Increments the controller epoch
    * 3. Initializes the controller's context object that holds cache objects for current topics, live brokers and
@@ -322,21 +335,32 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
     if(isRunning) {
       info("Broker %d starting become controller state transition".format(config.brokerId))
       //read controller epoch from zk
+      // 读取epoch相关信息并更新
       readControllerEpochFromZookeeper()
       // increment the controller epoch
+      // 在“/controller_epoch”节点增加epoch，如果不存在该节点，那么是第一次创建此时初始化
       incrementControllerEpoch(zkUtils.zkClient)
       // before reading source of truth from zookeeper, register the listeners to get broker/topic callbacks
+      // 在“/admin/reassign_partitions”节点注册partitionReassignedListener监听器
       registerReassignedPartitionsListener()
+      // 在“/isr_change_notification”节点注册isrChangeNotificationListener监听器
       registerIsrChangeNotificationListener()
+      // 在“/admin/preferred_replica_election”节点注册preferredReplicaElectionListener监听器
       registerPreferredReplicaElectionListener()
+      // 在“/brokers/topics”节点注册topicChangeListener监听器
+      // 如果配置“delete.topic.enable”为true，则在“/admin/delete_topics”节点注册deleteTopicsListener监听器
       partitionStateMachine.registerListeners()
+      // 在“/brokers/ids”节点注册brokerChangeListener监听器
       replicaStateMachine.registerListeners()
+      // 初始化controllerContext
       initializeControllerContext()
+
       replicaStateMachine.startup()
       partitionStateMachine.startup()
       // register the partition change listeners for all existing topics on failover
       controllerContext.allTopics.foreach(topic => partitionStateMachine.registerPartitionChangeListener(topic))
       info("Broker %d is ready to serve as the new controller with epoch %d".format(config.brokerId, epoch))
+
       brokerState.newState(RunningAsController)
       maybeTriggerPartitionReassignment()
       maybeTriggerPreferredReplicaElection()
@@ -348,6 +372,7 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
         autoRebalanceScheduler.schedule("partition-rebalance-thread", checkAndTriggerPartitionRebalance,
           5, config.leaderImbalanceCheckIntervalSeconds.toLong, TimeUnit.SECONDS)
       }
+      // 启动topic删除管理器
       deleteTopicManager.start()
     }
     else
@@ -357,6 +382,8 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
   /**
    * This callback is invoked by the zookeeper leader elector when the current broker resigns as the controller. This is
    * required to clean up internal controller data structures
+    * 当当前controller退出时，zookeeper leader elector会调用这个回调函数
+    * 当leader退位后，要关闭leader所依赖的功能模块
    */
   def onControllerResignation() {
     debug("Controller resigning, broker id %d".format(config.brokerId))
@@ -680,9 +707,10 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
   def startup() = {
     inLock(controllerContext.controllerLock) {
       info("Controller starting up")
-      // 注册监听器
+      // 注册Session过期监听器
       registerSessionExpirationListener()
       isRunning = true
+      // 尝试选举leader
       controllerElector.startup
       info("Controller startup complete")
     }
@@ -704,13 +732,20 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
     controllerContext.controllerChannelManager.sendRequest(brokerId, apiKey, apiVersion, request, callback)
   }
 
+  /**
+    * 增加epoch
+    * @param zkClient
+    */
   def incrementControllerEpoch(zkClient: ZkClient) = {
     try {
+      // 增加epoch
       var newControllerEpoch = controllerContext.epoch + 1
       val (updateSucceeded, newVersion) = zkUtils.conditionalUpdatePersistentPathIfExists(
         ZkUtils.ControllerEpochPath, newControllerEpoch.toString, controllerContext.epochZkVersion)
+      // 执行失败报错
       if(!updateSucceeded)
         throw new ControllerMovedException("Controller moved to another broker. Aborting controller startup procedure")
+      // 执行成功则更新对应的
       else {
         controllerContext.epochZkVersion = newVersion
         controllerContext.epoch = newControllerEpoch
@@ -718,9 +753,11 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
     } catch {
       case nne: ZkNoNodeException =>
         // if path doesn't exist, this is the first controller whose epoch should be 1
+        // 如果path不存在，这是第一个epoch为1的控制器
         // the following call can still fail if another controller gets elected between checking if the path exists and
         // trying to create the controller epoch path
         try {
+          // 创建持久epoch节点
           zkClient.createPersistent(ZkUtils.ControllerEpochPath, KafkaController.InitialControllerEpoch.toString)
           controllerContext.epoch = KafkaController.InitialControllerEpoch
           controllerContext.epochZkVersion = KafkaController.InitialControllerEpochZkVersion
@@ -966,10 +1003,16 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
     }
   }
 
+  /**
+    * 读取并更新epoch信息
+    */
   private def readControllerEpochFromZookeeper() {
     // initialize the controller epoch and zk version by reading from zookeeper
+    // 判断“/controller_epoch”节点是否存在
     if(controllerContext.zkUtils.pathExists(ZkUtils.ControllerEpochPath)) {
+      // 获取epoch
       val epochData = controllerContext.zkUtils.readData(ZkUtils.ControllerEpochPath)
+      // 更新相关值
       controllerContext.epoch = epochData._1.toInt
       controllerContext.epochZkVersion = epochData._2.getVersion
       info("Initialized controller epoch to %d and zk version %d".format(controllerContext.epoch, controllerContext.epochZkVersion))
@@ -1155,6 +1198,9 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
     finalLeaderIsrAndControllerEpoch
   }
 
+  /**
+    * Session过期监听器
+    */
   class SessionExpirationListener() extends IZkStateListener with Logging {
     this.logIdent = "[SessionExpirationListener on " + config.brokerId + "], "
     @throws(classOf[Exception])
@@ -1165,6 +1211,7 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
     /**
      * Called after the zookeeper session has expired and a new session has been created. You would have to re-create
      * any ephemeral nodes here.
+      * 在zookeeper会话过期并创建了新的会话后调用该方法
      *
      * @throws Exception
      *             On any error.
@@ -1173,7 +1220,9 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
     def handleNewSession() {
       info("ZK expired; shut down all controller components and try to re-elect")
       inLock(controllerContext.controllerLock) {
+        // 先注销一些已经注册的监听器，关闭资源
         onControllerResignation()
+        // 重新尝试选举成controller
         controllerElector.elect
       }
     }

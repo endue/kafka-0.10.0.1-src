@@ -28,7 +28,9 @@ abstract class ShutdownableThread(val name: String, val isInterruptible: Boolean
   private val shutdownLatch = new CountDownLatch(1)
 
   def shutdown() = {
+    //设置running状态为false
     initiateShutdown()
+    // 等待doWork()方法执行完毕
     awaitShutdown()
   }
 
@@ -59,6 +61,7 @@ abstract class ShutdownableThread(val name: String, val isInterruptible: Boolean
   override def run(): Unit = {
     info("Starting ")
     try{
+      // 如果running状态为false，则退出循环
       while(isRunning.get()){
         doWork()
       }
@@ -67,6 +70,7 @@ abstract class ShutdownableThread(val name: String, val isInterruptible: Boolean
         if(isRunning.get())
           error("Error due to ", e)
     }
+    // 唤醒等待在awaitShutdown()方法上的线程
     shutdownLatch.countDown()
     info("Stopped ")
   }

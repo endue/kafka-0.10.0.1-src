@@ -75,6 +75,7 @@ class PartitionStateMachine(controller: KafkaController) extends Logging {
   // register topic and partition change listeners
   def registerListeners() {
     registerTopicChangeListener()
+    // 是否配置“delete.topic.enable”为true
     if(controller.config.deleteTopicEnable)
       registerDeleteTopicListener()
   }
@@ -445,6 +446,7 @@ class PartitionStateMachine(controller: KafkaController) extends Logging {
 
   /**
    * Delete topics includes the following operations -
+    * 删除topic包括以下操作
    * 1. Add the topic to be deleted to the delete topics cache, only if the topic exists
    * 2. If there are topics to be deleted, it signals the delete topic thread
    */
@@ -454,6 +456,7 @@ class PartitionStateMachine(controller: KafkaController) extends Logging {
 
     /**
      * Invoked when a topic is being deleted
+      * 当有topic被删除时只需如下方法
      * @throws Exception On any error.
      */
     @throws(classOf[Exception])
@@ -464,24 +467,32 @@ class PartitionStateMachine(controller: KafkaController) extends Logging {
           (children: Buffer[String]).toSet
         }
         debug("Delete topics listener fired for topics %s to be deleted".format(topicsToBeDeleted.mkString(",")))
+        // 查询topic是否存在，若topic已经不存在了，则直接从“/admin/delete_topics/<topic_name>”节点删除
         val nonExistentTopics = topicsToBeDeleted.filter(t => !controllerContext.allTopics.contains(t))
         if(nonExistentTopics.size > 0) {
           warn("Ignoring request to delete non-existing topics " + nonExistentTopics.mkString(","))
+          // 删除对应的topic
           nonExistentTopics.foreach(topic => zkUtils.deletePathRecursive(getDeleteTopicPath(topic)))
         }
+        // 计算剩余存在的topic
         topicsToBeDeleted --= nonExistentTopics
         if(topicsToBeDeleted.size > 0) {
           info("Starting topic deletion for topics " + topicsToBeDeleted.mkString(","))
           // mark topic ineligible for deletion if other state changes are in progress
+          // 如果正在进行其他状态更改，则标记主题不适合删除
           topicsToBeDeleted.foreach { topic =>
+            // 副本选举
             val preferredReplicaElectionInProgress =
               controllerContext.partitionsUndergoingPreferredReplicaElection.map(_.topic).contains(topic)
+            // 分区重分配
             val partitionReassignmentInProgress =
               controllerContext.partitionsBeingReassigned.keySet.map(_.topic).contains(topic)
+            // 查询topic是否为当前正在执行Preferred副本选举或分区重分配，若果是，则标记为暂时不适合被删除
             if(preferredReplicaElectionInProgress || partitionReassignmentInProgress)
               controller.deleteTopicManager.markTopicIneligibleForDeletion(Set(topic))
           }
           // add topic to deletion list
+          // 添加topic到待删除的queue中
           controller.deleteTopicManager.enqueueTopicsForDeletion(topicsToBeDeleted)
         }
       }

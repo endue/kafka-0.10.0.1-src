@@ -79,9 +79,13 @@ class TopicDeletionManager(controller: KafkaController,
   val controllerContext = controller.controllerContext
   val partitionStateMachine = controller.partitionStateMachine
   val replicaStateMachine = controller.replicaStateMachine
+  // 等待删除的topic
   val topicsToBeDeleted: mutable.Set[String] = mutable.Set.empty[String] ++ initialTopicsToBeDeleted
+  // 等待删除topic的分区
   val partitionsToBeDeleted: mutable.Set[TopicAndPartition] = topicsToBeDeleted.flatMap(controllerContext.partitionsForTopic)
+  // 锁
   val deleteLock = new ReentrantLock()
+  // 暂停被删除的topic
   val topicsIneligibleForDeletion: mutable.Set[String] = mutable.Set.empty[String] ++
     (initialTopicsIneligibleForDeletion & initialTopicsToBeDeleted)
   val deleteTopicsCond = deleteLock.newCondition()
@@ -91,8 +95,10 @@ class TopicDeletionManager(controller: KafkaController,
 
   /**
    * Invoked at the end of new controller initiation
+    * 启动
    */
   def start() {
+    // 如果"topic.delete.enable"=true，则启动删除线程
     if (isDeleteTopicEnabled) {
       deleteTopicsThread = new DeleteTopicsThread()
       if (topicsToBeDeleted.size > 0)
@@ -103,14 +109,19 @@ class TopicDeletionManager(controller: KafkaController,
 
   /**
    * Invoked when the current controller resigns. At this time, all state for topic deletion should be cleared.
+    * 关闭
    */
   def shutdown() {
     // Only allow one shutdown to go through
+    // 如果"topic.delete.enable"=true && 关闭deleteTopicsThread成功
     if (isDeleteTopicEnabled && deleteTopicsThread.initiateShutdown()) {
       // Resume the topic deletion so it doesn't block on the condition
+      // 此时删除线程有可能处于等待状态，即awaitTopicDeletionNotification方法处于阻塞等待状态，则唤醒该删除线程
       resumeTopicDeletionThread()
       // Await delete topic thread to exit
+      // 等待删除线程doWork执行结束
       deleteTopicsThread.awaitShutdown()
+      // 清除相关资源
       topicsToBeDeleted.clear()
       partitionsToBeDeleted.clear()
       topicsIneligibleForDeletion.clear()
@@ -122,6 +133,7 @@ class TopicDeletionManager(controller: KafkaController,
    * to the topicsToBeDeleted list and only gets removed from the list when the topic deletion has completed successfully
    * i.e. all replicas of all partitions of that topic are deleted successfully.
    * @param topics Topics that should be deleted
+    * 等待删除的分区入队
    */
   def enqueueTopicsForDeletion(topics: Set[String]) {
     if(isDeleteTopicEnabled) {
@@ -173,6 +185,7 @@ class TopicDeletionManager(controller: KafkaController,
 
   /**
    * Halt delete topic if -
+    * 暂停删除的主题，包括以下情况
    * 1. replicas being down
    * 2. partition reassignment in progress for some partitions of the topic
    * 3. preferred replica election in progress for some partitions of the topic
@@ -290,9 +303,13 @@ class TopicDeletionManager(controller: KafkaController,
     topicsToBeDeleted -= topic
     partitionsToBeDeleted.retain(_.topic != topic)
     val zkUtils = controllerContext.zkUtils
+    // 删除zookeeper上节点/brokers/topics/< topic_name >
     zkUtils.zkClient.deleteRecursive(getTopicPath(topic))
+    // 删除zookeeper上节点/config/topics/< topic_name >
     zkUtils.zkClient.deleteRecursive(getEntityConfigPath(ConfigType.Topic, topic))
+    // 删除zookeeper上节点/admin/delete_topics/< topic_name >
     zkUtils.zkClient.delete(getDeleteTopicPath(topic))
+    // 最后移除内存中的topic相关信息
     controllerContext.removeTopic(topic)
   }
 
@@ -386,9 +403,14 @@ class TopicDeletionManager(controller: KafkaController,
     }
   }
 
+  /**
+    * 删除topic线程
+    */
   class DeleteTopicsThread() extends ShutdownableThread(name = "delete-topics-thread-" + controller.config.brokerId, isInterruptible = false) {
     val zkUtils = controllerContext.zkUtils
+    // 删除操作
     override def doWork() {
+      // 等待删除Topic的事件通知
       awaitTopicDeletionNotification()
 
       if (!isRunning.get)
@@ -402,6 +424,7 @@ class TopicDeletionManager(controller: KafkaController,
 
         topicsQueuedForDeletion.foreach { topic =>
         // if all replicas are marked as deleted successfully, then topic deletion is done
+          // 如果所有replicas都删除了topic
           if(controller.replicaStateMachine.areAllReplicasForTopicDeleted(topic)) {
             // clear up all state for this topic from controller cache and zookeeper
             completeDeleteTopic(topic)
