@@ -78,7 +78,7 @@ case class LogAppendInfo(var firstOffset: Long,// 消息集起始位置
 @threadsafe
 class Log(val dir: File,// 日志目录
           @volatile var config: LogConfig,// 日志配置设置
-          @volatile var recoveryPoint: Long = 0L,// 开始恢复的偏移量——即尚未刷新到磁盘的第一个偏移量
+          @volatile var recoveryPoint: Long = 0L,// 开始恢复的偏移量——即已刷新到磁盘的最后一个偏移量
           scheduler: Scheduler,
           time: Time = SystemTime) extends Logging with KafkaMetricsGroup {
 
@@ -582,6 +582,7 @@ class Log(val dir: File,// 日志目录
    * starting with the oldest segment and moving forward until a segment doesn't match.
    * @param predicate A function that takes in a single log segment and returns true iff it is deletable
    * @return The number of segments deleted
+    * 删除日志
    */
   def deleteOldSegments(predicate: LogSegment => Boolean): Int = {
     lock synchronized {
@@ -594,9 +595,11 @@ class Log(val dir: File,// 日志目录
       val numToDelete = deletable.size
       if (numToDelete > 0) {
         // we must always have at least one segment, so if we are going to delete all the segments, create a new one first
+        // 如果删除了所有的segment，那么需要在建立一个segment
         if (segments.size == numToDelete)
           roll()
         // remove the segments for lookups
+        // 循环删除segment
         deletable.foreach(deleteSegment(_))
       }
       numToDelete
@@ -717,6 +720,7 @@ class Log(val dir: File,// 日志目录
 
   /**
    * Flush all log segments
+    * flush所有的segment
    */
   def flush(): Unit = flush(this.logEndOffset)
 
@@ -859,6 +863,7 @@ class Log(val dir: File,// 日志目录
   /**
    * Perform an asynchronous delete on the given file if it exists (otherwise do nothing)
    * @throws KafkaStorageException if the file can't be renamed and still exists
+    *  异步删除segment
    */
   private def asyncDeleteSegment(segment: LogSegment) {
     segment.changeFileSuffixes("", Log.DeletedFileSuffix)

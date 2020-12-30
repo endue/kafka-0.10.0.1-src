@@ -46,21 +46,29 @@ private[log] class LogCleanerManager(val logDirs: Array[File], val logs: Pool[To
   override val loggerName = classOf[LogCleaner].getName
 
   // package-private for testing
+  // cleaner checkpoint要写入的文件
   private[log] val offsetCheckpointFile = "cleaner-offset-checkpoint"
   
   /* the offset checkpoints holding the last cleaned point for each log */
+  // Map[File,OffsetCheckpoint]类型，用来维护数据目录和cleaner-offset-checkpoint文件之间的对应关系
   private val checkpoints = logDirs.map(dir => (dir, new OffsetCheckpoint(new File(dir, offsetCheckpointFile)))).toMap
 
   /* the set of logs currently being cleaned */
+  // HashMap[TopicAndPartition, LogCleaningState]，记录正在进行的清理的TopicAndPartition的压缩状态
+  // 刚开始状态为：LogCleaningInProgress
+  //
   private val inProgress = mutable.HashMap[TopicAndPartition, LogCleaningState]()
 
   /* a global lock used to control all access to the in-progress set and the offset checkpoints */
+  // 锁
   private val lock = new ReentrantLock
   
   /* for coordinating the pausing and the cleaning of a partition */
+  // 暂停分区的清理
   private val pausedCleaningCond = lock.newCondition()
   
   /* a gauge for tracking the cleanable ratio of the dirtiest log */
+  // dirty部分占log文件的比例
   @volatile private var dirtiestLogCleanableRatio = 0.0
   newGauge("max-dirty-percent", new Gauge[Int] { def value = (100 * dirtiestLogCleanableRatio).toInt })
 
@@ -74,15 +82,21 @@ private[log] class LogCleanerManager(val logDirs: Array[File], val logs: Pool[To
     * Choose the log to clean next and add it to the in-progress set. We recompute this
     * every time off the full set of logs to allow logs to be dynamically added to the pool of logs
     * the log manager maintains.
+     * 选择要清理的log，添加到inProgress集合中
     */
   def grabFilthiestLog(): Option[LogToClean] = {
     inLock(lock) {
+      // 获取全部log的cleaner checkpoint
       val lastClean = allCleanerCheckpoints()
+      // 筛选要清理的log
       val dirtyLogs = logs.filter {
+        // 筛选log类型为Compact
         case (topicAndPartition, log) => log.config.compact  // skip any logs marked for delete rather than dedupe
       }.filterNot {
+        // 筛选inProgress不包含的
         case (topicAndPartition, log) => inProgress.contains(topicAndPartition) // skip any logs already in-progress
       }.map {
+        // 处理要清理的log
         case (topicAndPartition, log) => // create a LogToClean instance for each
           // if the log segments are abnormally truncated and hence the checkpointed offset
           // is no longer valid, reset to the log starting offset and log the error event
@@ -98,14 +112,17 @@ private[log] class LogCleanerManager(val logDirs: Array[File], val logs: Pool[To
             }
           }
           LogToClean(topicAndPartition, log, firstDirtyOffset)
-      }.filter(ltc => ltc.totalBytes > 0) // skip any empty logs
+      }.filter(ltc => ltc.totalBytes > 0) // skip any empty logs 跳过空的log
 
       this.dirtiestLogCleanableRatio = if (!dirtyLogs.isEmpty) dirtyLogs.max.cleanableRatio else 0
       // and must meet the minimum threshold for dirty byte ratio
+      // "min.cleanable.dirty.ratio" 默认0.5
+      // 过滤清理比例超过0.5的
       val cleanableLogs = dirtyLogs.filter(ltc => ltc.cleanableRatio > ltc.log.config.minCleanableRatio)
       if(cleanableLogs.isEmpty) {
         None
       } else {
+        // 记录到清理的日志，状态为LogCleaningInProgress
         val filthiest = cleanableLogs.max
         inProgress.put(filthiest.topicPartition, LogCleaningInProgress)
         Some(filthiest)

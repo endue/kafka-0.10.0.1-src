@@ -70,6 +70,7 @@ class LogCleaner(val config: CleanerConfig,
                  time: Time = SystemTime) extends Logging with KafkaMetricsGroup {
   
   /* for managing the state of partitions being cleaned. package-private to allow access in tests */
+  // 用于负责每一个Log的压缩状态管理以及cleaner checkpoint的维护和更新
   private[log] val cleanerManager = new LogCleanerManager(logDirs, logs)
 
   /* a throttle used to limit the I/O of all the cleaner threads to a user-specified maximum rate */
@@ -81,6 +82,7 @@ class LogCleaner(val config: CleanerConfig,
                                         time = time)
   
   /* the threads */
+  // 默认1，记录的CleanerThread
   private val cleaners = (0 until config.numThreads).map(new CleanerThread(_))
   
   /* a metric to track the maximum utilization of any thread's buffer in the last cleaning */
@@ -105,6 +107,7 @@ class LogCleaner(val config: CleanerConfig,
   
   /**
    * Start the background cleaning
+    * 启动后台压缩日志线程
    */
   def startup() {
     info("Starting the log cleaner")
@@ -113,6 +116,7 @@ class LogCleaner(val config: CleanerConfig,
   
   /**
    * Stop the background cleaning
+    * 关闭后台压缩日志线程
    */
   def shutdown() {
     info("Shutting down the log cleaner.")
@@ -181,6 +185,7 @@ class LogCleaner(val config: CleanerConfig,
   /**
    * The cleaner threads do the actual log cleaning. Each thread processes does its cleaning repeatedly by
    * choosing the dirtiest log, cleaning it, and then swapping in the cleaned segments.
+    * 清理日志后台线程，doWork()
    */
   private class CleanerThread(threadId: Int)
     extends ShutdownableThread(name = "kafka-log-cleaner-thread-" + threadId, isInterruptible = false) {
@@ -226,16 +231,21 @@ class LogCleaner(val config: CleanerConfig,
      
     /**
      * Clean a log if there is a dirty log available, otherwise sleep for a bit
+      * 如果有可用的脏日志，则清理日志，否则休眠一段时间
      */
     private def cleanOrSleep() {
+      // 选择要清理的log，添加到inProgress集合中
       cleanerManager.grabFilthiestLog() match {
         case None =>
           // there are no cleanable logs, sleep a while
+          // 没有要清理的日志，休眠 15 * 1000
           backOffWaitLatch.await(config.backOffMs, TimeUnit.MILLISECONDS)
         case Some(cleanable) =>
           // there's a log, clean it
+          // 有日志需要清理
           var endOffset = cleanable.firstDirtyOffset
           try {
+            // 开始清理
             endOffset = cleaner.clean(cleanable)
             recordStats(cleaner.id, cleanable.log.name, cleanable.firstDirtyOffset, endOffset, cleaner.stats)
           } catch {
@@ -248,7 +258,12 @@ class LogCleaner(val config: CleanerConfig,
     
     /**
      * Log out statistics on a single run of the cleaner.
-     */
+      * @param id
+      * @param name
+      * @param from
+      * @param to
+      * @param stats
+    */
     def recordStats(id: Int, name: String, from: Long, to: Long, stats: CleanerStats) {
       this.lastStats = stats
       cleaner.statsUnderlying.swap
@@ -323,11 +338,14 @@ private[log] class Cleaner(val id: Int,
   private[log] def clean(cleanable: LogToClean): Long = {
     stats.clear()
     info("Beginning cleaning of log %s.".format(cleanable.log.name))
+    // 获取要清理的log
     val log = cleanable.log
 
     // build the offset map
     info("Building offset map for %s...".format(cleanable.log.name))
+    // 获取日志压缩最大上限的offset
     val upperBoundOffset = log.activeSegment.baseOffset
+    //
     val endOffset = buildOffsetMap(log, cleanable.firstDirtyOffset, upperBoundOffset, offsetMap) + 1
     stats.indexDone()
     
@@ -342,6 +360,7 @@ private[log] class Cleaner(val id: Int,
     // group the segments and clean the groups
     info("Cleaning log %s (discarding tombstones prior to %s)...".format(log.name, new Date(deleteHorizonMs)))
     for (group <- groupSegmentsBySize(log.logSegments(0, endOffset), log.config.segmentSize, log.config.maxIndexSize))
+      // 清理
       cleanSegments(log, group, offsetMap, deleteHorizonMs)
       
     // record buffer utilization
@@ -727,9 +746,13 @@ private case class CleanerStats(time: Time = SystemTime) {
  * Helper class for a log, its topic/partition, and the last clean position
  */
 private case class LogToClean(topicPartition: TopicAndPartition, log: Log, firstDirtyOffset: Long) extends Ordered[LogToClean] {
+  // 已清理部分
   val cleanBytes = log.logSegments(-1, firstDirtyOffset).map(_.size).sum
+  // 未清理部分
   val dirtyBytes = log.logSegments(firstDirtyOffset, math.max(firstDirtyOffset, log.activeSegment.baseOffset)).map(_.size).sum
+  // 计算清理百分比
   val cleanableRatio = dirtyBytes / totalBytes.toDouble
+  // 总的字节数
   def totalBytes = cleanBytes + dirtyBytes
   override def compare(that: LogToClean): Int = math.signum(this.cleanableRatio - that.cleanableRatio).toInt
 }

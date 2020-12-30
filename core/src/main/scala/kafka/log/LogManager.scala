@@ -43,33 +43,37 @@ class LogManager(val logDirs: Array[File],// 读取log所在文件，首先加�
                  val defaultConfig: LogConfig,
                  val cleanerConfig: CleanerConfig,
                  ioThreads: Int,// 默认1
-                 val flushCheckMs: Long,// Long.MaxValue
-                 val flushCheckpointMs: Long,// 60000
-                 val retentionCheckMs: Long,// 5 * 60 * 1000L
+                 val flushCheckMs: Long,// flush检查时间 Long.MaxValue
+                 val flushCheckpointMs: Long,// flushCheckpoint检查时间 60000
+                 val retentionCheckMs: Long,// 日志保留检查时间 5 * 60 * 1000L
                  scheduler: Scheduler,// 任务调度线程池
-                 val brokerState: BrokerState,
+                 val brokerState: BrokerState,// broker状态
                  private val time: Time) extends Logging {
   val RecoveryPointCheckpointFile = "recovery-point-offset-checkpoint"
   val LockFile = ".lock"
   val InitialTaskDelayMs = 30*1000
   private val logCreationOrDeletionLock = new Object
   // 底层基于ConcurrentHashMap,key是TopicAndPartition，value是log
-  // 初始化记录主题分区对应<-->log关系的map
+  // 记录主题分区<-->log关系的map也就是用于管理TopicAndPartition和Log之间的对应关系
   private val logs = new Pool[TopicAndPartition, Log]()
   // 检查日志目录
   createAndValidateLogDirs(logDirs)
-  // 对所有的目录生成对应的FileLock
+  // 对所有的log目录生成对应的FileLock
   private val dirLocks = lockLogDirs(logDirs)
-  // 生成日志检查点
+  // 生成日志检查点，Map[File,OffsetCheckpoint] 类型
+  // 管理每一个log目录与其下的RecoveryPointCheckpoint文件之间的映射关系，在LogManager对象初始化时，
+  // 会在每一个log目录下创建一个对应的RecoveryPointCheckpoint文件。
+  // 这个Map的value是OffsetCheckpoint类型的对象，其中封装了对应log目录下RecoveryPointCheckpoint文件，
+  // 并提供对RecoveryPointCheckpoint文件的读写操作。RecoveryPointCheckpoint文件则记录了该log目录下所有Log的recoveryPointCheckpoint
   private val recoveryPointCheckpoints = logDirs.map(dir => (dir, new OffsetCheckpoint(new File(dir, RecoveryPointCheckpointFile)))).toMap
   // 加载日志
   loadLogs()
 
   // public, so we can access this from kafka.admin.DeleteTopicTest
+  // 创建一个LogCleaner
   val cleaner: LogCleaner =
     // 是否启动清理调度任务
     if(cleanerConfig.enableCleaner)
-      // 生成清理调度任务
       new LogCleaner(cleanerConfig, logDirs, logs, time = time)
     else
       null
@@ -231,8 +235,9 @@ class LogManager(val logDirs: Array[File],// 读取log所在文件，首先加�
                          period = flushCheckpointMs,
                          TimeUnit.MILLISECONDS)
     }
-    // 启动清理log后台线程
+    // 启动清理log后台线程，也就是对日志进行压缩
     if(cleanerConfig.enableCleaner)
+      // 启动log压缩线程
       cleaner.startup()
   }
 
@@ -345,6 +350,7 @@ class LogManager(val logDirs: Array[File],// 读取log所在文件，首先加�
   /**
    * Write out the current recovery point for all logs to a text file in the log directory 
    * to avoid recovering the whole log on startup.
+    * 定时将每一个Log的recoveryPoint写入RecoveryPointCheckpoint文件
    */
   def checkpointRecoveryPointOffsets() {
     this.logDirs.foreach(checkpointLogsInDir)
@@ -352,10 +358,12 @@ class LogManager(val logDirs: Array[File],// 读取log所在文件，首先加�
 
   /**
    * Make a checkpoint for all logs in provided directory.
+    * 为log创建检查点
    */
   private def checkpointLogsInDir(dir: File): Unit = {
     val recoveryPoints = this.logsByDir.get(dir.toString)
     if (recoveryPoints.isDefined) {
+      // 获取对应目录下的OffsetCheckpoint，然后调用其write
       this.recoveryPointCheckpoints(dir).write(recoveryPoints.get.mapValues(_.recoveryPoint))
     }
   }
@@ -446,21 +454,27 @@ class LogManager(val logDirs: Array[File],// 读取log所在文件，首先加�
 
   /**
    * Runs through the log removing segments older than a certain age
+    * 删除过期的segment
    */
   private def cleanupExpiredSegments(log: Log): Int = {
+    // “retention.ms”，默认 24 * 7 *  * 60 * 60 * 1000L
     if (log.config.retentionMs < 0)
       return 0
     val startMs = time.milliseconds
+    // 删除
     log.deleteOldSegments(startMs - _.lastModified > log.config.retentionMs)
   }
 
   /**
    *  Runs through the log removing segments until the size of the log
    *  is at least logRetentionSize bytes in size
+    * 根据log的大小决定是否删除最旧的segment
    */
   private def cleanupSegmentsToMaintainSize(log: Log): Int = {
+    // “retention.bytes”
     if(log.config.retentionSize < 0 || log.size < log.config.retentionSize)
       return 0
+    // 循环删除segment，直到diff - segment.size < 0
     var diff = log.size - log.config.retentionSize
     def shouldDelete(segment: LogSegment) = {
       if(diff - segment.size >= 0) {
@@ -481,6 +495,7 @@ class LogManager(val logDirs: Array[File],// 读取log所在文件，首先加�
     debug("Beginning log cleanup...")
     var total = 0
     val startMs = time.milliseconds
+    // 遍历所有的log && log清理策略为删除(如果是compact则不执行)
     for(log <- allLogs; if !log.config.compact) {
       debug("Garbage collecting '" + log.name + "'")
       total += cleanupExpiredSegments(log) + cleanupSegmentsToMaintainSize(log)
@@ -510,15 +525,18 @@ class LogManager(val logDirs: Array[File],// 读取log所在文件，首先加�
 
   /**
    * Flush any log which has exceeded its flush interval and has unwritten messages.
+    * 消息刷盘
    */
   private def flushDirtyLogs() = {
     debug("Checking for dirty logs to flush...")
-
+    // 遍历所有的log
     for ((topicAndPartition, log) <- logs) {
       try {
+        // 获取log最后一次执行flush操作的时间
         val timeSinceLastFlush = time.milliseconds - log.lastFlushTime
         debug("Checking if flush is needed on " + topicAndPartition.topic + " flush interval  " + log.config.flushMs +
               " last flushed " + log.lastFlushTime + " time since last flush: " + timeSinceLastFlush)
+        // 超过指定时间，执行flush操作
         if(timeSinceLastFlush >= log.config.flushMs)
           log.flush
       } catch {

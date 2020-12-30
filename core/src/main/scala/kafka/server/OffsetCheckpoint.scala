@@ -36,9 +36,12 @@ object OffsetCheckpoint {
  */
 class OffsetCheckpoint(val file: File) extends Logging {
   import OffsetCheckpoint._
+  // checkpoint文件
   private val path = file.toPath.toAbsolutePath
+  // 临时文件
   private val tempPath = Paths.get(path.toString + ".tmp")
   private val lock = new Object()
+  // 初始化的时候就创建了checkpoint文件
   file.createNewFile() // in case the file doesn't exist
 
   /**
@@ -48,6 +51,7 @@ class OffsetCheckpoint(val file: File) extends Logging {
   def write(offsets: Map[TopicAndPartition, Long]) {
     lock synchronized {
       // write to temp file and then swap with the existing file
+      // 先写临时文件然后交换临时文件和原来的RecoveryPointCheckpoint文件
       val fileOutputStream = new FileOutputStream(tempPath.toFile)
       val writer = new BufferedWriter(new OutputStreamWriter(fileOutputStream))
       try {

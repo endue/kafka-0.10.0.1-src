@@ -179,10 +179,12 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
   private val autoRebalanceScheduler = new KafkaScheduler(1)
   // topic删除管理器
   var deleteTopicManager: TopicDeletionManager = null
+  // 分区副本中的leader选举
   val offlinePartitionSelector = new OfflinePartitionLeaderSelector(controllerContext, config)
   private val reassignedPartitionLeaderSelector = new ReassignedPartitionLeaderSelector(controllerContext)
   private val preferredReplicaPartitionLeaderSelector = new PreferredReplicaPartitionLeaderSelector(controllerContext)
   private val controlledShutdownPartitionLeaderSelector = new ControlledShutdownLeaderSelector(controllerContext)
+
   private val brokerRequestBatch = new ControllerBrokerRequestBatch(this)
   // 重分配监听器
   private val partitionReassignedListener = new PartitionsReassignedListener(this)
@@ -1232,10 +1234,14 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
     }
   }
 
+  /**
+    * 分区重平衡
+    */
   private def checkAndTriggerPartitionRebalance(): Unit = {
     if (isActive()) {
       trace("checking need to trigger partition rebalance")
       // get all the active brokers
+      //
       var preferredReplicasForTopicsByBrokers: Map[Int, Map[TopicAndPartition, Seq[Int]]] = null
       inLock(controllerContext.controllerLock) {
         preferredReplicasForTopicsByBrokers =
