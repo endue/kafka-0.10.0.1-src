@@ -41,16 +41,19 @@ import java.io.{IOException, File}
  * @param time The time instance
  */
 @nonthreadsafe
-class LogSegment(val log: FileMessageSet,
-                 val index: OffsetIndex,
-                 val baseOffset: Long,
-                 val indexIntervalBytes: Int,// 默认10 * 1024 * 1024
+class LogSegment(val log: FileMessageSet,// 用于操作对应消息日志文件的FileMessageSet对象
+                 val index: OffsetIndex,// 用于操作对应offset 索引文件的 OffsetIndex对象
+                 val baseOffset: Long,// 每一个日志文件的第一个消息的offset
+                 val indexIntervalBytes: Int,// 索引项之间间隔的最小字节数，也就是隔多少字节写一次索引 默认10 * 1024 * 1024
                  val rollJitterMs: Long,
                  time: Time) extends Logging {
 
+   // LogSegment创建事件
   var created = time.milliseconds
 
   /* the number of bytes since we last added an entry in the offset index */
+   // 记录从上次在index文件中添加一个索引后，到现在为止日志文件中添加的字节数
+   // 用来生成下一个索引
   private var bytesSinceLastIndexEntry = 0
 
   def this(dir: File, startOffset: Long, indexIntervalBytes: Int, maxIndexSize: Int, rollJitterMs: Long, time: Time, fileAlreadyExists: Boolean = false, initFileSize: Int = 0, preallocate: Boolean = false) =
@@ -62,6 +65,7 @@ class LogSegment(val log: FileMessageSet,
          time)
 
   /* Return the size in bytes of this log segment */
+   // 返回该日志段的大小(以字节为单位)
   def size: Long = log.sizeInBytes()
 
   /**
@@ -167,7 +171,7 @@ class LogSegment(val log: FileMessageSet,
 
   /**
    * Run recovery on the given segment. This will rebuild the index from the log file and lop off any invalid bytes from the end of the log and index.
-   *
+   * 在给定的段上运行恢复。这将从日志文件重新构建索引，并删除日志和索引末尾的任何无效字节
    * @param maxMessageSize A bound the memory allocation in the case of a corrupt message size--we will assume any message larger than this
    * is corrupt.
    *

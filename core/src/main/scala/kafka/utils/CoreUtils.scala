@@ -205,6 +205,7 @@ object CoreUtils extends Logging {
 
   /**
    * Replace the given string suffix with the new suffix. If the string doesn't end with the given suffix throw an exception.
+    * 用新的后缀替换给定的字符串后缀。如果字符串没有以给定的后缀结束，则抛出异常
    */
   def replaceSuffix(s: String, oldSuffix: String, newSuffix: String): String = {
     if(!s.endsWith(oldSuffix))
