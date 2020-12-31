@@ -22,16 +22,19 @@ import java.nio.channels._
 
 /**
  * Message set helper functions
+  * 消息集，对应producer一次性传过来的消息
  */
 object MessageSet {
 
   val MessageSizeLength = 4
   val OffsetLength = 8
   val LogOverhead = MessageSizeLength + OffsetLength
+  // 记录消息
   val Empty = new ByteBufferMessageSet(ByteBuffer.allocate(0))
   
   /**
    * The size of a message set containing the given messages
+    * 包含给定消息的消息集的大小
    */
   def messageSetSize(messages: Iterable[Message]): Int =
     messages.foldLeft(0)(_ + entrySize(_))

@@ -48,7 +48,7 @@ class LogSegment(val log: FileMessageSet,// 用于操作对应消息日志文件
                  val rollJitterMs: Long,
                  time: Time) extends Logging {
 
-   // LogSegment创建事件
+   // LogSegment创建时间
   var created = time.milliseconds
 
   /* the number of bytes since we last added an entry in the offset index */
@@ -78,6 +78,7 @@ class LogSegment(val log: FileMessageSet,// 用于操作对应消息日志文件
    * @param messages The messages to append.
    */
   // 拼接给定的消息
+  // producer一次性传过来的消息就是一个ByteBufferMessageSet，里面包含了客户端的多条消息
   @nonthreadsafe
   def append(offset: Long, messages: ByteBufferMessageSet) {
     if (messages.sizeInBytes > 0) {
@@ -85,8 +86,9 @@ class LogSegment(val log: FileMessageSet,// 用于操作对应消息日志文件
       // append an entry to the index (if needed)
       // 判断是否更新index索引
       if(bytesSinceLastIndexEntry > indexIntervalBytes) {
-        // 消息的起始位置，消息大小
+        // 添加索引，消息的起始位置，消息大小
         index.append(offset, log.sizeInBytes())
+        // 重置累加消息字节数
         this.bytesSinceLastIndexEntry = 0
       }
       // 拼接消息
@@ -99,7 +101,7 @@ class LogSegment(val log: FileMessageSet,// 用于操作对应消息日志文件
 
   /**
    * Find the physical file position for the first message with offset >= the requested offset.
-   *
+   * 找到第一个带有偏移量>=请求偏移量的消息的物理文件位置
    * The lowerBound argument is an optimization that can be used if we already know a valid starting position
    * in the file higher than the greatest-lower-bound from the index.
    *
@@ -119,10 +121,10 @@ class LogSegment(val log: FileMessageSet,// 用于操作对应消息日志文件
    * Read a message set from this segment beginning with the first offset >= startOffset. The message set will include
    * no more than maxSize bytes and will end before maxOffset if a maxOffset is specified.
    *
-   * @param startOffset A lower bound on the first offset to include in the message set we read
-   * @param maxSize The maximum number of bytes to include in the message set we read
-   * @param maxOffset An optional maximum offset for the message set we read
-   * @param maxPosition The maximum position in the log segment that should be exposed for read
+   * @param startOffset A lower bound on the first offset to include in the message set we read 消息读取起始偏移量
+   * @param maxSize The maximum number of bytes to include in the message set we read 消息读取最大字节数
+   * @param maxOffset An optional maximum offset for the message set we read 消息读取最大偏移量
+   * @param maxPosition The maximum position in the log segment that should be exposed for read LongSegment中可读取的最大偏移量
    *
    * @return The fetched data and the offset metadata of the first message whose offset is >= startOffset,
    *         or null if the startOffset is larger than the largest offset in this log
@@ -131,24 +133,30 @@ class LogSegment(val log: FileMessageSet,// 用于操作对应消息日志文件
   def read(startOffset: Long, maxOffset: Option[Long], maxSize: Int, maxPosition: Long = size): FetchDataInfo = {
     if(maxSize < 0)
       throw new IllegalArgumentException("Invalid max size for log read (%d)".format(maxSize))
-
+    // 读取日志大小
     val logSize = log.sizeInBytes // this may change, need to save a consistent copy
+    // 计算要读取的消息的物理文件位置,将startOffset准换成物理地址
     val startPosition = translateOffset(startOffset)
 
     // if the start position is already off the end of the log, return null
+    // 如果起始偏移量已经在日志的末尾返回null
     if(startPosition == null)
       return null
 
     val offsetMetadata = new LogOffsetMetadata(startOffset, this.baseOffset, startPosition.position)
 
     // if the size is zero, still return a log segment but with zero size
+    // 如果大小为0，仍然返回一个大小为0的日志段
     if(maxSize == 0)
       return FetchDataInfo(offsetMetadata, MessageSet.Empty)
 
     // calculate the length of the message set to read based on whether or not they gave us a maxOffset
+    // 判断maxOffset是否为空
+    // 也就是读取消息的最大偏移量
     val length = maxOffset match {
       case None =>
         // no max offset, just read until the max position
+        // 为空，计算可读消息的长度
         min((maxPosition - startPosition.position).toInt, maxSize)
       case Some(offset) =>
         // there is a max offset, translate it to a file position and use that to calculate the max read size;
@@ -165,7 +173,7 @@ class LogSegment(val log: FileMessageSet,// 用于操作对应消息日志文件
             mapping.position
         min(min(maxPosition, endPosition) - startPosition.position, maxSize).toInt
     }
-
+    // 返回数据
     FetchDataInfo(offsetMetadata, log.read(startPosition.position, length))
   }
 
@@ -254,6 +262,7 @@ class LogSegment(val log: FileMessageSet,// 用于操作对应消息日志文件
 
   /**
    * Flush this log segment to disk
+    * LogSegment刷磁盘
    */
   @threadsafe
   def flush() {

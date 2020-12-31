@@ -108,7 +108,7 @@ class Log(val dir: File,// 日志文件对应的磁盘目录，如：/tmp/kafka-
   /* Calculate the offset of the next message */
   // 记录了当前LogSegment下一个消息存储的位置、起始位置和当前大小，其实可以看做当前副本的LEO
   @volatile var nextOffsetMetadata = new LogOffsetMetadata(activeSegment.nextOffset(), activeSegment.baseOffset, activeSegment.size.toInt)
-
+  // 记录当前log对应的主题和分区
   val topicAndPartition: TopicAndPartition = Log.parseTopicPartitionName(dir)
 
   info("Completed load of log %s with log end offset %d".format(name, logEndOffset))
@@ -1075,6 +1075,7 @@ object Log {
 
   /**
    * Parse the topic and partition out of the directory name of a log
+    * 从日志的目录名解析主题和分区
    */
   def parseTopicPartitionName(dir: File): TopicAndPartition = {
     val name: String = dir.getName

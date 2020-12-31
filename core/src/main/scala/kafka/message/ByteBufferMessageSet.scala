@@ -30,26 +30,45 @@ import org.apache.kafka.common.utils.Utils
 
 import scala.collection.mutable
 
+/**
+  * 底层基于ByteBuffer保存消息
+  */
 object ByteBufferMessageSet {
 
+  /**
+    * 初始化
+    * @param offsetAssigner // 偏移量
+    * @param compressionCodec
+    * @param wrapperMessageTimestamp
+    * @param timestampType
+    * @param messages
+    * @return
+    */
   private def create(offsetAssigner: OffsetAssigner,
                      compressionCodec: CompressionCodec,
                      wrapperMessageTimestamp: Option[Long],
                      timestampType: TimestampType,
                      messages: Message*): ByteBuffer = {
+    // producer发送消息为空
     if (messages.isEmpty)
       MessageSet.Empty.buffer
+      // 不需要对消息压缩
     else if (compressionCodec == NoCompressionCodec) {
+      // 申请一个所有消息大小的ByteBuffer = LogOverhead + messages.size
       val buffer = ByteBuffer.allocate(MessageSet.messageSetSize(messages))
+      // 遍历所有消息，然后写入
       for (message <- messages) writeMessage(buffer, message, offsetAssigner.nextAbsoluteOffset())
       buffer.rewind()
       buffer
     } else {
+      // 得到magic 和 timestamp
       val magicAndTimestamp = wrapperMessageTimestamp match {
         case Some(ts) => MagicAndTimestamp(messages.head.magic, ts)
         case None => MessageSet.magicAndLargestTimestamp(messages)
       }
+
       var offset = -1L
+      // 压缩消息
       val messageWriter = new MessageWriter(math.min(math.max(MessageSet.messageSetSize(messages) / 2, 1024), 1 << 16))
       messageWriter.write(codec = compressionCodec, timestamp = magicAndTimestamp.timestamp, timestampType = timestampType, magicValue = magicAndTimestamp.magic) { outputStream =>
         val output = new DataOutputStream(CompressionFactory(compressionCodec, magicAndTimestamp.magic, outputStream))
@@ -70,7 +89,9 @@ object ByteBufferMessageSet {
           output.close()
         }
       }
+      //申请buffer
       val buffer = ByteBuffer.allocate(messageWriter.size + MessageSet.LogOverhead)
+      // 写消息
       writeMessage(buffer, messageWriter, offset)
       buffer.rewind()
       buffer
@@ -162,16 +183,27 @@ object ByteBufferMessageSet {
     }
   }
 
+  /**
+    * 写入producer发送过来的消息
+    * @param buffer
+    * @param message
+    * @param offset
+    */
   private[kafka] def writeMessage(buffer: ByteBuffer, message: Message, offset: Long) {
-    buffer.putLong(offset)
-    buffer.putInt(message.size)
-    buffer.put(message.buffer)
+    buffer.putLong(offset)// 偏移量
+    buffer.putInt(message.size)// 消息大小
+    buffer.put(message.buffer)// 消息
     message.buffer.rewind()
   }
-
+  /**
+    * 写入producer发送过来的消息
+    * @param buffer
+    * @param messageWriter
+    * @param offset
+    */
   private[kafka] def writeMessage(buffer: ByteBuffer, messageWriter: MessageWriter, offset: Long) {
-    buffer.putLong(offset)
-    buffer.putInt(messageWriter.size)
+    buffer.putLong(offset)// 偏移量
+    buffer.putInt(messageWriter.size)// 包含消息大小的MessageWriter
     messageWriter.writeTo(buffer)
   }
 }
