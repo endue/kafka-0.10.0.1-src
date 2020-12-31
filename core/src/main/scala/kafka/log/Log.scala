@@ -757,7 +757,7 @@ class Log(val dir: File,// 日志文件对应的磁盘目录，如：/tmp/kafka-
           entry.getValue.log.trim()
         }
       }
-      // 创建
+      // 创建LogSegment
       val segment = new LogSegment(dir,
                                    startOffset = newOffset,
                                    indexIntervalBytes = config.indexInterval,
