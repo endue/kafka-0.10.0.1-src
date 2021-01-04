@@ -64,12 +64,15 @@ class OffsetIndex(@volatile private[this] var _file: File, val baseOffset: Long,
   private val lock = new ReentrantLock
   
   /* initialize the memory mapping for this index */
+  // 初始化索引文件的内存映射
   @volatile
   private[this] var mmap: MappedByteBuffer = {
+    // 索引文件不存在就创建并返回true，否则返回false
     val newlyCreated = _file.createNewFile()
     val raf = new RandomAccessFile(_file, "rw")
     try {
       /* pre-allocate the file if necessary */
+      // 如果需要，预分配文件
       if (newlyCreated) {
         if (maxIndexSize < 8)
           throw new IllegalArgumentException("Invalid max index size: " + maxIndexSize)
@@ -81,10 +84,12 @@ class OffsetIndex(@volatile private[this] var _file: File, val baseOffset: Long,
       val idx = raf.getChannel.map(FileChannel.MapMode.READ_WRITE, 0, len)
 
       /* set the position in the index for the next entry */
+      // 如果是新索引文件，从头开始写入数据
       if (newlyCreated)
         idx.position(0)
       else
         // if this is a pre-existing index, assume it is all valid and set position to last entry
+        // 索引文件已存在，将position移动到索引项的结束位置，防止数据覆盖
         idx.position(roundToExactMultiple(idx.limit, 8))
       idx
     } finally {
@@ -136,6 +141,7 @@ class OffsetIndex(@volatile private[this] var _file: File, val baseOffset: Long,
    * @return The offset found and the corresponding file position for this offset. 
    * If the target offset is smaller than the least entry in the index (or the index is empty),
    * the pair (baseOffset, 0) is returned.
+    * 查找
    */
   def lookup(targetOffset: Long): OffsetPosition = {
     maybeLock(lock) {
@@ -207,6 +213,7 @@ class OffsetIndex(@volatile private[this] var _file: File, val baseOffset: Long,
   
   /**
    * Append an entry for the given offset/location pair to the index. This entry must have a larger offset than all subsequent entries.
+    * 添加索引
    */
   def append(offset: Long, position: Int) {
     inLock(lock) {
