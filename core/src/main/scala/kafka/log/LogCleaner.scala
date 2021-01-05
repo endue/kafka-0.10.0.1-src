@@ -345,7 +345,7 @@ private[log] class Cleaner(val id: Int,
     info("Building offset map for %s...".format(cleanable.log.name))
     // 获取日志压缩最大上限的offset
     val upperBoundOffset = log.activeSegment.baseOffset
-    //
+    // 开始压缩日志
     val endOffset = buildOffsetMap(log, cleanable.firstDirtyOffset, upperBoundOffset, offsetMap) + 1
     stats.indexDone()
     
@@ -616,6 +616,7 @@ private[log] class Cleaner(val id: Int,
    */
   private[log] def buildOffsetMap(log: Log, start: Long, end: Long, map: OffsetMap): Long = {
     map.clear()
+    // 从start到end所有的LogSegment
     val dirty = log.logSegments(start, end).toBuffer
     info("Building offset map for log %s for %d segments in offset range [%d, %d).".format(log.name, dirty.size, start, end))
     
@@ -625,8 +626,10 @@ private[log] class Cleaner(val id: Int,
     require(offset == start, "Last clean offset is %d but segment base offset is %d for log %s.".format(start, offset, log.name))
     var full = false
     for (segment <- dirty if !full) {
+      // 检查topic-partiton的清理状态是否为LogCleaningAborted
+      // 如果是则抛出异常
       checkDone(log.topicAndPartition)
-
+      // 开始清理单个segment，将消息的key和offset添加到OffsetMap中,并返回full是否已经填满的状态
       val newOffset = buildOffsetMapForSegment(log.topicAndPartition, segment, map)
       if (newOffset > -1L)
         offset = newOffset

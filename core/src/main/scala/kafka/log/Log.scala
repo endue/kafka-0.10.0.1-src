@@ -662,6 +662,8 @@ class Log(val dir: File,// 日志文件对应的磁盘目录，如：/tmp/kafka-
       //find any segments that match the user-supplied predicate UNLESS it is the final segment
       //and it is empty (since we would just end up re-creating it)
       val lastEntry = segments.lastEntry
+      // 遍历segments中的Segment，通过predicate判断是否需要删除
+      // 最后将待删除的Segment记录到deletable中
       val deletable =
         if (lastEntry == null) Seq.empty
         else logSegments.takeWhile(s => predicate(s) && (s.baseOffset != lastEntry.getValue.baseOffset || s.size > 0))
@@ -906,6 +908,8 @@ class Log(val dir: File,// 日志文件对应的磁盘目录，如：/tmp/kafka-
   /**
    * Get all segments beginning with the segment that includes "from" and ending with the segment
    * that includes up to "to-1" or the end of the log (if to > logEndOffset)
+    * 从segments中查找LogSegment，处于[from,to)之后，
+    * 如果to > LEO那么就是[from,to]
    */
   def logSegments(from: Long, to: Long): Iterable[LogSegment] = {
     import JavaConversions._
@@ -951,6 +955,7 @@ class Log(val dir: File,// 日志文件对应的磁盘目录，如：/tmp/kafka-
       info("Deleting segment %d from log %s.".format(segment.baseOffset, name))
       segment.delete()
     }
+    // 默认60000
     scheduler.schedule("delete-file", deleteSeg, delay = config.fileDeleteDelayMs)
   }
 

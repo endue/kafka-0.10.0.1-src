@@ -304,6 +304,7 @@ class LogSegment(val log: FileMessageSet,// 用于操作对应消息日志文件
   /**
    * Delete this log segment from the filesystem.
    * @throws KafkaStorageException if the delete fails.
+    * 从文件系统中删除此日志段
    */
   def delete() {
     val deletedLog = log.delete()

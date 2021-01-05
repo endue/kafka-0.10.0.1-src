@@ -211,6 +211,7 @@ private[log] class LogCleanerManager(val logDirs: Array[File], val logs: Pool[To
 
   /**
    *  Check if the cleaning for a partition is aborted. If so, throw an exception.
+    *  检查对分区的清理是否已中止。如果是，抛出一个异常
    */
   def checkCleaningAborted(topicAndPartition: TopicAndPartition) {
     inLock(lock) {

@@ -60,6 +60,7 @@ class LogManager(val logDirs: Array[File],// 读取log所在文件，首先加�
   createAndValidateLogDirs(logDirs)
   // 对所有的log目录生成对应的FileLock
   private val dirLocks = lockLogDirs(logDirs)
+  // 下列注释中的log非Log类，而是指“log.dirs”中配置的一个个的目录
   // 生成日志检查点，Map[File,OffsetCheckpoint] 类型
   // 管理每一个log目录与其下的RecoveryPointCheckpoint文件之间的映射关系，在LogManager对象初始化时，
   // 会在每一个log目录下创建一个对应的RecoveryPointCheckpoint文件。
@@ -153,7 +154,7 @@ class LogManager(val logDirs: Array[File],// 读取log所在文件，首先加�
         // log recovery itself is being performed by `Log` class during initialization
         brokerState.newState(RecoveringFromUncleanShutdown)
       }
-
+      // 获取对应的topic-partition和recoveryPoint的映射关系
       var recoveryPoints = Map[TopicAndPartition, Long]()
       try {
         recoveryPoints = this.recoveryPointCheckpoints(dir).read
@@ -173,9 +174,11 @@ class LogManager(val logDirs: Array[File],// 读取log所在文件，首先加�
 
           val topicPartition = Log.parseTopicPartitionName(logDir)
           val config = topicConfigs.getOrElse(topicPartition.topic, defaultConfig)
+          // 获取对应log的recoveryPoint
           val logRecoveryPoint = recoveryPoints.getOrElse(topicPartition, 0L)
-
+          // 创建Log
           val current = new Log(logDir, config, logRecoveryPoint, scheduler, time)
+          // 保存Log
           val previous = this.logs.put(topicPartition, current)
 
           if (previous != null) {
@@ -363,7 +366,7 @@ class LogManager(val logDirs: Array[File],// 读取log所在文件，首先加�
   private def checkpointLogsInDir(dir: File): Unit = {
     val recoveryPoints = this.logsByDir.get(dir.toString)
     if (recoveryPoints.isDefined) {
-      // 获取对应目录下的OffsetCheckpoint，然后调用其write
+      // 获取对应目录下的OffsetCheckpoint，然后遍历所有的topic-partition获取对应的recoveryPoint，最后写入
       this.recoveryPointCheckpoints(dir).write(recoveryPoints.get.mapValues(_.recoveryPoint))
     }
   }
@@ -471,9 +474,10 @@ class LogManager(val logDirs: Array[File],// 读取log所在文件，首先加�
     * 根据log的大小决定是否删除最旧的segment
    */
   private def cleanupSegmentsToMaintainSize(log: Log): Int = {
-    // “retention.bytes”
+    // “retention.bytes”配置的 < 0 或者 当前log大小 < “retention.bytes”那么不需要处理
     if(log.config.retentionSize < 0 || log.size < log.config.retentionSize)
       return 0
+    // 计算当前log大小 和 “retention.bytes”的差值
     // 循环删除segment，直到diff - segment.size < 0
     var diff = log.size - log.config.retentionSize
     def shouldDelete(segment: LogSegment) = {
@@ -536,7 +540,7 @@ class LogManager(val logDirs: Array[File],// 读取log所在文件，首先加�
         val timeSinceLastFlush = time.milliseconds - log.lastFlushTime
         debug("Checking if flush is needed on " + topicAndPartition.topic + " flush interval  " + log.config.flushMs +
               " last flushed " + log.lastFlushTime + " time since last flush: " + timeSinceLastFlush)
-        // 超过指定时间，执行flush操作
+        // 超过指定时间 flush.ms = ，执行flush操作
         if(timeSinceLastFlush >= log.config.flushMs)
           log.flush
       } catch {
