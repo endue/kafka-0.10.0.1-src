@@ -48,37 +48,51 @@ import kafka.common.TopicAndPartition
 
 class ControllerContext(val zkUtils: ZkUtils,
                         val zkSessionTimeout: Int) {
+  // 负责和kafka集群内部Server之间建立channel来进行通信
   var controllerChannelManager: ControllerChannelManager = null
 
   val controllerLock: ReentrantLock = new ReentrantLock()
+  // 记录关闭的brokerId集合
   var shuttingDownBrokerIds: mutable.Set[Int] = mutable.Set.empty
   val brokerShutdownLock: Object = new Object
-  // 当前epoch，默认0
+  // 当前epoch，默认0，KafkaController的年代信息，一般在leader变化后修改，
+  // 比如当前leader挂了，新的contorller leader被选举，那么这个值就会加1，
+  // 这样就能够判断哪些是旧的controller leader发送的请求
   var epoch: Int = KafkaController.InitialControllerEpoch - 1
-  // 当前epoch版本，默认0
+  // 当前epoch zk版本，默认0
   var epochZkVersion: Int = KafkaController.InitialControllerEpochZkVersion - 1
+  // 存放集群中所有的topic
   var allTopics: Set[String] = Set.empty
+  // 记录每一个partition的ar集合
   var partitionReplicaAssignment: mutable.Map[TopicAndPartition, Seq[Int]] = mutable.Map.empty
+  // 记录每一个分区的leader副本所在的brokerId、ISR列表、controller_epoch、LeaderEpoch
   var partitionLeadershipInfo: mutable.Map[TopicAndPartition, LeaderIsrAndControllerEpoch] = mutable.Map.empty
+  // 记录正在重新分配副本的分区
   val partitionsBeingReassigned: mutable.Map[TopicAndPartition, ReassignedPartitionsContext] = new mutable.HashMap
+  // 记录正在进行"优先副本"选举的分区
   val partitionsUndergoingPreferredReplicaElection: mutable.Set[TopicAndPartition] = new mutable.HashSet
-
+  // 记录当前可用的broker集合
   private var liveBrokersUnderlying: Set[Broker] = Set.empty
+  // 记录当前可用的brokerID集合
   private var liveBrokerIdsUnderlying: Set[Int] = Set.empty
 
   // setter
+  // 根据brokers更新liveBrokersUnderlying和liveBrokerIdsUnderlying
   def liveBrokers_=(brokers: Set[Broker]) {
     liveBrokersUnderlying = brokers
     liveBrokerIdsUnderlying = liveBrokersUnderlying.map(_.id)
   }
 
   // getter
+  // 从liveBrokersUnderlying剔除shuttingDownBrokerIds,就是可用的broker以及brokerID
   def liveBrokers = liveBrokersUnderlying.filter(broker => !shuttingDownBrokerIds.contains(broker.id))
   def liveBrokerIds = liveBrokerIdsUnderlying.filter(brokerId => !shuttingDownBrokerIds.contains(brokerId))
 
+  // 关闭或可用的broker以及brokerID集合
   def liveOrShuttingDownBrokerIds = liveBrokerIdsUnderlying
   def liveOrShuttingDownBrokers = liveBrokersUnderlying
 
+  // 获取指定broker上的TopicAndPartition
   def partitionsOnBroker(brokerId: Int): Set[TopicAndPartition] = {
     partitionReplicaAssignment
       .filter { case(topicAndPartition, replicas) => replicas.contains(brokerId) }
@@ -86,6 +100,7 @@ class ControllerContext(val zkUtils: ZkUtils,
       .toSet
   }
 
+  // 获取指定broker上的PartitionAndReplica
   def replicasOnBrokers(brokerIds: Set[Int]): Set[PartitionAndReplica] = {
     brokerIds.map { brokerId =>
       partitionReplicaAssignment
@@ -95,6 +110,7 @@ class ControllerContext(val zkUtils: ZkUtils,
     }.flatten.toSet
   }
 
+  // 获取指定topic上的PartitionAndReplica
   def replicasForTopic(topic: String): Set[PartitionAndReplica] = {
     partitionReplicaAssignment
       .filter { case(topicAndPartition, replicas) => topicAndPartition.topic.equals(topic) }
@@ -105,15 +121,18 @@ class ControllerContext(val zkUtils: ZkUtils,
     }.flatten.toSet
   }
 
+  // 获取指定topic上的TopicAndPartition
   def partitionsForTopic(topic: String): collection.Set[TopicAndPartition] = {
     partitionReplicaAssignment
       .filter { case(topicAndPartition, replicas) => topicAndPartition.topic.equals(topic) }.keySet
   }
 
+  // 获取所有存活的PartitionAndReplica
   def allLiveReplicas(): Set[PartitionAndReplica] = {
     replicasOnBrokers(liveBrokerIds)
   }
 
+  // 将Set[TopicAndPartition]转换为Set[PartitionAndReplica]
   def replicasForPartition(partitions: collection.Set[TopicAndPartition]): collection.Set[PartitionAndReplica] = {
     partitions.map { p =>
       val replicas = partitionReplicaAssignment(p)
@@ -121,6 +140,7 @@ class ControllerContext(val zkUtils: ZkUtils,
     }.flatten
   }
 
+  // 删除指定topic并更新
   def removeTopic(topic: String) = {
     partitionLeadershipInfo = partitionLeadershipInfo.filter{ case (topicAndPartition, _) => topicAndPartition.topic != topic }
     partitionReplicaAssignment = partitionReplicaAssignment.filter{ case (topicAndPartition, _) => topicAndPartition.topic != topic }

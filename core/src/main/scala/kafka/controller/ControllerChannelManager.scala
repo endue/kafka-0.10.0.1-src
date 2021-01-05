@@ -37,7 +37,17 @@ import scala.collection.JavaConverters._
 import scala.collection.{Set, mutable}
 import scala.collection.mutable.HashMap
 
+/**
+  * 用来管理KafkaController Leader和集群中其他broker之间的网络通信
+  * @param controllerContext
+  * @param config
+  * @param time
+  * @param metrics
+  * @param threadNamePrefix
+  */
 class ControllerChannelManager(controllerContext: ControllerContext, config: KafkaConfig, time: Time, metrics: Metrics, threadNamePrefix: Option[String] = None) extends Logging {
+  // key是brokerId，value是ControllerBrokerStateInfo
+  // ControllerBrokerStateInfo表示与一个broker的连续信息
   protected val brokerStateInfo = new HashMap[Int, ControllerBrokerStateInfo]
   private val brokerLock = new Object
   this.logIdent = "[Channel manager on controller " + config.brokerId + "]: "
@@ -84,6 +94,7 @@ class ControllerChannelManager(controllerContext: ControllerContext, config: Kaf
     }
   }
 
+  // 添加新的broker
   private def addNewBroker(broker: Broker) {
     val messageQueue = new LinkedBlockingQueue[QueueItem]
     debug("Controller %d trying to connect to broker %d".format(config.brokerId, broker.id))
@@ -151,6 +162,17 @@ class ControllerChannelManager(controllerContext: ControllerContext, config: Kaf
 
 case class QueueItem(apiKey: ApiKeys, apiVersion: Option[Short], request: AbstractRequest, callback: AbstractRequestResponse => Unit)
 
+/**
+  * 发送请求的线程，一个broker对应一个
+  * @param controllerId
+  * @param controllerContext
+  * @param queue
+  * @param networkClient
+  * @param brokerNode
+  * @param config
+  * @param time
+  * @param name
+  */
 class RequestSendThread(val controllerId: Int,
                         val controllerContext: ControllerContext,
                         val queue: BlockingQueue[QueueItem],
@@ -165,10 +187,11 @@ class RequestSendThread(val controllerId: Int,
   private val stateChangeLogger = KafkaController.stateChangeLogger
   private val socketTimeoutMs = config.controllerSocketTimeoutMs
 
+  // 发送请求
   override def doWork(): Unit = {
 
     def backoff(): Unit = CoreUtils.swallowTrace(Thread.sleep(300))
-
+    // 获取请求队列中的消息
     val QueueItem(apiKey, apiVersion, request, callback) = queue.take()
     import NetworkClientBlockingOps._
     var clientResponse: ClientResponse = null
@@ -176,14 +199,17 @@ class RequestSendThread(val controllerId: Int,
       lock synchronized {
         var isSendSuccessful = false
         while (isRunning.get() && !isSendSuccessful) {
+          // 当broker宕机后，会触发zookeeper的监听器调用removeBroker方法将当前线程停止，isRunning.get()会返回false停止重试
           // if a broker goes down for a long time, then at some point the controller's zookeeper listener will trigger a
           // removeBroker which will invoke shutdown() on this thread. At that point, we will stop retrying.
           try {
+            // 如果broker连接没有准备好，那么阻塞等待
             if (!brokerReady()) {
               isSendSuccessful = false
               backoff()
             }
             else {
+              // 发送请求并阻塞等待响应
               val requestHeader = apiVersion.fold(networkClient.nextRequestHeader(apiKey))(networkClient.nextRequestHeader(apiKey, _))
               val send = new RequestSend(brokerNode.idString, requestHeader, request.toStruct)
               val clientRequest = new ClientRequest(time.milliseconds(), true, send, null)
@@ -191,6 +217,7 @@ class RequestSendThread(val controllerId: Int,
               isSendSuccessful = true
             }
           } catch {
+            // 消息发送失败，重新连接到对应broker并重新发送消息
             case e: Throwable => // if the send was not successful, reconnect to broker and resend the message
               warn(("Controller %d epoch %d fails to send request %s to broker %s. " +
                 "Reconnecting to broker.").format(controllerId, controllerContext.epoch,
@@ -200,7 +227,10 @@ class RequestSendThread(val controllerId: Int,
               backoff()
           }
         }
+        // 响应不为空
         if (clientResponse != null) {
+          // 从这里可以看出KafkaController只能接受3种请求：
+          // LeaderAndIsrRequest，StopReplicaRequest，UpdateMetadataCache
           val response = ApiKeys.forId(clientResponse.request.request.header.apiKey) match {
             case ApiKeys.LEADER_AND_ISR => new LeaderAndIsrResponse(clientResponse.responseBody)
             case ApiKeys.STOP_REPLICA => new StopReplicaResponse(clientResponse.responseBody)
@@ -443,6 +473,13 @@ class ControllerBrokerRequestBatch(controller: KafkaController) extends  Logging
   }
 }
 
+/**
+  *
+  * @param networkClient 负责维护controller与对应broker之间的网络连接
+  * @param brokerNode 对应的broker的网络位置信息，其中保存了host、ip、port和机架信息
+  * @param messageQueue 缓冲队列，缓冲发往borker的请求
+  * @param requestSendThread 负责发送请求的线程
+  */
 case class ControllerBrokerStateInfo(networkClient: NetworkClient,
                                      brokerNode: Node,
                                      messageQueue: BlockingQueue[QueueItem],
