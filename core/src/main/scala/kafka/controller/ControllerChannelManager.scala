@@ -65,7 +65,7 @@ class ControllerChannelManager(controllerContext: ControllerContext, config: Kaf
       brokerStateInfo.values.foreach(removeExistingBroker)
     }
   }
-
+  // 发送请求，就是将请求添加到对应broker的ControllerBrokerStateInfo的队列中
   def sendRequest(brokerId: Int, apiKey: ApiKeys, apiVersion: Option[Short], request: AbstractRequest, callback: AbstractRequestResponse => Unit = null) {
     brokerLock synchronized {
       val stateInfoOpt = brokerStateInfo.get(brokerId)
@@ -99,7 +99,9 @@ class ControllerChannelManager(controllerContext: ControllerContext, config: Kaf
     val messageQueue = new LinkedBlockingQueue[QueueItem]
     debug("Controller %d trying to connect to broker %d".format(config.brokerId, broker.id))
     val brokerEndPoint = broker.getBrokerEndPoint(config.interBrokerSecurityProtocol)
+    // 创建broker节点
     val brokerNode = new Node(broker.id, brokerEndPoint.host, brokerEndPoint.port)
+    // 创建networkClient
     val networkClient = {
       val channelBuilder = ChannelBuilders.create(
         config.interBrokerSecurityProtocol,
@@ -135,13 +137,15 @@ class ControllerChannelManager(controllerContext: ControllerContext, config: Kaf
       case None => "Controller-%d-to-broker-%d-send-thread".format(config.brokerId, broker.id)
       case Some(name) => "%s:Controller-%d-to-broker-%d-send-thread".format(name, config.brokerId, broker.id)
     }
-
+    // 创建RequestSendThread，用来发送请求
     val requestThread = new RequestSendThread(config.brokerId, controllerContext, messageQueue, networkClient,
       brokerNode, config, time, threadName)
     requestThread.setDaemon(false)
+    // 保存到brokerStateInfo中
     brokerStateInfo.put(broker.id, new ControllerBrokerStateInfo(networkClient, brokerNode, messageQueue, requestThread))
   }
 
+  // 删除broker，关闭连接，清理请求队列，关闭线程，把broker相关信息从brokerStateInfo里移除
   private def removeExistingBroker(brokerState: ControllerBrokerStateInfo) {
     try {
       brokerState.networkClient.close()
@@ -153,6 +157,7 @@ class ControllerChannelManager(controllerContext: ControllerContext, config: Kaf
     }
   }
 
+  // 启动发送请求的线程
   protected def startRequestSendThread(brokerId: Int) {
     val requestThread = brokerStateInfo(brokerId).requestSendThread
     if(requestThread.getState == Thread.State.NEW)
@@ -253,15 +258,20 @@ class RequestSendThread(val controllerId: Int,
     }
   }
 
+  /**
+    * 连接是否已经建立
+    * @return
+    */
   private def brokerReady(): Boolean = {
     import NetworkClientBlockingOps._
     try {
-
+      // 已经建立，返回true
       if (networkClient.isReady(brokerNode, time.milliseconds()))
         true
       else {
+        // 等待建立
         val ready = networkClient.blockingReady(brokerNode, socketTimeoutMs)(time)
-
+        // 超时抛出异常
         if (!ready)
           throw new SocketTimeoutException(s"Failed to connect within $socketTimeoutMs ms")
 
