@@ -190,7 +190,7 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
   val partitionStateMachine = new PartitionStateMachine(this)
   // 实例化replica状态机
   val replicaStateMachine = new ReplicaStateMachine(this)
-  // 初始化ZookeeperLeaderElector对象，
+  // 初始化ZookeeperLeaderElector对象，赋值kafkaController的leader选举和故障转移
   // 为ZookeeperLeaderElector设置两个回调方法，onControllerFailover和onControllerResignation
   private val controllerElector = new ZookeeperLeaderElector(controllerContext, ZkUtils.ControllerPath, onControllerFailover,
     onControllerResignation, config.brokerId)
@@ -1265,12 +1265,14 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
       var preferredReplicasForTopicsByBrokers: Map[Int, Map[TopicAndPartition, Seq[Int]]] = null
       inLock(controllerContext.controllerLock) {
         preferredReplicasForTopicsByBrokers =
+          // 遍历每一个partition的ar集合，过滤掉被删除的topic,之后分组
           controllerContext.partitionReplicaAssignment.filterNot(p => deleteTopicManager.isTopicQueuedUpForDeletion(p._1.topic)).groupBy {
             case(topicAndPartition, assignedReplicas) => assignedReplicas.head
           }
       }
       debug("preferred replicas by broker " + preferredReplicasForTopicsByBrokers)
       // for each broker, check if a preferred replica election needs to be triggered
+      // 过滤每一个存活的broker,检查是否需要一个preferred replica选举被触发
       preferredReplicasForTopicsByBrokers.foreach {
         case(leaderBroker, topicAndPartitionsForBroker) => {
           var imbalanceRatio: Double = 0
