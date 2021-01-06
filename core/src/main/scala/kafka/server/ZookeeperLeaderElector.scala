@@ -30,6 +30,8 @@ import org.apache.kafka.common.security.JaasUtils
  * session expiration, instead it assumes the caller will handle it by probably try to re-elect again. If the existing
  * leader is dead, this class will handle automatic re-election and if it succeeds, it invokes the leader state change
  * callback
+  * 这个类处理基于临时路径的zookeeper leader选举。选举模块不处理会话过期，相反，它假定调用者将通过再次尝试重新选举来处理它。
+  * 如果现有的leader已经死亡，这个类将处理自动重选，如果成功，它将调用leader状态更改回调
  */
 class ZookeeperLeaderElector(controllerContext: ControllerContext,
                              electionPath: String,
@@ -178,6 +180,7 @@ class ZookeeperLeaderElector(controllerContext: ControllerContext,
 
     /**
      * Called when the leader information stored in zookeeper has been delete. Try to elect as the leader
+      * 当"/controller"节点中的数据被删除时会触发handleDataDeleted方法进行处理
      * @throws Exception
      *             On any error.
      */
