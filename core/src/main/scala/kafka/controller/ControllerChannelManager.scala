@@ -288,14 +288,23 @@ class RequestSendThread(val controllerId: Int,
 
 }
 
+/**
+  * 提高KafkaController Leader和集群其他broker的通信效率，实现批量发送请求的功能
+  * @param controller
+  */
 class ControllerBrokerRequestBatch(controller: KafkaController) extends  Logging {
   val controllerContext = controller.controllerContext
   val controllerId: Int = controller.config.brokerId
+  // 保存了发往指定broker的LeaderAndIsrRequest请求相关的信息
   val leaderAndIsrRequestMap = mutable.Map.empty[Int, mutable.Map[TopicPartition, PartitionStateInfo]]
+  // 保存了发往指定broker的StopReplicaRequest请求相关的信息
   val stopReplicaRequestMap = mutable.Map.empty[Int, Seq[StopReplicaRequestInfo]]
+  // 保存了发往指定broker的UpdateMetadataRequestMap请求相关的信息
   val updateMetadataRequestMap = mutable.Map.empty[Int, mutable.Map[TopicPartition, PartitionStateInfo]]
   private val stateChangeLogger = KafkaController.stateChangeLogger
 
+  // 添加请求前的校验
+  // 如果前一批不是空的，则引发错误
   def newBatch() {
     // raise error if the previous batch is not empty
     if (leaderAndIsrRequestMap.size > 0)
@@ -309,17 +318,19 @@ class ControllerBrokerRequestBatch(controller: KafkaController) extends  Logging
         "new one. Some UpdateMetadata state changes %s might be lost ".format(updateMetadataRequestMap.toString()))
   }
 
+  // 清空相关请求集合
   def clear() {
     leaderAndIsrRequestMap.clear()
     stopReplicaRequestMap.clear()
     updateMetadataRequestMap.clear()
   }
 
+  // 添加LeaderAndIsrRequest
   def addLeaderAndIsrRequestForBrokers(brokerIds: Seq[Int], topic: String, partition: Int,
                                        leaderIsrAndControllerEpoch: LeaderIsrAndControllerEpoch,
                                        replicas: Seq[Int], callback: AbstractRequestResponse => Unit = null) {
     val topicPartition = new TopicPartition(topic, partition)
-
+    // 遍历要接收请求的每一个broker
     brokerIds.filter(_ >= 0).foreach { brokerId =>
       val result = leaderAndIsrRequestMap.getOrElseUpdate(brokerId, mutable.Map.empty)
       result.put(topicPartition, PartitionStateInfo(leaderIsrAndControllerEpoch, replicas.toSet))
@@ -328,7 +339,7 @@ class ControllerBrokerRequestBatch(controller: KafkaController) extends  Logging
     addUpdateMetadataRequestForBrokers(controllerContext.liveOrShuttingDownBrokerIds.toSeq,
                                        Set(TopicAndPartition(topic, partition)))
   }
-
+  // 添加StopReplicaRequest
   def addStopReplicaRequestForBrokers(brokerIds: Seq[Int], topic: String, partition: Int, deletePartition: Boolean,
                                       callback: (AbstractRequestResponse, Int) => Unit = null) {
     brokerIds.filter(b => b >= 0).foreach { brokerId =>
@@ -344,9 +355,11 @@ class ControllerBrokerRequestBatch(controller: KafkaController) extends  Logging
   }
 
   /** Send UpdateMetadataRequest to the given brokers for the given partitions and partitions that are being deleted */
+  // 添加UpdateMetadataRequest
   def addUpdateMetadataRequestForBrokers(brokerIds: Seq[Int],
                                          partitions: collection.Set[TopicAndPartition] = Set.empty[TopicAndPartition],
                                          callback: AbstractRequestResponse => Unit = null) {
+    // 回调函数
     def updateMetadataRequestMapFor(partition: TopicAndPartition, beingDeleted: Boolean) {
       val leaderIsrAndControllerEpochOpt = controllerContext.partitionLeadershipInfo.get(partition)
       leaderIsrAndControllerEpochOpt match {
@@ -372,6 +385,7 @@ class ControllerBrokerRequestBatch(controller: KafkaController) extends  Logging
         controllerContext.partitionLeadershipInfo.keySet
       else
         partitions
+      // 过滤要被删除的分区
       if (controller.deleteTopicManager.partitionsToBeDeleted.isEmpty)
         givenPartitions
       else
@@ -409,6 +423,7 @@ class ControllerBrokerRequestBatch(controller: KafkaController) extends  Logging
           )
           topicPartition -> partitionState
         }
+        // 构建leaderAndIsrRequest并发送
         val leaderAndIsrRequest = new LeaderAndIsrRequest(controllerId, controllerEpoch, partitionStates.asJava, leaders.asJava)
         controller.sendRequest(broker, ApiKeys.LEADER_AND_ISR, None, leaderAndIsrRequest, null)
       }

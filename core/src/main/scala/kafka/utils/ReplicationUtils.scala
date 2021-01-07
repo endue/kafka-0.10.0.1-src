@@ -70,6 +70,7 @@ object ReplicationUtils extends Logging {
   }
 
   def getLeaderIsrAndEpochForPartition(zkUtils: ZkUtils, topic: String, partition: Int):Option[LeaderIsrAndControllerEpoch] = {
+    // 路径：/brokers/topics/{topic}/partitions/{partitionId}
     val leaderAndIsrPath = getTopicPartitionLeaderAndIsrPath(topic, partition)
     val (leaderAndIsrOpt, stat) = zkUtils.readDataMaybeNull(leaderAndIsrPath)
     leaderAndIsrOpt.flatMap(leaderAndIsrStr => parseLeaderAndIsr(leaderAndIsrStr, leaderAndIsrPath, stat))

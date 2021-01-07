@@ -63,7 +63,7 @@ class ControllerContext(val zkUtils: ZkUtils,
   var epochZkVersion: Int = KafkaController.InitialControllerEpochZkVersion - 1
   // 存放集群中所有的topic
   var allTopics: Set[String] = Set.empty
-  // 记录每一个partition的ar集合
+  // 记录每一个topic-partition的ar集合
   var partitionReplicaAssignment: mutable.Map[TopicAndPartition, Seq[Int]] = mutable.Map.empty
   // 记录每一个分区的leader副本所在的brokerId、ISR列表、controller_epoch、LeaderEpoch
   var partitionLeadershipInfo: mutable.Map[TopicAndPartition, LeaderIsrAndControllerEpoch] = mutable.Map.empty
@@ -190,7 +190,7 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
   val partitionStateMachine = new PartitionStateMachine(this)
   // 实例化replica状态机
   val replicaStateMachine = new ReplicaStateMachine(this)
-  // 初始化ZookeeperLeaderElector对象，赋值kafkaController的leader选举和故障转移
+  // 初始化ZookeeperLeaderElector对象，负责kafkaController的leader选举和故障转移
   // 为ZookeeperLeaderElector设置两个回调方法，onControllerFailover和onControllerResignation
   private val controllerElector = new ZookeeperLeaderElector(controllerContext, ZkUtils.ControllerPath, onControllerFailover,
     onControllerResignation, config.brokerId)
@@ -550,9 +550,11 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
    * 2. Invokes the new partition callback
    * 3. Send metadata request with the new topic to all brokers so they allow requests for that topic to be served
    */
+  // 当新的topic创建时执行
   def onNewTopicCreation(topics: Set[String], newPartitions: Set[TopicAndPartition]) {
     info("New topic creation callback for %s".format(newPartitions.mkString(",")))
     // subscribe to partition changes
+    // 为新topic建立registerPartitionChangeListener监听器
     topics.foreach(topic => partitionStateMachine.registerPartitionChangeListener(topic))
     onNewPartitionCreation(newPartitions)
   }
@@ -565,9 +567,13 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
    */
   def onNewPartitionCreation(newPartitions: Set[TopicAndPartition]) {
     info("New partition creation callback for %s".format(newPartitions.mkString(",")))
+    // 将新Partitions的状态转为NewPartition
     partitionStateMachine.handleStateChanges(newPartitions, NewPartition)
+    // 将新Partitions的副本状态转为NewReplica
     replicaStateMachine.handleStateChanges(controllerContext.replicasForPartition(newPartitions), NewReplica)
+    // 将新Partitions的状态转为OnlinePartition
     partitionStateMachine.handleStateChanges(newPartitions, OnlinePartition, offlinePartitionSelector)
+    // 将新Partitions的副本状态转为OnlineReplica
     replicaStateMachine.handleStateChanges(controllerContext.replicasForPartition(newPartitions), OnlineReplica)
   }
 
