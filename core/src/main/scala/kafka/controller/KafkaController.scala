@@ -1287,7 +1287,8 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
 
   /**
     * 定时对所有topic-partition的leader检查
-    * 确定是否leader的重新选举
+    * 确定是否执行leader的重新选举
+    * leader一般情况下都是ar列表的第一个
     */
   private def checkAndTriggerPartitionRebalance(): Unit = {
     if (isActive()) {
