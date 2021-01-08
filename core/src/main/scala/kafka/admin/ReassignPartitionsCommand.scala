@@ -120,6 +120,11 @@ object ReassignPartitionsCommand extends Logging {
     (partitionsToBeReassigned, currentAssignment)
   }
 
+  /**
+    * 分区重配置
+    * @param zkUtils
+    * @param opts
+    */
   def executeAssignment(zkUtils: ZkUtils, opts: ReassignPartitionsCommandOptions) {
     if(!opts.options.has(opts.reassignmentJsonFileOpt))
       CommandLineUtils.printUsageAndDie(opts.parser, "If --execute option is used, command must include --reassignment-json-file that was output " + "during the --generate option")
@@ -129,7 +134,7 @@ object ReassignPartitionsCommand extends Logging {
   }
 
   def executeAssignment(zkUtils: ZkUtils,reassignmentJsonString: String){
-
+    // 校验
     val partitionsToBeReassigned = zkUtils.parsePartitionReassignmentDataWithoutDedup(reassignmentJsonString)
     if (partitionsToBeReassigned.isEmpty)
       throw new AdminCommandFailedException("Partition reassignment data file is empty")
@@ -151,6 +156,7 @@ object ReassignPartitionsCommand extends Logging {
     println("Current partition replica assignment\n\n%s\n\nSave this to use as the --reassignment-json-file option during rollback"
       .format(zkUtils.formatAsReassignmentJson(currentPartitionReplicaAssignment)))
     // start the reassignment
+    // 开始重新分配
     if(reassignPartitionsCommand.reassignPartitions())
       println("Successfully started reassignment of partitions %s".format(zkUtils.formatAsReassignmentJson(partitionsToBeReassigned.toMap)))
     else
@@ -224,16 +230,20 @@ object ReassignPartitionsCommand extends Logging {
   }
 }
 
+// 开始重分配
 class ReassignPartitionsCommand(zkUtils: ZkUtils, partitions: collection.Map[TopicAndPartition, collection.Seq[Int]])
   extends Logging {
   def reassignPartitions(): Boolean = {
     try {
+      // 过滤不存在的partition
       val validPartitions = partitions.filter(p => validatePartition(zkUtils, p._1.topic, p._1.partition))
       if(validPartitions.isEmpty) {
         false
       }
       else {
         val jsonReassignmentData = zkUtils.formatAsReassignmentJson(validPartitions)
+        // 创建节点"/admin/reassign_partitions"并写入数据
+        // 触发PartitionsReassignedListener执行
         zkUtils.createPersistentPath(ZkUtils.ReassignPartitionsPath, jsonReassignmentData)
         true
       }
