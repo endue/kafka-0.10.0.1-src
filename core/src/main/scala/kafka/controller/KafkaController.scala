@@ -1479,6 +1479,7 @@ class ReassignedPartitionsIsrChangeListener(controller: KafkaController, topic: 
 /**
  * Called when leader intimates of isr change
  * @param controller
+  * 监听"/isr_change_notification",用来更新各个broker的缓存
  */
 class IsrChangeNotificationListener(controller: KafkaController) extends IZkChildListener with Logging {
 
@@ -1487,11 +1488,15 @@ class IsrChangeNotificationListener(controller: KafkaController) extends IZkChil
 
     inLock(controller.controllerContext.controllerLock) {
       debug("[IsrChangeNotificationListener] Fired!!!")
+      // 获取"/isr_change_notification"的所有子节点
       val childrenAsScala: mutable.Buffer[String] = currentChildren.asScala
       try {
+        // 转换为topic-partiton集合
         val topicAndPartitions: immutable.Set[TopicAndPartition] = childrenAsScala.map(x => getTopicAndPartition(x)).flatten.toSet
         if (topicAndPartitions.nonEmpty) {
+          // 更新controllerContext.partitionLeadershipInfo
           controller.updateLeaderAndIsrCache(topicAndPartitions)
+          // 发送UpdateMetadataRequest到每个broker上
           processUpdateNotifications(topicAndPartitions)
         }
       } finally {
