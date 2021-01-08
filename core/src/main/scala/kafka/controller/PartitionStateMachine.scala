@@ -240,7 +240,7 @@ class PartitionStateMachine(controller: KafkaController) extends Logging {
             case OfflinePartition =>
               // 为当前分区重新选举
               electLeaderForPartition(topic, partition, leaderSelector)
-            // 当前分区状态为OnlinePartition，因为某种原因重新选举
+            // 当前分区状态为OnlinePartition，因为某种原因重新选举，参考kafka.controller.KafkaController.checkAndTriggerPartitionRebalance
             case OnlinePartition => // invoked when the leader needs to be re-elected
               // 为当前分区重新选举
               electLeaderForPartition(topic, partition, leaderSelector)
