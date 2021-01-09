@@ -51,7 +51,7 @@ class ControllerChannelManager(controllerContext: ControllerContext, config: Kaf
   protected val brokerStateInfo = new HashMap[Int, ControllerBrokerStateInfo]
   private val brokerLock = new Object
   this.logIdent = "[Channel manager on controller " + config.brokerId + "]: "
-
+  // 为每个broker建立ControllerBrokerStateInfo
   controllerContext.liveBrokers.foreach(addNewBroker(_))
 
   def startup() = {
@@ -96,6 +96,7 @@ class ControllerChannelManager(controllerContext: ControllerContext, config: Kaf
 
   // 添加新的broker
   private def addNewBroker(broker: Broker) {
+    // 消息队列，一个broker对应一个
     val messageQueue = new LinkedBlockingQueue[QueueItem]
     debug("Controller %d trying to connect to broker %d".format(config.brokerId, broker.id))
     val brokerEndPoint = broker.getBrokerEndPoint(config.interBrokerSecurityProtocol)
@@ -194,9 +195,9 @@ class RequestSendThread(val controllerId: Int,
 
   // 发送请求
   override def doWork(): Unit = {
-
+    // 阻塞300ms
     def backoff(): Unit = CoreUtils.swallowTrace(Thread.sleep(300))
-    // 获取请求队列中的消息
+    // 获取请求队列中的消息，没有消息会阻塞住
     val QueueItem(apiKey, apiVersion, request, callback) = queue.take()
     import NetworkClientBlockingOps._
     var clientResponse: ClientResponse = null
@@ -229,13 +230,14 @@ class RequestSendThread(val controllerId: Int,
                   request.toString, brokerNode.toString()), e)
               networkClient.close(brokerNode.idString)
               isSendSuccessful = false
+              // 阻塞等待300ms
               backoff()
           }
         }
         // 响应不为空
         if (clientResponse != null) {
-          // 从这里可以看出KafkaController只能接受3种请求：
-          // LeaderAndIsrRequest，StopReplicaRequest，UpdateMetadataCache
+          // 从这里可以看出KafkaController只能接受3种响应：
+          // LeaderAndIsrResponse，StopReplicaResponse，UpdateMetadataResponse
           val response = ApiKeys.forId(clientResponse.request.request.header.apiKey) match {
             case ApiKeys.LEADER_AND_ISR => new LeaderAndIsrResponse(clientResponse.responseBody)
             case ApiKeys.STOP_REPLICA => new StopReplicaResponse(clientResponse.responseBody)
@@ -244,7 +246,7 @@ class RequestSendThread(val controllerId: Int,
           }
           stateChangeLogger.trace("Controller %d epoch %d received response %s for a request sent to broker %s"
             .format(controllerId, controllerContext.epoch, response.toString, brokerNode.toString))
-
+          // 回调不为null，将响应消息发送给对应的回调
           if (callback != null) {
             callback(response)
           }
@@ -281,6 +283,7 @@ class RequestSendThread(val controllerId: Int,
     } catch {
       case e: Throwable =>
         warn("Controller %d's connection to broker %s was unsuccessful".format(controllerId, brokerNode.toString()), e)
+        // 抛出异常关闭连接
         networkClient.close(brokerNode.idString)
         false
     }
@@ -290,6 +293,7 @@ class RequestSendThread(val controllerId: Int,
 
 /**
   * 提高KafkaController Leader和集群其他broker的通信效率，实现批量发送请求的功能
+  * 这里可以看出对应三种请求leaderAndIsrRequest，stopReplicaRequest，updateMetadataRequest
   * @param controller
   */
 class ControllerBrokerRequestBatch(controller: KafkaController) extends  Logging {
@@ -330,7 +334,8 @@ class ControllerBrokerRequestBatch(controller: KafkaController) extends  Logging
                                        leaderIsrAndControllerEpoch: LeaderIsrAndControllerEpoch,
                                        replicas: Seq[Int], callback: AbstractRequestResponse => Unit = null) {
     val topicPartition = new TopicPartition(topic, partition)
-    // 遍历要接收请求的每一个broker
+    // 遍历要接收请求的每一个broker获取对应的Map[TopicPartition, PartitionStateInfo]
+    // 不存在时返回空map，然后将请求添加都map中
     brokerIds.filter(_ >= 0).foreach { brokerId =>
       val result = leaderAndIsrRequestMap.getOrElseUpdate(brokerId, mutable.Map.empty)
       result.put(topicPartition, PartitionStateInfo(leaderIsrAndControllerEpoch, replicas.toSet))
@@ -401,6 +406,7 @@ class ControllerBrokerRequestBatch(controller: KafkaController) extends  Logging
     controller.deleteTopicManager.partitionsToBeDeleted.foreach(partition => updateMetadataRequestMapFor(partition, beingDeleted = true))
   }
 
+  // //依次取出三个map的中的消息，分别放入对应broker的queue中
   def sendRequestsToBrokers(controllerEpoch: Int) {
     try {
       leaderAndIsrRequestMap.foreach { case (broker, partitionStateInfos) =>
@@ -425,6 +431,7 @@ class ControllerBrokerRequestBatch(controller: KafkaController) extends  Logging
         }
         // 构建leaderAndIsrRequest并发送
         val leaderAndIsrRequest = new LeaderAndIsrRequest(controllerId, controllerEpoch, partitionStates.asJava, leaders.asJava)
+        // 添加请求到对应broker的queue中
         controller.sendRequest(broker, ApiKeys.LEADER_AND_ISR, None, leaderAndIsrRequest, null)
       }
       leaderAndIsrRequestMap.clear()
@@ -460,7 +467,7 @@ class ControllerBrokerRequestBatch(controller: KafkaController) extends  Logging
             }
             new UpdateMetadataRequest(version, controllerId, controllerEpoch, partitionStates.asJava, liveBrokers.asJava)
           }
-
+        // 添加请求到对应broker的queue中
         controller.sendRequest(broker, ApiKeys.UPDATE_METADATA_KEY, Some(version), updateMetadataRequest, null)
       }
       updateMetadataRequestMap.clear()
@@ -474,6 +481,7 @@ class ControllerBrokerRequestBatch(controller: KafkaController) extends  Logging
         replicaInfoList.foreach { r =>
           val stopReplicaRequest = new StopReplicaRequest(controllerId, controllerEpoch, r.deletePartition,
             Set(new TopicPartition(r.replica.topic, r.replica.partition)).asJava)
+          // 添加请求到对应broker的queue中
           controller.sendRequest(broker, ApiKeys.STOP_REPLICA, None, stopReplicaRequest, r.callback)
         }
       }
