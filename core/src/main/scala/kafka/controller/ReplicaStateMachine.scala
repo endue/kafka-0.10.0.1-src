@@ -85,7 +85,7 @@ class ReplicaStateMachine(controller: KafkaController) extends Logging {
     * 启动state machine
    */
   def startup() {
-    // initialize replica state 初始化各个副本状态
+    // initialize replica state 初始化zk上各个副本状态
     initializeReplicaState()
     // set started flag
     hasStarted.set(true)
@@ -136,7 +136,7 @@ class ReplicaStateMachine(controller: KafkaController) extends Logging {
         brokerRequestBatch.newBatch()
         // 遍历副本转换状态
         replicas.foreach(r => handleStateChange(r, targetState, callbacks))
-        // 发送消息
+        // 向其他broker发送消息
         brokerRequestBatch.sendRequestsToBrokers(controller.epoch)
       }catch {
         case e: Throwable => error("Error while moving some replicas to %s state".format(targetState), e)
@@ -199,20 +199,25 @@ class ReplicaStateMachine(controller: KafkaController) extends Logging {
       // 判断目标状态
       targetState match {
         case NewReplica =>
+          // 校验副本的前置状态，只有处于 NonExistentReplica 状态的副本才能转移到 NewReplica 状态
           assertValidPreviousStates(partitionAndReplica, List(NonExistentReplica), targetState)
           // start replica as a follower to the current leader for its partition
-          //
+          // 从ZK中获取该分区的 LeaderIsrAndControllerEpoch 信息
           val leaderIsrAndControllerEpochOpt = ReplicationUtils.getLeaderIsrAndEpochForPartition(zkUtils, topic, partition)
           leaderIsrAndControllerEpochOpt match {
             case Some(leaderIsrAndControllerEpoch) =>
-              // NewReplica时不可能是该副本的leader,只有OnlineReplica状态才有leader
+              // 获取到分区的 LeaderIsrAndControllerEpoch 信息，如果发现该分区的leader是当前副本，
+              // 那么就抛出StateChangeFailedException异常，因为处在这个状态的副本是不能被选举为leader的
               if(leaderIsrAndControllerEpoch.leaderAndIsr.leader == replicaId)
                 throw new StateChangeFailedException("Replica %d for partition %s cannot be moved to NewReplica"
                   .format(replicaId, topicAndPartition) + "state as it is being requested to become leader")
-              // 封装请求
+              // 获取到了分区的 LeaderIsrAndControllerEpoch 信息，并且分区的 leader 不是当前副本，那么向该分区的所有副本添加一个 LeaderAndIsr请求
+              // （添加 LeaderAndIsr 请求时，同时也会向所有的 Broker 都添加一个 UpdateMetadata 请求）
               brokerRequestBatch.addLeaderAndIsrRequestForBrokers(List(replicaId),
                                                                   topic, partition, leaderIsrAndControllerEpoch,
                                                                   replicaAssignment)
+            // 如果获取不到leaderIsrAndControllerEpochOpt信息，直接将该副本的状态设置为 NewReplica，
+            // 然后结束流程（新建分区时，副本可能处于这个状态，该分区的所有副本是没有 LeaderAndIsr 信息的）
             case None => // new leader request will be sent to this replica when one gets elected
           }
           // 修改副本状态
@@ -225,7 +230,7 @@ class ReplicaStateMachine(controller: KafkaController) extends Logging {
           // 修改副本状态
           replicaState.put(partitionAndReplica, ReplicaDeletionStarted)
           // send stop replica command
-          // 发送请求
+          // 准备要发送的StopReplicaRequest请求到其他broker
           brokerRequestBatch.addStopReplicaRequestForBrokers(List(replicaId), topic, partition, deletePartition = true,
             callbacks.stopReplicaResponseCallback)
           stateChangeLogger.trace("Controller %d epoch %d changed state of replica %d for partition %s from %s to %s"
@@ -290,7 +295,7 @@ class ReplicaStateMachine(controller: KafkaController) extends Logging {
           assertValidPreviousStates(partitionAndReplica,
             List(NewReplica, OnlineReplica, OfflineReplica, ReplicaDeletionIneligible), targetState)
           // send stop replica command to the replica so that it stops fetching from the leader
-          // 添加StopReplicaRequest请求
+          // 准备要发送的StopReplicaRequest请求到其他broker
           brokerRequestBatch.addStopReplicaRequestForBrokers(List(replicaId), topic, partition, deletePartition = false)
           // As an optimization, the controller removes dead replicas from the ISR
           val leaderAndIsrIsEmpty: Boolean =
@@ -384,7 +389,7 @@ class ReplicaStateMachine(controller: KafkaController) extends Logging {
     * 初始化每个主题对应副本的状态
    */
   private def initializeReplicaState() {
-    // 遍历每一个主题分区的AR列表
+    // 遍历zk上每一个主题分区的AR副本列表
     for((topicPartition, assignedReplicas) <- controllerContext.partitionReplicaAssignment) {
       // 获取主题
       val topic = topicPartition.topic
@@ -428,7 +433,7 @@ class ReplicaStateMachine(controller: KafkaController) extends Logging {
               val curBrokers = currentBrokerList.map(_.toInt).toSet.flatMap(zkUtils.getBrokerInfo)
               // 获取当前的brokerId列表
               val curBrokerIds = curBrokers.map(_.id)
-              // 关闭或可用的brokerId列表
+              // 获取前者live的brokerId列表
               val liveOrShuttingDownBrokerIds = controllerContext.liveOrShuttingDownBrokerIds
               // 获取新的brokerId
               val newBrokerIds = curBrokerIds -- liveOrShuttingDownBrokerIds
