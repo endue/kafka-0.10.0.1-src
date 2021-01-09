@@ -138,6 +138,7 @@ class ReassignedPartitionLeaderSelector(controllerContext: ControllerContext) ex
                                                                              currentLeaderAndIsr.isr.contains(r))
     val newLeaderOpt = aliveReassignedInSyncReplicas.headOption
     newLeaderOpt match {
+        // 返回ISR中的第一个为主副本,将当前LeaderEpoch计数器加1，对应的Zookeeper节点的版本号也加1
       case Some(newLeader) => (new LeaderAndIsr(newLeader, currentLeaderEpoch + 1, currentLeaderAndIsr.isr,
         currentLeaderIsrZkPathVersion + 1), reassignedInSyncReplicas)
       case None =>
@@ -208,7 +209,7 @@ class ControlledShutdownLeaderSelector(controllerContext: ControllerContext)
     val currentLeader = currentLeaderAndIsr.leader
     // 获取当前分区的AR列表
     val assignedReplicas = controllerContext.partitionReplicaAssignment(topicAndPartition)
-    // 获取或者的或者关闭的副本列表
+    // 获取活着的或者关闭的副本列表
     val liveOrShuttingDownBrokerIds = controllerContext.liveOrShuttingDownBrokerIds
     // 从AR列表过滤出活着的副本列表
     val liveAssignedReplicas = assignedReplicas.filter(r => liveOrShuttingDownBrokerIds.contains(r))

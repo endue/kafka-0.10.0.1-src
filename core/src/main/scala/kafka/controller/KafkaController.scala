@@ -69,7 +69,7 @@ class ControllerContext(val zkUtils: ZkUtils,
   var partitionLeadershipInfo: mutable.Map[TopicAndPartition, LeaderIsrAndControllerEpoch] = mutable.Map.empty
   // 记录正在重新分配副本的分区
   val partitionsBeingReassigned: mutable.Map[TopicAndPartition, ReassignedPartitionsContext] = new mutable.HashMap
-  // 记录正在进行"优先副本"选举的分区
+  // 记录正在进行"leader副本优化"选举的分区
   val partitionsUndergoingPreferredReplicaElection: mutable.Set[TopicAndPartition] = new mutable.HashSet
   // 记录潜在live的broker集合
   private var liveBrokersUnderlying: Set[Broker] = Set.empty
