@@ -48,7 +48,7 @@ import kafka.common.TopicAndPartition
 
 class ControllerContext(val zkUtils: ZkUtils,
                         val zkSessionTimeout: Int) {
-  // 负责和kafka集群内部Server之间建立channel来进行通信
+  // 负责和kafka集群内部broker之间建立channel来进行通信
   var controllerChannelManager: ControllerChannelManager = null
 
   val controllerLock: ReentrantLock = new ReentrantLock()
@@ -71,9 +71,9 @@ class ControllerContext(val zkUtils: ZkUtils,
   val partitionsBeingReassigned: mutable.Map[TopicAndPartition, ReassignedPartitionsContext] = new mutable.HashMap
   // 记录正在进行"优先副本"选举的分区
   val partitionsUndergoingPreferredReplicaElection: mutable.Set[TopicAndPartition] = new mutable.HashSet
-  // 记录当前可用的broker集合
+  // 记录潜在live的broker集合
   private var liveBrokersUnderlying: Set[Broker] = Set.empty
-  // 记录当前可用的brokerID集合
+  // 记录当潜在live的brokerID集合
   private var liveBrokerIdsUnderlying: Set[Int] = Set.empty
 
   // setter
@@ -88,7 +88,7 @@ class ControllerContext(val zkUtils: ZkUtils,
   def liveBrokers = liveBrokersUnderlying.filter(broker => !shuttingDownBrokerIds.contains(broker.id))
   def liveBrokerIds = liveBrokerIdsUnderlying.filter(brokerId => !shuttingDownBrokerIds.contains(brokerId))
 
-  // 关闭或可用的broker以及brokerID集合
+  // 潜在live的broker以及brokerID集合
   def liveOrShuttingDownBrokerIds = liveBrokerIdsUnderlying
   def liveOrShuttingDownBrokers = liveBrokersUnderlying
 
