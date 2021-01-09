@@ -1275,7 +1275,7 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
       inLock(controllerContext.controllerLock) {
         // 先注销一些已经注册的监听器，关闭资源
         onControllerResignation()
-        // 重新尝试选举成controller
+        // 重新尝试选举成controller leader
         controllerElector.elect
       }
     }

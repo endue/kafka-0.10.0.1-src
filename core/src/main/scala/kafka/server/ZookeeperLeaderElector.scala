@@ -46,6 +46,7 @@ class ZookeeperLeaderElector(controllerContext: ControllerContext,
   val index = electionPath.lastIndexOf("/")
   if (index > 0)
     controllerContext.zkUtils.makeSurePersistentPathExists(electionPath.substring(0, index))
+  // leader发生变更后的监听器
   val leaderChangeListener = new LeaderChangeListener
 
   def startup {
@@ -59,7 +60,7 @@ class ZookeeperLeaderElector(controllerContext: ControllerContext,
 
   /**
     * 获取“/controller”节点下的brokerID，该节点如果有内容，格式如下
-    * {"version":xx,"brokerid":xx,"timestamp":"xxxxxx"}
+    * {"version":1,"brokerid":xx,"timestamp":"xxxxxx"}
     *
     * @return
     */
@@ -173,6 +174,7 @@ class ZookeeperLeaderElector(controllerContext: ControllerContext,
         info("New leader is %d".format(leaderId))
         // The old leader needs to resign leadership if it is no longer the leader
         // 如果之前是controller && 现在不是了
+        // 执行回调方法onResigningAsLeader()
         if (amILeaderBeforeDataChange && !amILeader)
           onResigningAsLeader()
       }
@@ -191,6 +193,7 @@ class ZookeeperLeaderElector(controllerContext: ControllerContext,
           .format(brokerId, dataPath))
         // 如果之前是leader
         if(amILeader)
+          // 执行回调方法onResigningAsLeader()
           onResigningAsLeader()
         // 重新尝试选举成为controller
         elect
