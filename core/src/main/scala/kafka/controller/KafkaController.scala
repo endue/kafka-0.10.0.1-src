@@ -266,6 +266,7 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
    *
    * @param id Id of the broker to shutdown.
    * @return The number of partitions that the broker still leads.
+    * 关闭broker，也就是优雅关闭broker
    */
   def shutdownBroker(id: Int) : Set[TopicAndPartition] = {
 
@@ -471,10 +472,16 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
    * 2. Even if we do refresh the cache, there is no guarantee that by the time the leader and ISR request reaches
    *    every broker that it is still valid.  Brokers check the leader epoch to determine validity of the request.
     *
-    *    broker上线
+    * broker上线
+    * 调用 sendUpdateMetadataRequest() 方法向当前集群所有潜在存活的Broker发送UpdateMetadataRequest请求，这样的话其他的节点就会知道当前的Broker已经上线了
+    * 获取当前节点分配的所有的副本列表，并将其状态转移为OnlineReplica状态
+    * 触发PartitionStateMachine的 triggerOnlinePartitionStateChange() 方法，为所有处于 New/Offline的状态的分区进行leader选举，如果leader选举成功，那么该Partition的状态就会转移到OnlinePartition状态，否则状态转移失败；
+    * 如果副本迁移中有新的副本落在这台新上线的节点上，那么开始执行副本迁移操作
+    * 如果之前由于这个Topic设置为删除标志，但是由于其中有副本掉线而导致无法删除，这里在节点启动后，尝试重新执行删除操作
    */
   def onBrokerStartup(newBrokers: Seq[Int]) {
     info("New broker startup callback for %s".format(newBrokers.mkString(",")))
+    // 新加入的broker
     val newBrokersSet = newBrokers.toSet
     // send update metadata request to all live and shutting down brokers. Old brokers will get to know of the new
     // broker via this update.
@@ -484,20 +491,20 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
     sendUpdateMetadataRequest(controllerContext.liveOrShuttingDownBrokerIds.toSeq)
     // the very first thing to do when a new broker comes up is send it the entire list of partitions that it is
     // supposed to host. Based on that the broker starts the high watermark threads for the input list of partitions
-    // 获取这个broker上的所有分区副本
+    // 获取新加入broker上的所有分区副本
     val allReplicasOnNewBrokers = controllerContext.replicasOnBrokers(newBrokersSet)
-    // 新上线broker，设置状态为OnlineReplica
+    // 将新添加的broker上的分区副本状态设置为OnlineReplica
     replicaStateMachine.handleStateChanges(allReplicasOnNewBrokers, OnlineReplica)
     // when a new broker comes up, the controller needs to trigger leader election for all new and offline partitions
     // to see if these brokers can become leaders for some/all of those
     // 触发new/offline partitions副本leader选举
     partitionStateMachine.triggerOnlinePartitionStateChange()
     // check if reassignment of some partitions need to be restarted
-    // 检查副本迁移中是否有新的Replica落在这台新上线的broker上
+    // 检查是否有副本重分配落在这台新上线的broker
     val partitionsWithReplicasOnNewBrokers = controllerContext.partitionsBeingReassigned.filter {
       case (topicAndPartition, reassignmentContext) => reassignmentContext.newReplicas.exists(newBrokersSet.contains(_))
     }
-    // 执行副本迁移操作
+    // 如果有副本重分配分配到了新上线的broker上，那么就执行副本重分配
     partitionsWithReplicasOnNewBrokers.foreach(p => onPartitionReassignment(p._1, p._2))
     // check if topic deletion needs to be resumed. If at least one replica that belongs to the topic being deleted exists
     // on the newly restarted brokers, there is a chance that topic deletion can resume
@@ -541,28 +548,32 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
     partitionStateMachine.handleStateChanges(partitionsWithoutLeader, OfflinePartition)
     // trigger OnlinePartition state changes for offline or new partitions
     // 触发offline/new partition状态为OnlinePartition
+    // 也就是为上述失去leader的分区进行leader的选举
     partitionStateMachine.triggerOnlinePartitionStateChange()
     // filter out the replicas that belong to topics that are being deleted
     // 过滤出副本在这个broker上并且没有被设置为删除的topic集合
     var allReplicasOnDeadBrokers = controllerContext.replicasOnBrokers(deadBrokersSet)
+    // 过滤掉等待删除的topic
     val activeReplicasOnDeadBrokers = allReplicasOnDeadBrokers.filterNot(p => deleteTopicManager.isTopicQueuedUpForDeletion(p.topic))
     // handle dead replicas
-    // 将上述过滤出来的副本状态设置为OfflineReplica
+    // 将上述过滤出来的副本，也就是在要下线broker上的副本的状态设置为OfflineReplica
     replicaStateMachine.handleStateChanges(activeReplicasOnDeadBrokers, OfflineReplica)
     // check if topic deletion state for the dead replicas needs to be updated
     // 过滤出副本在这个broker上并且被设置为删除的topic集合
     val replicasForTopicsToBeDeleted = allReplicasOnDeadBrokers.filter(p => deleteTopicManager.isTopicQueuedUpForDeletion(p.topic))
+    // 如果被删除topic有副本在要下线的broker上
     if(replicasForTopicsToBeDeleted.size > 0) {
       // it is required to mark the respective replicas in TopicDeletionFailed state since the replica cannot be
       // deleted when the broker is down. This will prevent the replica from being in TopicDeletionStarted state indefinitely
       // since topic deletion cannot be retried until at least one replica is in TopicDeletionStarted state
       // 将上述过滤出来的副本状态设置为ReplicaDeletionIneligible
-      // 然后再将该 Topic 标记为非法删除，即因为有 Replica 掉线导致该 Topic 无法删除
+      // 然后再将该Topic标记为暂停删除，即因为有副本掉线导致该Topic无法删除
       deleteTopicManager.failReplicaDeletion(replicasForTopicsToBeDeleted)
     }
 
     // If broker failure did not require leader re-election, inform brokers of failed broker
     // Note that during leader re-election, brokers update their metadata
+    // 有分区leader在下线broker，需要通知其他broker更新缓存
     if (partitionsWithoutLeader.isEmpty) {
       sendUpdateMetadataRequest(controllerContext.liveOrShuttingDownBrokerIds.toSeq)
     }
