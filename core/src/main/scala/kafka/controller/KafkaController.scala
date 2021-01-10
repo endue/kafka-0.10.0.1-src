@@ -1554,6 +1554,7 @@ class IsrChangeNotificationListener(controller: KafkaController) extends IZkChil
     inLock(controller.controllerContext.controllerLock) {
       debug("[IsrChangeNotificationListener] Fired!!!")
       // 获取"/isr_change_notification"的所有子节点
+      // 如：/isr_change_notification/isr_change_0000000013
       val childrenAsScala: mutable.Buffer[String] = currentChildren.asScala
       try {
         // 转换为topic-partiton集合
@@ -1566,6 +1567,7 @@ class IsrChangeNotificationListener(controller: KafkaController) extends IZkChil
         }
       } finally {
         // delete processed children
+        // 删除添加的节点 /isr_change_notification/isr_change_0000000013
         childrenAsScala.map(x => controller.controllerContext.zkUtils.deletePath(
           ZkUtils.IsrChangeNotificationPath + "/" + x))
       }
@@ -1579,6 +1581,7 @@ class IsrChangeNotificationListener(controller: KafkaController) extends IZkChil
   }
 
   private def getTopicAndPartition(child: String): Set[TopicAndPartition] = {
+    //
     val changeZnode: String = ZkUtils.IsrChangeNotificationPath + "/" + child
     val (jsonOpt, stat) = controller.controllerContext.zkUtils.readDataMaybeNull(changeZnode)
     if (jsonOpt.isDefined) {
