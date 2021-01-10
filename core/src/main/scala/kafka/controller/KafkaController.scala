@@ -52,7 +52,7 @@ class ControllerContext(val zkUtils: ZkUtils,
   var controllerChannelManager: ControllerChannelManager = null
 
   val controllerLock: ReentrantLock = new ReentrantLock()
-  // 记录关闭的brokerId集合
+  // 记录正在关闭的brokerId集合
   var shuttingDownBrokerIds: mutable.Set[Int] = mutable.Set.empty
   val brokerShutdownLock: Object = new Object
   // 当前epoch，默认0，KafkaController的年代信息，一般在leader变化后修改，
@@ -457,15 +457,20 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
    * This callback is invoked by the replica state machine's broker change listener, with the list of newly started
    * brokers as input. It does the following -
    * 1. Sends update metadata request to all live and shutting down brokers
+    * 发送update-metadata请求给所有潜在存活的broker
    * 2. Triggers the OnlinePartition state change for all new/offline partitions
+    * 对于所有 new/offline partition触发选主操作,选举成功的,Partition状态设置为Online
    * 3. It checks whether there are reassigned replicas assigned to any newly started brokers.  If
    *    so, it performs the reassignment logic for each topic/partition.
+    * 检查是否有重新分配的副本分配给新的broker上，如果有，就
    *
    * Note that we don't need to refresh the leader/isr cache for all topic/partitions at this point for two reasons:
    * 1. The partition state machine, when triggering online state change, will refresh leader and ISR for only those
    *    partitions currently new or offline (rather than every partition this controller is aware of)
    * 2. Even if we do refresh the cache, there is no guarantee that by the time the leader and ISR request reaches
    *    every broker that it is still valid.  Brokers check the leader epoch to determine validity of the request.
+    *
+    *    broker上线
    */
   def onBrokerStartup(newBrokers: Seq[Int]) {
     info("New broker startup callback for %s".format(newBrokers.mkString(",")))
@@ -474,21 +479,28 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
     // broker via this update.
     // In cases of controlled shutdown leaders will not be elected when a new broker comes up. So at least in the
     // common controlled shutdown case, the metadata will reach the new brokers faster
+    // 发送UpdateMetadataRequest到所有潜在live的broker上
     sendUpdateMetadataRequest(controllerContext.liveOrShuttingDownBrokerIds.toSeq)
     // the very first thing to do when a new broker comes up is send it the entire list of partitions that it is
     // supposed to host. Based on that the broker starts the high watermark threads for the input list of partitions
+    // 获取这个broker上的所有分区副本
     val allReplicasOnNewBrokers = controllerContext.replicasOnBrokers(newBrokersSet)
+    // 新上线broker，设置状态为OnlineReplica
     replicaStateMachine.handleStateChanges(allReplicasOnNewBrokers, OnlineReplica)
     // when a new broker comes up, the controller needs to trigger leader election for all new and offline partitions
     // to see if these brokers can become leaders for some/all of those
+    // 触发new/offline partitions副本leader选举
     partitionStateMachine.triggerOnlinePartitionStateChange()
     // check if reassignment of some partitions need to be restarted
+    // 检查副本迁移中是否有新的Replica落在这台新上线的broker上
     val partitionsWithReplicasOnNewBrokers = controllerContext.partitionsBeingReassigned.filter {
       case (topicAndPartition, reassignmentContext) => reassignmentContext.newReplicas.exists(newBrokersSet.contains(_))
     }
+    // 执行副本迁移操作
     partitionsWithReplicasOnNewBrokers.foreach(p => onPartitionReassignment(p._1, p._2))
     // check if topic deletion needs to be resumed. If at least one replica that belongs to the topic being deleted exists
     // on the newly restarted brokers, there is a chance that topic deletion can resume
+    // 检查 topic 删除操作是否需要重新启动
     val replicasForTopicsToBeDeleted = allReplicasOnNewBrokers.filter(p => deleteTopicManager.isTopicQueuedUpForDeletion(p.topic))
     if(replicasForTopicsToBeDeleted.size > 0) {
       info(("Some replicas %s for topics scheduled for deletion %s are on the newly restarted brokers %s. " +
@@ -509,31 +521,42 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
    * Note that we don't need to refresh the leader/isr cache for all topic/partitions at this point.  This is because
    * the partition state machine will refresh our cache for us when performing leader election for all new/offline
    * partitions coming online.
+    *
+    * broker下线
    */
   def onBrokerFailure(deadBrokers: Seq[Int]) {
     info("Broker failure callback for %s".format(deadBrokers.mkString(",")))
+    // 从正在关闭的brokerId集合中剔除当前broker
     val deadBrokersThatWereShuttingDown =
       deadBrokers.filter(id => controllerContext.shuttingDownBrokerIds.remove(id))
     info("Removed %s from list of shutting down brokers.".format(deadBrokersThatWereShuttingDown))
     val deadBrokersSet = deadBrokers.toSet
     // trigger OfflinePartition state for all partitions whose current leader is one amongst the dead brokers
+    // 过滤出leader在下线broker的并且没有设置为删除的分区
     val partitionsWithoutLeader = controllerContext.partitionLeadershipInfo.filter(partitionAndLeader =>
       deadBrokersSet.contains(partitionAndLeader._2.leaderAndIsr.leader) &&
         !deleteTopicManager.isTopicQueuedUpForDeletion(partitionAndLeader._1.topic)).keySet
+    // 将上述过滤出来的分区状态设置为OfflinePartition
     partitionStateMachine.handleStateChanges(partitionsWithoutLeader, OfflinePartition)
     // trigger OnlinePartition state changes for offline or new partitions
+    // 触发offline/new partition状态为OnlinePartition
     partitionStateMachine.triggerOnlinePartitionStateChange()
     // filter out the replicas that belong to topics that are being deleted
+    // 过滤出副本在这个broker上并且没有被设置为删除的topic集合
     var allReplicasOnDeadBrokers = controllerContext.replicasOnBrokers(deadBrokersSet)
     val activeReplicasOnDeadBrokers = allReplicasOnDeadBrokers.filterNot(p => deleteTopicManager.isTopicQueuedUpForDeletion(p.topic))
     // handle dead replicas
+    // 将上述过滤出来的副本状态设置为OfflineReplica
     replicaStateMachine.handleStateChanges(activeReplicasOnDeadBrokers, OfflineReplica)
     // check if topic deletion state for the dead replicas needs to be updated
+    // 过滤出副本在这个broker上并且被设置为删除的topic集合
     val replicasForTopicsToBeDeleted = allReplicasOnDeadBrokers.filter(p => deleteTopicManager.isTopicQueuedUpForDeletion(p.topic))
     if(replicasForTopicsToBeDeleted.size > 0) {
       // it is required to mark the respective replicas in TopicDeletionFailed state since the replica cannot be
       // deleted when the broker is down. This will prevent the replica from being in TopicDeletionStarted state indefinitely
       // since topic deletion cannot be retried until at least one replica is in TopicDeletionStarted state
+      // 将上述过滤出来的副本状态设置为ReplicaDeletionIneligible
+      // 然后再将该 Topic 标记为非法删除，即因为有 Replica 掉线导致该 Topic 无法删除
       deleteTopicManager.failReplicaDeletion(replicasForTopicsToBeDeleted)
     }
 
