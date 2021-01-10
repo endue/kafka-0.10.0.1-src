@@ -209,6 +209,7 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
   // 监听分区重分配，路径"/admin/reassign_partitions"
   // 当执行分区重分配后，会在创建上述路径并写入数据
   private val partitionReassignedListener = new PartitionsReassignedListener(this)
+  // leader副本优化监听器
   private val preferredReplicaElectionListener = new PreferredReplicaElectionListener(this)
   // ISR列表变更通知器
   private val isrChangeNotificationListener = new IsrChangeNotificationListener(this)
@@ -604,33 +605,52 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
   /**
    * This callback is invoked by the reassigned partitions listener. When an admin command initiates a partition
    * reassignment, it creates the /admin/reassign_partitions path that triggers the zookeeper listener.
+    * 这个回调方法被reassigned partitions listener触发,当需要进行分区副本迁移时,会在"/admin/reassign_partitions"下创建一个节点来触发操作
    * Reassigning replicas for a partition goes through a few steps listed in the code.
-   * RAR = Reassigned replicas
-   * OAR = Original list of replicas for partition
-   * AR = current assigned replicas
+   * RAR = Reassigned replicas 新分配的副本列表
+   * OAR = Original list of replicas for partition 原来的副本列表
+   * AR = current assigned replicas 当前副本列表
    *
    * 1. Update AR in ZK with OAR + RAR.
+    * 用OAR + RAR更新ZK中的AR
    * 2. Send LeaderAndIsr request to every replica in OAR + RAR (with AR as OAR + RAR). We do this by forcing an update
    *    of the leader epoch in zookeeper.
+    * 发送LeaderAndIsr请求到每个AR副本，通过强制更新zk中的leader epoch来实现
    * 3. Start new replicas RAR - OAR by moving replicas in RAR - OAR to NewReplica state.
+    * 启动新的副本，状态设置为NewReplica
    * 4. Wait until all replicas in RAR are in sync with the leader.
+    * 等待直到RAR中的所有副本与leader同步
    * 5  Move all replicas in RAR to OnlineReplica state.
+    * 移动RAR中所有部分到OnlineReplica状态
    * 6. Set AR to RAR in memory.
+    * 更新内存中的RAR为AR
    * 7. If the leader is not in RAR, elect a new leader from RAR. If new leader needs to be elected from RAR, a LeaderAndIsr
    *    will be sent. If not, then leader epoch will be incremented in zookeeper and a LeaderAndIsr request will be sent.
    *    In any case, the LeaderAndIsr request will have AR = RAR. This will prevent the leader from adding any replica in
    *    RAR - OAR back in the isr.
+    * 如果leader不在RAR中，那么就从RAR中选择一个leader，之后发送一个LeaderAndIsr请求
+    * 如果leader在RAR中，那么只需要递增zk中的eader epoch，之后发送一个LeaderAndIsr请求
+    * 在发送LeaderAndIsr请求前设置了AR=RAR, 这将确保了leader在isr中不会添加任何RAR-OAR中的副本
    * 8. Move all replicas in OAR - RAR to OfflineReplica state. As part of OfflineReplica state change, we shrink the
    *    isr to remove OAR - RAR in zookeeper and sent a LeaderAndIsr ONLY to the Leader to notify it of the shrunk isr.
    *    After that, we send a StopReplica (delete = false) to the replicas in OAR - RAR.
+    * 将OAR - RAR的所有副本都设置为OfflineReplica状态，OfflineReplica状态的变化将会从zk的isr列表中删除OAR - RAR的副本
+    * 并发送一个LeaderAndIsr请求给leader副本，通知它，isr列表发生了变化
+    * 最后再发送一个StopReplica (delete = false)请求到OAR - RAR副本
    * 9. Move all replicas in OAR - RAR to NonExistentReplica state. This will send a StopReplica (delete = false) to
    *    the replicas in OAR - RAR to physically delete the replicas on disk.
+    * 将OAR - RAR的所有副本设置为NonExistentReplica状态，发送StopReplica (delete = false)请求到OAR - RAR副本然后物理删除
+    * 这些副本上保存的分区数据
    * 10. Update AR in ZK with RAR.
+    * 更新zk上的RAR为AR
    * 11. Update the /admin/reassign_partitions path in ZK to remove this partition.
+    * 更新zk中"/admin/reassign_partitions"信息，移除已经成功迁移的分区
    * 12. After electing leader, the replicas and isr information changes. So resend the update metadata request to every broker.
+    * leader选举完成后，这个副本的isr信息会发生变化，然后发送update metadata request到每个broker上
    *
    * For example, if OAR = {1, 2, 3} and RAR = {4,5,6}, the values in the assigned replica (AR) and leader/isr path in ZK
    * may go through the following transition.
+    * 举例，OAR = {1, 2, 3} ，RAR = {4,5,6}
    * AR                 leader/isr
    * {1,2,3}            1/{1,2,3}           (initial state)
    * {1,2,3,4,5,6}      1/{1,2,3}           (step 2)
@@ -642,21 +662,23 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
    * Note that we have to update AR in ZK with RAR last since it's the only place where we store OAR persistently.
    * This way, if the controller crashes before that step, we can still recover.
    */
+  // 真正的执行分区重分配
   def onPartitionReassignment(topicAndPartition: TopicAndPartition, reassignedPartitionContext: ReassignedPartitionsContext) {
     // 新副本
     val reassignedReplicas = reassignedPartitionContext.newReplicas
-    // 新分配的副本是否都在ISR列表中
+    // 遍历新分配的副本是否在ISR列表中
+    // 如果否执行步骤1--3
     areReplicasInIsr(topicAndPartition.topic, topicAndPartition.partition, reassignedReplicas) match {
         // 否
       case false =>
         info("New replicas %s for partition %s being ".format(reassignedReplicas.mkString(","), topicAndPartition) +
           "reassigned not yet caught up with the leader")
-        // 计算新的副本 = RAR - OAR
+        // newReplicasNotInOldReplicaList = 计算新增加的副本 = RAR - OAR
         val newReplicasNotInOldReplicaList = reassignedReplicas.toSet -- controllerContext.partitionReplicaAssignment(topicAndPartition).toSet
-        // 新副本 + 旧副本 = OAR + RAR.
+        // newAndOldReplicas = 新副本 + 旧副本 = OAR + RAR.
         val newAndOldReplicas = (reassignedPartitionContext.newReplicas ++ controllerContext.partitionReplicaAssignment(topicAndPartition)).toSet
         //1. Update AR in ZK with OAR + RAR.
-        // 更新zk中的ar列表
+        // 1.更新zk和本地缓存中的ar列表为OAR + RAR
         updateAssignedReplicasForPartition(topicAndPartition, newAndOldReplicas.toSeq)
         //2. Send LeaderAndIsr request to every replica in OAR + RAR (with AR as OAR + RAR).
         // 向上面AR(OAR+RAR)中的副本发送LeaderAndIsr请求
@@ -670,10 +692,10 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
         // 是
       case true =>
         //4. Wait until all replicas in RAR are in sync with the leader.
-        // 旧副本 - 新副本 = OAR - RAR
+        // oldReplicas = 旧副本 - 新副本 = OAR - RAR
         val oldReplicas = controllerContext.partitionReplicaAssignment(topicAndPartition).toSet -- reassignedReplicas.toSet
         //5. replicas in RAR -> OnlineReplica
-        // 更新RAR状态为OnlineReplica
+        // 更新RAR中副本状态为OnlineReplica
         reassignedReplicas.foreach { replica =>
           replicaStateMachine.handleStateChanges(Set(new PartitionAndReplica(topicAndPartition.topic, topicAndPartition.partition,
             replica)), OnlineReplica)
@@ -681,12 +703,12 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
         //6. Set AR to RAR in memory.
         //7. Send LeaderAndIsr request with a potential new leader (if current leader not in RAR) and
         //   a new AR (using RAR) and same isr to every broker in RAR
-        /** 6.将上下文中的AR设置为RAR */
-        /** 7.新加入的副本已经同步完成, LeaderAndIsr都更新到最新的结果 */
+        // 6.将内存缓存中的AR设置为RAR
+        // 7.选择leader，发送LeaderAndIsr请求
         moveReassignedPartitionLeaderIfRequired(topicAndPartition, reassignedPartitionContext)
         //8. replicas in OAR - RAR -> Offline (force those replicas out of isr)
         //9. replicas in OAR - RAR -> NonExistentReplica (force those replicas to be deleted)
-        /** 8-9.将旧的副本下线 */
+        // 8-9.将旧的副本下线
         stopOldReplicasOfReassignedPartition(topicAndPartition, reassignedPartitionContext, oldReplicas)
         //10. Update AR in ZK with RAR.
         // 将ZK中的AR设置为RAR
@@ -716,26 +738,41 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
     zkUtils.zkClient.subscribeDataChanges(getTopicPartitionLeaderAndIsrPath(topic, partition), isrChangeListener)
   }
 
+  /**
+    * 分区副本重分配
+    * @param topicAndPartition
+    * @param reassignedPartitionContext
+    */
   def initiateReassignReplicasForTopicPartition(topicAndPartition: TopicAndPartition,
                                         reassignedPartitionContext: ReassignedPartitionsContext) {
+    // 获取新的副本列表
     val newReplicas = reassignedPartitionContext.newReplicas
+    // 获取要重分配的topic
     val topic = topicAndPartition.topic
+    // 获取要重分配的分区
     val partition = topicAndPartition.partition
+    // 从新的副本中过滤出活跃的副本
     val aliveNewReplicas = newReplicas.filter(r => controllerContext.liveBrokerIds.contains(r))
     try {
+      // 获取分区旧的ar副本列表
       val assignedReplicasOpt = controllerContext.partitionReplicaAssignment.get(topicAndPartition)
       assignedReplicasOpt match {
         case Some(assignedReplicas) =>
+          // 如果要分配的分区新分配的副本列表与之前的副本列表相同，那么不进行副本重分配
           if(assignedReplicas == newReplicas) {
             throw new KafkaException("Partition %s to be reassigned is already assigned to replicas".format(topicAndPartition) +
               " %s. Ignoring request for partition reassignment".format(newReplicas.mkString(",")))
           } else {
+            // 新分配的副本都是活跃的
             if(aliveNewReplicas == newReplicas) {
               info("Handling reassignment of partition %s to new replicas %s".format(topicAndPartition, newReplicas.mkString(",")))
               // first register ISR change listener
+              // 注册isr列表监听器
               watchIsrChangesForReassignedPartition(topic, partition, reassignedPartitionContext)
+              // 更新副本标记为正在重新分配副本
               controllerContext.partitionsBeingReassigned.put(topicAndPartition, reassignedPartitionContext)
               // mark topic ineligible for deletion for the partitions being reassigned
+              // 标记当前主题不可用删除
               deleteTopicManager.markTopicIneligibleForDeletion(Set(topic))
               // 执行分区重分配
               onPartitionReassignment(topicAndPartition, reassignedPartitionContext)
@@ -1101,13 +1138,16 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
         controllerContext.partitionsBeingReassigned(topicAndPartition).isrChangeListener)
     }
     // read the current list of reassigned partitions from zookeeper
-    // 从zookeeper中读取当前重分配的分区列表
+    // 从zk中读取"/admin/reassign_partitions"节点下重分配的分区列表
     val partitionsBeingReassigned = zkUtils.getPartitionsBeingReassigned()
     // remove this partition from that list
+    // 剔除掉当前被删除的topic分区
     val updatedPartitionsBeingReassigned = partitionsBeingReassigned - topicAndPartition
     // write the new list to zookeeper
+    // 更新"/admin/reassign_partitions"节点数据
     zkUtils.updatePartitionReassignmentData(updatedPartitionsBeingReassigned.mapValues(_.newReplicas))
     // update the cache. NO-OP if the partition's reassignment was never started
+    // 从正在执行重分配的分区中剔除当前分区
     controllerContext.partitionsBeingReassigned.remove(topicAndPartition)
   }
 
@@ -1419,9 +1459,11 @@ class PartitionsReassignedListener(controller: KafkaController) extends IZkDataL
     // 遍历需要被重分配的分区
     partitionsToBeReassigned.foreach { partitionToBeReassigned =>
       inLock(controllerContext.controllerLock) {
+        // 如果要执行副本重分配的topic已经被删除
         if(controller.deleteTopicManager.isTopicQueuedUpForDeletion(partitionToBeReassigned._1.topic)) {
           error("Skipping reassignment of partition %s for topic %s since it is currently being deleted"
             .format(partitionToBeReassigned._1, partitionToBeReassigned._1.topic))
+          // 更新/admin/reassign_partitions"节点数据提成已经删除的topic的副本
           controller.removePartitionFromReassignedPartitions(partitionToBeReassigned._1)
         } else {
           // 开始进行分区重分配
