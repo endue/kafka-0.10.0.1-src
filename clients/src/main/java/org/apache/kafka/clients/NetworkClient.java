@@ -594,11 +594,12 @@ public class NetworkClient implements KafkaClient {
         @Override
         public long maybeUpdate(long now) {
             // should we update our metadata?
-            // 获取下次更新metadata的时间戳
+            // metadata是否应该更新
+            // 获取下次更新metadata的时间戳，如果needUpdate=true，返回0
             long timeToNextMetadataUpdate = metadata.timeToNextUpdate(now);
-            //
+            // 如果连接失败后等待重试的世界
             long timeToNextReconnectAttempt = Math.max(this.lastNoNodeAvailableMs + metadata.refreshBackoff() - now, 0);
-            //
+            // 如果一条metadata的fetch请求还未从server收到回复,那么时间设置为Integer.MAX_VALUE
             long waitForMetadataFetch = this.metadataFetchInProgress ? Integer.MAX_VALUE : 0;
             // if there is no node available to connect, back off refreshing metadata
             long metadataTimeout = Math.max(Math.max(timeToNextMetadataUpdate, timeToNextReconnectAttempt),
@@ -607,6 +608,7 @@ public class NetworkClient implements KafkaClient {
             if (metadataTimeout == 0) {
                 // Beware that the behavior of this method and the computation of timeouts for poll() are
                 // highly dependent on the behavior of leastLoadedNode.
+                // 选择一个连接数最小的Node
                 Node node = leastLoadedNode(now);
                 maybeUpdate(now, node);
             }
@@ -661,8 +663,16 @@ public class NetworkClient implements KafkaClient {
             this.metadata.requestUpdate();
         }
 
+        /**
+         * 处理更新Metadata请求的响应
+         * @param header
+         * @param body
+         * @param now
+         */
         private void handleResponse(RequestHeader header, Struct body, long now) {
+            // 将metadataFetchInProgress置为false
             this.metadataFetchInProgress = false;
+            // 转换响应
             MetadataResponse response = new MetadataResponse(body);
             Cluster cluster = response.cluster();
             // check if any topics metadata failed to get updated
@@ -700,20 +710,28 @@ public class NetworkClient implements KafkaClient {
                 return;
             }
             String nodeConnectionId = node.idString();
-
+            // 当前node是否可以发送请求
             if (canSendRequest(nodeConnectionId)) {
+                // 准备开始发送数据,将metadataFetchInProgress置为true
                 this.metadataFetchInProgress = true;
+                // 创建metadata请求
                 MetadataRequest metadataRequest;
+                // 更新所有的topic
                 if (metadata.needMetadataForAllTopics())
                     metadataRequest = MetadataRequest.allTopics();
                 else
+                    // 基于metadata中的topics集合进行更新
                     metadataRequest = new MetadataRequest(new ArrayList<>(metadata.topics()));
+                // 封装请求
                 ClientRequest clientRequest = request(now, nodeConnectionId, metadataRequest);
                 log.debug("Sending metadata request {} to node {}", metadataRequest, node.id());
+                // 发送
                 doSend(clientRequest, now);
+            // 如果可以重新建立连接
             } else if (connectionStates.canConnect(nodeConnectionId, now)) {
                 // we don't have a connection to this node right now, make one
                 log.debug("Initialize connection to node {} for sending metadata request", node.id());
+                // 建立连接
                 initiateConnect(node, now);
                 // If initiateConnect failed immediately, this node will be put into blackout and we
                 // should allow immediately retrying in case there is another candidate node. If it
