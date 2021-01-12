@@ -65,8 +65,8 @@ import scala.collection._
  */
 // 清理日志
 class LogCleaner(val config: CleanerConfig,
-                 val logDirs: Array[File],
-                 val logs: Pool[TopicAndPartition, Log], 
+                 val logDirs: Array[File],// // 日志目录列表，加载的是"log.dirs"为空则加载"log.dir"
+                 val logs: Pool[TopicAndPartition, Log], // 记录topic-partition<-->log关系的map也就是用于管理TopicAndPartition和Log之间的对应关系
                  time: Time = SystemTime) extends Logging with KafkaMetricsGroup {
   
   /* for managing the state of partitions being cleaned. package-private to allow access in tests */
@@ -74,6 +74,7 @@ class LogCleaner(val config: CleanerConfig,
   private[log] val cleanerManager = new LogCleanerManager(logDirs, logs)
 
   /* a throttle used to limit the I/O of all the cleaner threads to a user-specified maximum rate */
+  // 用于将所有cleaner线程的I/O限制为用户指定的最大速率 log.cleaner.io.max.bytes.per.second
   private val throttler = new Throttler(desiredRatePerSec = config.maxIoBytesPerSecond, 
                                         checkIntervalMs = 300, 
                                         throttleDown = true, 
@@ -82,7 +83,7 @@ class LogCleaner(val config: CleanerConfig,
                                         time = time)
   
   /* the threads */
-  // 默认1，记录的CleanerThread
+  // log.cleaner.threads默认1
   private val cleaners = (0 until config.numThreads).map(new CleanerThread(_))
   
   /* a metric to track the maximum utilization of any thread's buffer in the last cleaning */
@@ -234,15 +235,17 @@ class LogCleaner(val config: CleanerConfig,
       * 如果有可用的脏日志，则清理日志，否则休眠一段时间
      */
     private def cleanOrSleep() {
-      // 选择要清理的log，添加到inProgress集合中
+      // 选择要清理的topic-partiton对应的log，添加到inProgress集合状态为LogCleaningInProgress并返回
       cleanerManager.grabFilthiestLog() match {
+        // 没有要清理的
         case None =>
           // there are no cleanable logs, sleep a while
-          // 没有要清理的日志，休眠 15 * 1000
+          // 休眠 log.cleaner.backoff.ms = 15 * 1000
           backOffWaitLatch.await(config.backOffMs, TimeUnit.MILLISECONDS)
+        // 有要清理的
         case Some(cleanable) =>
           // there's a log, clean it
-          // 有日志需要清理
+          // 获取清理的起始位置
           var endOffset = cleanable.firstDirtyOffset
           try {
             // 开始清理
@@ -343,9 +346,10 @@ private[log] class Cleaner(val id: Int,
 
     // build the offset map
     info("Building offset map for %s...".format(cleanable.log.name))
-    // 获取日志压缩最大上限的offset
+    // 获取topic-partiton对应的log中当前活跃的Segment的baseOffset
+    // 也就是清理操作只能清理到活跃Segment的上一个Segment
     val upperBoundOffset = log.activeSegment.baseOffset
-    // 开始压缩日志
+    // 开始清理日志，endOffset为清理到的位置
     val endOffset = buildOffsetMap(log, cleanable.firstDirtyOffset, upperBoundOffset, offsetMap) + 1
     stats.indexDone()
     
@@ -359,8 +363,9 @@ private[log] class Cleaner(val id: Int,
         
     // group the segments and clean the groups
     info("Cleaning log %s (discarding tombstones prior to %s)...".format(log.name, new Date(deleteHorizonMs)))
+    // 清理合并旧Segment中的数据
     for (group <- groupSegmentsBySize(log.logSegments(0, endOffset), log.config.segmentSize, log.config.maxIndexSize))
-      // 清理
+      //
       cleanSegments(log, group, offsetMap, deleteHorizonMs)
       
     // record buffer utilization
@@ -613,26 +618,31 @@ private[log] class Cleaner(val id: Int,
    * @param map The map in which to store the mappings
    *
    * @return The final offset the map covers
+    * 真正清理日志
    */
   private[log] def buildOffsetMap(log: Log, start: Long, end: Long, map: OffsetMap): Long = {
     map.clear()
-    // 从start到end所有的LogSegment
+    // 获取从start到end所有的LogSegment
     val dirty = log.logSegments(start, end).toBuffer
     info("Building offset map for log %s for %d segments in offset range [%d, %d).".format(log.name, dirty.size, start, end))
     
     // Add all the dirty segments. We must take at least map.slots * load_factor,
     // but we may be able to fit more (if there is lots of duplication in the dirty section of the log)
+    // 获取脏数据的起始偏移量
     var offset = dirty.head.baseOffset
     require(offset == start, "Last clean offset is %d but segment base offset is %d for log %s.".format(start, offset, log.name))
     var full = false
+    // 遍历脏的segment
     for (segment <- dirty if !full) {
       // 检查topic-partiton的清理状态是否为LogCleaningAborted
       // 如果是则抛出异常
       checkDone(log.topicAndPartition)
       // 开始清理单个segment，将消息的key和offset添加到OffsetMap中,并返回full是否已经填满的状态
       val newOffset = buildOffsetMapForSegment(log.topicAndPartition, segment, map)
+      // 如果不为-1说明处理完了这个segment
       if (newOffset > -1L)
         offset = newOffset
+      // 为-1说明map满了
       else {
         // If not even one segment can fit in the map, compaction cannot happen
         require(offset > start, "Unable to build the offset map for segment %s/%s. You can increase log.cleaner.dedupe.buffer.size or decrease log.cleaner.threads".format(log.name, segment.log.file.getName))
@@ -651,38 +661,56 @@ private[log] class Cleaner(val id: Int,
    * @param map The map in which to store the key=>offset mapping
    *
    * @return The final offset covered by the map or -1 if the map is full
+    * 开始清理segment将对应的数据记录到给定的map中，如果map满了则返回-1
    */
   private def buildOffsetMapForSegment(topicAndPartition: TopicAndPartition, segment: LogSegment, map: OffsetMap): Long = {
+    // 记录读取segment的位置
     var position = 0
+    // segment的起始偏移量
     var offset = segment.baseOffset
     val maxDesiredMapSize = (map.slots * this.dupBufferLoadFactor).toInt
+    // 开始遍历segment中的消息数据
     while (position < segment.log.sizeInBytes) {
+      // 再次验证topic-partition状态
       checkDone(topicAndPartition)
+      // 清理readBuffer，为接下来的读segment做准备
       readBuffer.clear()
+      // 读取segment，从position位置开始读取
       val messages = new ByteBufferMessageSet(segment.log.readInto(readBuffer, position))
+      // 限制速率？
       throttler.maybeThrottle(messages.sizeInBytes)
+      // 记录本次读取到的位置
       val startPosition = position
+      // 遍历messages集合
       for (entry <- messages) {
         val message = entry.message
+        // 将message基于hasKey保存到map中，这样重复key的消息就会被较晚的消息覆盖
         if (message.hasKey) {
+          // map没满就继续放
           if (map.size < maxDesiredMapSize)
             map.put(message.key, entry.offset)
+          // map满了就返回-1，交给上层判断
           else {
             // The map is full, stop looping and return
             return -1L
           }
         }
+        // 记录处理到的位置
         offset = entry.offset
         stats.indexMessagesRead(1)
       }
+      // 记录下线开始读取的位置
       position += messages.validBytes
       stats.indexBytesRead(messages.validBytes)
 
       // if we didn't read even one complete message, our read buffer may be too small
+      // 如果我们没有读取一条完整的消息，可能是读取缓冲区小了，扩容一下
       if(position == startPosition)
         growBuffers()
     }
+    // 回复缓存区原始大小
     restoreBuffers()
+    // 返回已处理到的offset
     offset
   }
 }
@@ -747,13 +775,16 @@ private case class CleanerStats(time: Time = SystemTime) {
 
 /**
  * Helper class for a log, its topic/partition, and the last clean position
+  * @param topicPartition
+  * @param log
+  * @param firstDirtyOffset
  */
 private case class LogToClean(topicPartition: TopicAndPartition, log: Log, firstDirtyOffset: Long) extends Ordered[LogToClean] {
   // 已清理部分
   val cleanBytes = log.logSegments(-1, firstDirtyOffset).map(_.size).sum
   // 未清理部分
   val dirtyBytes = log.logSegments(firstDirtyOffset, math.max(firstDirtyOffset, log.activeSegment.baseOffset)).map(_.size).sum
-  // 计算清理百分比
+  // 计算清理百分比，也就是需要清理数据的占比
   val cleanableRatio = dirtyBytes / totalBytes.toDouble
   // 总的字节数
   def totalBytes = cleanBytes + dirtyBytes

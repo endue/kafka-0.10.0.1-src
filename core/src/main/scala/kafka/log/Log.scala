@@ -78,7 +78,7 @@ case class LogAppendInfo(var firstOffset: Long,// 消息集起始offset
 @threadsafe
 class Log(val dir: File,// 日志文件对应的磁盘目录，如：/tmp/kafka-logs/simon-topic-0
           @volatile var config: LogConfig,// 日志配置设置
-          @volatile var recoveryPoint: Long = 0L,// 开始恢复的偏移量——未刷新到磁盘的第一个偏移量
+          @volatile var recoveryPoint: Long = 0L,// Log对应已刷入磁盘的偏移量，默认0，当存在Log日志时会被初始化为其他值
           scheduler: Scheduler,
           time: Time = SystemTime) extends Logging with KafkaMetricsGroup {
 
@@ -661,16 +661,25 @@ class Log(val dir: File,// 日志文件对应的磁盘目录，如：/tmp/kafka-
     lock synchronized {
       //find any segments that match the user-supplied predicate UNLESS it is the final segment
       //and it is empty (since we would just end up re-creating it)
+      // 上来就是获取segments列表中的对应一个Entry
+      // 注意：这里获取的是Entry，而不是value
       val lastEntry = segments.lastEntry
-      // 遍历segments中的Segment，通过predicate判断是否需要删除
-      // 最后将待删除的Segment记录到deletable中
+      // 通过predicate来判断是否需要删除
       val deletable =
+        // lastEntry为null，segments为空没日志
         if (lastEntry == null) Seq.empty
+        // 获取segments的value也就是所有的LogSegment，从尾部循环遍历
+        // 如果遍历出的LogSegment符合predicate && s不是最后一个lastEntry那么就将s加入到deletable中暂存
+        // 那么问题来了，什么时候执行到【s.size > 0】?
+        // 看代码一定是前面的false了，也就是s是最后一个LogSegment并且符合被删除的条件，那么才会删除，否则删除LogSegment的
+        // 时候都是从倒数第二个开始
         else logSegments.takeWhile(s => predicate(s) && (s.baseOffset != lastEntry.getValue.baseOffset || s.size > 0))
       val numToDelete = deletable.size
+      // 开始删除
       if (numToDelete > 0) {
         // we must always have at least one segment, so if we are going to delete all the segments, create a new one first
-        // 如果删除了所有的segment，那么需要在建立一个segment
+        // 如果删除了所有的segment，那么需要在新建立一个segment
+        // 要不日志就没地方写了
         if (segments.size == numToDelete)
           roll()
         // remove the segments for lookups
@@ -810,7 +819,7 @@ class Log(val dir: File,// 日志文件对应的磁盘目录，如：/tmp/kafka-
       return
     debug("Flushing log '" + name + " up to offset " + offset + ", last flushed: " + lastFlushTime + " current time: " +
           time.milliseconds + " unflushed = " + unflushedMessages)
-    // 查找到recoveryPoint和offset之间的LogSegment对象
+    // segments是跳表，查找recoveryPoint和offset(LEO)之间的LogSegment对象
     for(segment <- logSegments(this.recoveryPoint, offset))
       // 调用操作系统fsync命令刷新到磁盘
       segment.flush()
@@ -914,10 +923,13 @@ class Log(val dir: File,// 日志文件对应的磁盘目录，如：/tmp/kafka-
   def logSegments(from: Long, to: Long): Iterable[LogSegment] = {
     import JavaConversions._
     lock synchronized {
+      // 返回小于等于from的最大key；如果不存在返回null
       val floor = segments.floorKey(from)
       if(floor eq null)
+        // 返回小于to的所有entry
         segments.headMap(to).values
       else
+       // 返回所有介于[from,to)直接的entry
         segments.subMap(floor, true, to, false).values
     }
   }
@@ -935,11 +947,14 @@ class Log(val dir: File,// 日志文件对应的磁盘目录，如：/tmp/kafka-
    * deleting a file while it is being read from.
    *
    * @param segment The log segment to schedule for deletion
+    * 删除LogSegment
    */
   private def deleteSegment(segment: LogSegment) {
     info("Scheduling log segment %d for log %s for deletion.".format(segment.baseOffset, name))
     lock synchronized {
+      // 先从segments中剔除
       segments.remove(segment.baseOffset)
+      // 异步删除
       asyncDeleteSegment(segment)
     }
   }
@@ -950,12 +965,14 @@ class Log(val dir: File,// 日志文件对应的磁盘目录，如：/tmp/kafka-
     *  异步删除segment
    */
   private def asyncDeleteSegment(segment: LogSegment) {
+    // 将segment的文件加上后缀.deleted
     segment.changeFileSuffixes("", Log.DeletedFileSuffix)
+    // 对应segment定义一个删除方法
     def deleteSeg() {
       info("Deleting segment %d from log %s.".format(segment.baseOffset, name))
       segment.delete()
     }
-    // 默认60000
+    // 将删除方法教给定时任务来执行，file.delete.delay.ms默认60000执行一次
     scheduler.schedule("delete-file", deleteSeg, delay = config.fileDeleteDelayMs)
   }
 

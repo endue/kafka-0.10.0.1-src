@@ -35,8 +35,8 @@ trait OffsetMap {
 /**
  * An hash table used for deduplicating the log. This hash table uses a cryptographicly secure hash of the key as a proxy for the key
  * for comparisons and to save space on object overhead. Collisions are resolved by probing. This hash table does not support deletes.
- * @param memory The amount of memory this map can use
- * @param hashAlgorithm The hash algorithm instance to use: MD2, MD5, SHA-1, SHA-256, SHA-384, SHA-512
+ * @param memory The amount of memory this map can use 这个映射可以使用的内存量
+ * @param hashAlgorithm The hash algorithm instance to use: MD2, MD5, SHA-1, SHA-256, SHA-384, SHA-512 要使用的哈希算法实例
  */
 @nonthreadsafe
 class SkimpyOffsetMap(val memory: Int, val hashAlgorithm: String = "MD5") extends OffsetMap {

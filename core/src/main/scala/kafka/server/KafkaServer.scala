@@ -188,9 +188,9 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePr
         zkUtils = initZk()
 
         /* start log manager */
-        // 启动log管理任务
+        // 创建LogManager
         logManager = createLogManager(zkUtils.zkClient, brokerState)
-        // 启动相关定时任务
+        // 启动LogManager相关定时任务
         logManager.startup()
 
         /* generate brokerId */
@@ -633,7 +633,7 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePr
                                       backOffMs = config.logCleanerBackoffMs,// 默认 15 * 1000
                                       enableCleaner = config.logCleanerEnable)// 默认 true
     // 生成LogManager
-    new LogManager(logDirs = config.logDirs.map(new File(_)).toArray,// 读取log所在文件，首先加载的是"log.dirs"配置项，如果为空则加载"log.dir"
+    new LogManager(logDirs = config.logDirs.map(new File(_)).toArray,// 日志目录列表，加载的是"log.dirs"为空则加载"log.dir"
                    topicConfigs = configs,//
                    defaultConfig = defaultLogConfig,
                    cleanerConfig = cleanerConfig,

@@ -38,7 +38,7 @@ import java.util.concurrent.{ExecutionException, ExecutorService, Executors, Fut
  * A background thread handles log retention by periodically truncating excess log segments.
  */
 @threadsafe
-class LogManager(val logDirs: Array[File],// 读取log所在文件，首先加载的是"log.dirs"配置项，如果为空则加载"log.dir"
+class LogManager(val logDirs: Array[File],// 日志目录列表，加载的是"log.dirs"为空则加载"log.dir"
                  val topicConfigs: Map[String, LogConfig],// log配置
                  val defaultConfig: LogConfig,
                  val cleanerConfig: CleanerConfig,
@@ -54,18 +54,14 @@ class LogManager(val logDirs: Array[File],// 读取log所在文件，首先加�
   val InitialTaskDelayMs = 30*1000
   private val logCreationOrDeletionLock = new Object
   // 底层基于ConcurrentHashMap,key是TopicAndPartition，value是log
-  // 记录主题分区<-->log关系的map也就是用于管理TopicAndPartition和Log之间的对应关系
+  // 记录topic-partition<-->log关系的map也就是用于管理TopicAndPartition和Log之间的对应关系
   private val logs = new Pool[TopicAndPartition, Log]()
-  // 检查日志目录
+  // 检查日志目录不存在则创建
   createAndValidateLogDirs(logDirs)
-  // 对所有的log目录生成对应的FileLock
+  // 对所有的日志目录生成对应的FileLock
   private val dirLocks = lockLogDirs(logDirs)
-  // 下列注释中的log非Log类，而是指“log.dirs”中配置的一个个的目录
-  // 生成日志检查点，Map[File,OffsetCheckpoint] 类型
-  // 管理每一个log目录与其下的RecoveryPointCheckpoint文件之间的映射关系，在LogManager对象初始化时，
-  // 会在每一个log目录下创建一个对应的RecoveryPointCheckpoint文件。
-  // 这个Map的value是OffsetCheckpoint类型的对象，其中封装了对应log目录下RecoveryPointCheckpoint文件，
-  // 并提供对RecoveryPointCheckpoint文件的读写操作。RecoveryPointCheckpoint文件则记录了该log目录下所有Log的recoveryPointCheckpoint
+  // logDirs是指“log.dirs”中配置的多个日志目录
+  // RecoveryPointCheckpointFile记录日志目录下所有topic-partition日志已经刷新到磁盘的位置
   private val recoveryPointCheckpoints = logDirs.map(dir => (dir, new OffsetCheckpoint(new File(dir, RecoveryPointCheckpointFile)))).toMap
   // 加载日志
   loadLogs()
@@ -94,9 +90,9 @@ class LogManager(val logDirs: Array[File],// 读取log所在文件，首先加�
   private def createAndValidateLogDirs(dirs: Seq[File]) {
     if(dirs.map(_.getCanonicalPath).toSet.size < dirs.size)
       throw new KafkaException("Duplicate log directory found: " + logDirs.mkString(", "))
-    // 遍历目录
+    // 遍历日志目录
     for(dir <- dirs) {
-      // 如果目录不存在
+      // 如果日志目录不存在
       if(!dir.exists) {
         info("Log directory '" + dir.getAbsolutePath + "' not found, creating it.")
         // 创建
@@ -105,7 +101,7 @@ class LogManager(val logDirs: Array[File],// 读取log所在文件，首先加�
         if(!created)
           throw new KafkaException("Failed to create data directory " + dir.getAbsolutePath)
       }
-      // 路径目录不是文件夹或不可读抛出异常
+      // 日志目录不是文件夹或不可读抛出异常
       if(!dir.isDirectory || !dir.canRead)
         throw new KafkaException(dir.getAbsolutePath + " is not a readable log directory.")
     }
@@ -131,32 +127,37 @@ class LogManager(val logDirs: Array[File],// 读取log所在文件，首先加�
   
   /**
    * Recover and load all logs in the given data directories
-    * 恢复并加载给定数据目录中的所有日志
+    * 恢复并加载给定日志目录
    */
   private def loadLogs(): Unit = {
     info("Loading logs.")
 
     val threadPools = mutable.ArrayBuffer.empty[ExecutorService]
     val jobs = mutable.Map.empty[File, Seq[Future[_]]]
-
+    // 遍历日志目录
     for (dir <- this.logDirs) {
+      // 一个日志目录对应一个线程池，默认ioThreads = 1
       val pool = Executors.newFixedThreadPool(ioThreads)
       threadPools.append(pool)
-
+      // 创建".kafka_cleanshutdown"文件
       val cleanShutdownFile = new File(dir, Log.CleanShutdownFile)
-
+      // .kafka_cleanshutdown文件存在，说明已经开始恢复日志了
       if (cleanShutdownFile.exists) {
+        // 打印日志，跳过所有日志的恢复工作
         debug(
           "Found clean shutdown file. " +
           "Skipping recovery for all logs in data directory: " +
           dir.getAbsolutePath)
+      // .kafka_cleanshutdown文件不存在
       } else {
         // log recovery itself is being performed by `Log` class during initialization
+        // 设置brokerState状态为RecoveringFromUncleanShutdown
         brokerState.newState(RecoveringFromUncleanShutdown)
       }
-      // 获取对应的topic-partition和recoveryPoint的映射关系
+      // 获取对应topic-partition的checkpoint
       var recoveryPoints = Map[TopicAndPartition, Long]()
       try {
+        // 基于recovery-point-offset-checkpoint文件
         recoveryPoints = this.recoveryPointCheckpoints(dir).read
       } catch {
         case e: Exception => {
@@ -166,17 +167,21 @@ class LogManager(val logDirs: Array[File],// 读取log所在文件，首先加�
       }
 
       val jobsForDir = for {
+        // 获取日志目录dir下的所有文件
         dirContent <- Option(dir.listFiles).toList
+        // 过滤出文件夹(此时一个文件夹对应的就是一个topic-partition)，然后处理
         logDir <- dirContent if logDir.isDirectory
       } yield {
+        // 每个topic-partition对应一个线程
         CoreUtils.runnable {
           debug("Loading log '" + logDir.getName + "'")
-
+          // 根据logDir获取对应的topic和partition
           val topicPartition = Log.parseTopicPartitionName(logDir)
+          // 获取topic对应的配置
           val config = topicConfigs.getOrElse(topicPartition.topic, defaultConfig)
-          // 获取对应log的recoveryPoint
+          // 获取对应log的recoveryPoint也就是offset
           val logRecoveryPoint = recoveryPoints.getOrElse(topicPartition, 0L)
-          // 创建Log
+          // 创建Log，同时会执行kafka.log.Log.loadSegments()加载所有的Segment
           val current = new Log(logDir, config, logRecoveryPoint, scheduler, time)
           // 保存Log
           val previous = this.logs.put(topicPartition, current)
@@ -188,12 +193,13 @@ class LogManager(val logDirs: Array[File],// 读取log所在文件，首先加�
           }
         }
       }
-
+      // 提交任务，记录结果到jobs
       jobs(cleanShutdownFile) = jobsForDir.map(pool.submit).toSeq
     }
 
 
     try {
+      // 遍历并获取日志目录dir下的结果，然后删除.kafka_cleanshutdown文件
       for ((cleanShutdownFile, dirJobs) <- jobs) {
         dirJobs.foreach(_.get)
         cleanShutdownFile.delete()
@@ -238,9 +244,8 @@ class LogManager(val logDirs: Array[File],// 读取log所在文件，首先加�
                          period = flushCheckpointMs,
                          TimeUnit.MILLISECONDS)
     }
-    // 启动清理log后台线程，也就是对日志进行压缩
+    // 如果设置为true，自动清理compaction类型的topic
     if(cleanerConfig.enableCleaner)
-      // 启动log压缩线程
       cleaner.startup()
   }
 
@@ -356,6 +361,7 @@ class LogManager(val logDirs: Array[File],// 读取log所在文件，首先加�
     * 定时将每一个Log的recoveryPoint写入RecoveryPointCheckpoint文件
    */
   def checkpointRecoveryPointOffsets() {
+    // 遍历所有的日志目录，获取每个日志目录的File文件
     this.logDirs.foreach(checkpointLogsInDir)
   }
 
@@ -366,7 +372,7 @@ class LogManager(val logDirs: Array[File],// 读取log所在文件，首先加�
   private def checkpointLogsInDir(dir: File): Unit = {
     val recoveryPoints = this.logsByDir.get(dir.toString)
     if (recoveryPoints.isDefined) {
-      // 获取对应目录下的OffsetCheckpoint，然后遍历所有的topic-partition获取对应的recoveryPoint，最后写入
+      // 对日志目录下的所有的topic-partiton，写入检查点文件
       this.recoveryPointCheckpoints(dir).write(recoveryPoints.get.mapValues(_.recoveryPoint))
     }
   }
@@ -460,11 +466,13 @@ class LogManager(val logDirs: Array[File],// 读取log所在文件，首先加�
     * 删除过期的segment
    */
   private def cleanupExpiredSegments(log: Log): Int = {
-    // “retention.ms”，默认 24 * 7 *  * 60 * 60 * 1000L
+    // 如果日志永久保留，则不删除
+    // retention.ms默认 24 * 7 *  * 60 * 60 * 1000L
     if (log.config.retentionMs < 0)
       return 0
     val startMs = time.milliseconds
-    // 删除
+    // 遍历log目录下的所有Segment，如果startMs - Segment的lastModified > log.config.retentionMs就删除
+    // 这里传入的是一个predicate
     log.deleteOldSegments(startMs - _.lastModified > log.config.retentionMs)
   }
 
@@ -474,12 +482,14 @@ class LogManager(val logDirs: Array[File],// 读取log所在文件，首先加�
     * 根据log的大小决定是否删除最旧的segment
    */
   private def cleanupSegmentsToMaintainSize(log: Log): Int = {
-    // “retention.bytes”配置的 < 0 或者 当前log大小 < “retention.bytes”那么不需要处理
+    // 1.retention.bytes配置的 < 0
+    // 2.当前log大小 < retention.bytes
+    // 以上情况不处理
     if(log.config.retentionSize < 0 || log.size < log.config.retentionSize)
       return 0
-    // 计算当前log大小 和 “retention.bytes”的差值
-    // 循环删除segment，直到diff - segment.size < 0
+    // 计算当前log大小和retention.bytes的差值
     var diff = log.size - log.config.retentionSize
+    // 定义一个predicate
     def shouldDelete(segment: LogSegment) = {
       if(diff - segment.size >= 0) {
         diff -= segment.size
@@ -488,6 +498,7 @@ class LogManager(val logDirs: Array[File],// 读取log所在文件，首先加�
         false
       }
     }
+    // 循环删除segment，直到diff - segment.size < 0
     log.deleteOldSegments(shouldDelete)
   }
 
@@ -499,7 +510,8 @@ class LogManager(val logDirs: Array[File],// 读取log所在文件，首先加�
     debug("Beginning log cleanup...")
     var total = 0
     val startMs = time.milliseconds
-    // 遍历所有的log && log清理策略为删除(如果是compact则不执行)
+    // 遍历所有的日志目录下topic-partition对应的log
+    // 如果log的清理策略cleanup.policy设置为非compact
     for(log <- allLogs; if !log.config.compact) {
       debug("Garbage collecting '" + log.name + "'")
       total += cleanupExpiredSegments(log) + cleanupSegmentsToMaintainSize(log)
@@ -533,14 +545,14 @@ class LogManager(val logDirs: Array[File],// 读取log所在文件，首先加�
    */
   private def flushDirtyLogs() = {
     debug("Checking for dirty logs to flush...")
-    // 遍历所有的log
+    // 遍历所有的日志目录，获取每个topic-partition对应的log
     for ((topicAndPartition, log) <- logs) {
       try {
         // 获取log最后一次执行flush操作的时间
         val timeSinceLastFlush = time.milliseconds - log.lastFlushTime
         debug("Checking if flush is needed on " + topicAndPartition.topic + " flush interval  " + log.config.flushMs +
               " last flushed " + log.lastFlushTime + " time since last flush: " + timeSinceLastFlush)
-        // 超过指定时间 flush.ms = ，执行flush操作
+        // 超过指定时间flush.ms，执行flush操作
         if(timeSinceLastFlush >= log.config.flushMs)
           log.flush
       } catch {
