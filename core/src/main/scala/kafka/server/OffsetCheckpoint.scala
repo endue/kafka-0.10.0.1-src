@@ -45,7 +45,16 @@ class OffsetCheckpoint(val file: File) extends Logging {
   file.createNewFile() // in case the file doesn't exist
 
   /**
-    * 写检查点
+    * 写检查点，大体结构如下:
+    * 0
+    * 53
+    * __consumer_offsets 0 0
+    * ... __consumer_offsets默认共50个
+    * __consumer_offsets 49 0
+    * simon-topic 0 1
+    * test-topic 0 0
+    * topic-demo 0 0
+    *
     * @param offsets
     */
   def write(offsets: Map[TopicAndPartition, Long]) {
@@ -55,17 +64,18 @@ class OffsetCheckpoint(val file: File) extends Logging {
       val fileOutputStream = new FileOutputStream(tempPath.toFile)
       val writer = new BufferedWriter(new OutputStreamWriter(fileOutputStream))
       try {
+        // 写入版本号0，换行
         writer.write(CurrentVersion.toString)
         writer.newLine()
-
+        // 写入topic-partition数量，换行
         writer.write(offsets.size.toString)
         writer.newLine()
-
+        // 遍历写入所有的topic-partition和当前的offset，每写一个换一次行
         offsets.foreach { case (topicPart, offset) =>
           writer.write(s"${topicPart.topic} ${topicPart.partition} $offset")
           writer.newLine()
         }
-
+        // 刷盘
         writer.flush()
         fileOutputStream.getFD().sync()
       } catch {
@@ -96,17 +106,20 @@ class OffsetCheckpoint(val file: File) extends Logging {
       val reader = new BufferedReader(new FileReader(file))
       var line: String = null
       try {
+        // 读取第一行的版本号
         line = reader.readLine()
         if (line == null)
           return Map.empty
         val version = line.toInt
         version match {
           case CurrentVersion =>
+            // 读取topic-partition的数量
             line = reader.readLine()
             if (line == null)
               return Map.empty
             val expectedSize = line.toInt
             val offsets = mutable.Map[TopicAndPartition, Long]()
+            // 开始循环读取topic-partition的offset
             line = reader.readLine()
             while (line != null) {
               WhiteSpacesPattern.split(line) match {
@@ -118,6 +131,7 @@ class OffsetCheckpoint(val file: File) extends Logging {
             }
             if (offsets.size != expectedSize)
               throw new IOException(s"Expected $expectedSize entries but found only ${offsets.size}")
+            // 返回
             offsets
           case _ =>
             throw new IOException("Unrecognized version of the highwatermark checkpoint file: " + version)
