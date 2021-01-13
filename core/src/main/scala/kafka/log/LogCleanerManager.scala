@@ -41,12 +41,17 @@ private[log] case object LogCleaningPaused extends LogCleaningState
  *  While a partition is in the LogCleaningPaused state, it won't be scheduled for cleaning again, until cleaning is
  *  requested to be resumed.
  */
+/**
+  *
+  * @param logDirs 日志目录列表，加载的是"log.dirs"为空则加载"log.dir"
+  * @param logs // 记录topic-partition<-->log关系的map也就是用于管理TopicAndPartition和Log之间的对应关系
+  */
 private[log] class LogCleanerManager(val logDirs: Array[File], val logs: Pool[TopicAndPartition, Log]) extends Logging with KafkaMetricsGroup {
   
   override val loggerName = classOf[LogCleaner].getName
 
   // package-private for testing
-  // cleaner checkpoint要写入的文件
+  // 每一个日志目录下都有一个cleaner-offset-checkpoint文件
   private[log] val offsetCheckpointFile = "cleaner-offset-checkpoint"
   
   /* the offset checkpoints holding the last cleaned point for each log */

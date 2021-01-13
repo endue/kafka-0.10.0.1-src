@@ -40,12 +40,15 @@ trait OffsetMap {
  */
 @nonthreadsafe
 class SkimpyOffsetMap(val memory: Int, val hashAlgorithm: String = "MD5") extends OffsetMap {
+  // 字节空间
   private val bytes = ByteBuffer.allocate(memory)
   
   /* the hash algorithm instance to use, default is MD5 */
+  // 算法
   private val digest = MessageDigest.getInstance(hashAlgorithm)
   
   /* the number of bytes for this hash algorithm */
+  // 通过算法进行信息摘要后的字节长度
   private val hashSize = digest.getDigestLength
   
   /* create some hash buffers to avoid reallocating each time */
@@ -64,10 +67,12 @@ class SkimpyOffsetMap(val memory: Int, val hashAlgorithm: String = "MD5") extend
   /**
    * The number of bytes of space each entry uses (the number of bytes in the hash plus an 8 byte offset)
    */
+  // 每个entry使用的空间字节数(散列中的字节数加上8字节的偏移量)
   val bytesPerEntry = hashSize + 8
   
   /**
    * The maximum number of entries this map can contain
+    * 当前map可保存的entry数
    */
   val slots: Int = memory / bytesPerEntry
   
@@ -75,34 +80,44 @@ class SkimpyOffsetMap(val memory: Int, val hashAlgorithm: String = "MD5") extend
    * Associate this offset to the given key.
    * @param key The key
    * @param offset The offset
+    * 往map中放入数据
    */
   override def put(key: ByteBuffer, offset: Long) {
     require(entries < slots, "Attempt to add a new entry to a full offset map.")
     lookups += 1
+    // 对key进行加密然后保存到hash1中
     hashInto(key, hash1)
     // probe until we find the first empty slot
+    // 探测找到第一个空槽
     var attempt = 0
-    var pos = positionOf(hash1, attempt)  
+    // 返回hash1要放入的槽
+    var pos = positionOf(hash1, attempt)
+    // 如果槽pos位置不为空
     while(!isEmpty(pos)) {
+      // 读取pos位置的数据到hash2
       bytes.position(pos)
       bytes.get(hash2)
+      // 旧值和新值相等，覆盖原值key的offset
       if(Arrays.equals(hash1, hash2)) {
         // we found an existing entry, overwrite it and return (size does not change)
         bytes.putLong(offset)
         return
       }
+      // 旧值和新值不相等，查找下一个槽
       attempt += 1
       pos = positionOf(hash1, attempt)
     }
     // found an empty slot, update it--size grows by 1
-    bytes.position(pos)
-    bytes.put(hash1)
-    bytes.putLong(offset)
+    // 发现是个空槽，放入key的散列值以及key相关信息
+    bytes.position(pos)// 偏移量8字节
+    bytes.put(hash1)// MD5占16字节
+    bytes.putLong(offset)// 放入消息的偏移量8字节
     entries += 1
   }
   
   /**
    * Check that there is no entry at the given position
+    * 检查给定位置是否没有条目
    */
   private def isEmpty(position: Int): Boolean = 
     bytes.getLong(position) == 0 && bytes.getLong(position + 8) == 0 && bytes.getLong(position + 16) == 0
@@ -155,8 +170,11 @@ class SkimpyOffsetMap(val memory: Int, val hashAlgorithm: String = "MD5") extend
    * Calculate the ith probe position. We first try reading successive integers from the hash itself
    * then if all of those fail we degrade to linear probing.
    * @param hash The hash of the key to find the position for
+    *             要查找位置的键的散列
    * @param attempt The ith probe
+    *              第几次查找
    * @return The byte offset in the buffer at which the ith probing for the given hash would reside
+    *         偏移量
    */
   private def positionOf(hash: Array[Byte], attempt: Int): Int = {
     val probe = CoreUtils.readInt(hash, math.min(attempt, hashSize - 4)) + math.max(0, attempt - hashSize + 4)
@@ -169,6 +187,7 @@ class SkimpyOffsetMap(val memory: Int, val hashAlgorithm: String = "MD5") extend
    * The offset at which we have stored the given key
    * @param key The key to hash
    * @param buffer The buffer to store the hash into
+    * 对key进行加密记录到参数buffer中
    */
   private def hashInto(key: ByteBuffer, buffer: Array[Byte]) {
     key.mark()
