@@ -101,12 +101,13 @@ class Log(val dir: File,// 日志文件对应的磁盘目录，如：/tmp/kafka-
   }
 
   /* the actual segments of the log */
-  // 记录所有的LogSegment，是一个跳表，key是LogSegment的baseOffset
+  // 记录所有的LogSegment是一个跳表，key是LogSegment的baseOffset
   private val segments: ConcurrentNavigableMap[java.lang.Long, LogSegment] = new ConcurrentSkipListMap[java.lang.Long, LogSegment]
+  // 加载日志目录下的LogSegments
   loadSegments()
 
   /* Calculate the offset of the next message */
-  // 记录了当前LogSegment下一个消息存储的位置、起始位置和当前大小，其实可以看做当前副本的LEO
+  // 记录了当前LogSegment下一条消息的偏移量、当前LogSegment起始位置、当前LogSegment的相对物理位置
   @volatile var nextOffsetMetadata = new LogOffsetMetadata(activeSegment.nextOffset(), activeSegment.baseOffset, activeSegment.size.toInt)
   // 记录当前log对应的主题和分区
   val topicAndPartition: TopicAndPartition = Log.parseTopicPartitionName(dir)
@@ -140,32 +141,32 @@ class Log(val dir: File,// 日志文件对应的磁盘目录，如：/tmp/kafka-
     tags)
 
   /** The name of this log */
-  // LogSegment文件在磁盘上对应位置的File对象
+  // 日志目录的名称，如/tmp/kafka-logs/simon-topic-0得到的就是simon-topic-0
   def name  = dir.getName()
 
   /* Load the log segments from the log files on disk */
   /**
-    * 从磁盘加载 LogSegment
+    * 此方法只有在创建Log时会被调用
+    * 从磁盘加载LogSegments
     */
   private def loadSegments() {
     // create the log directory if it doesn't exist
-    // 目录不存在则创建
+    // 日志目录不存在则创建
     dir.mkdirs()
-    // .swap结尾的文件
+    // 记录.swap结尾的文件
     var swapFiles = Set[File]()
 
     // first do a pass through the files in the log directory and remove any temporary files
     // and find any interrupted swap operations
-    // 首先，遍历dir下的文件并删除所有临时文件，查找任何中断的交换操作
-
-    // 遍历dir下的所有的文件 && 需要是一个文件
+    // 第一次遍历获取日志目录下的所有.swap结尾的文件记录到swapFiles中
+    // 遍历日志目录dir下的所有的LogSegment文件
     for(file <- dir.listFiles if file.isFile) {
       // 不可读抛出异常
       if(!file.canRead)
         throw new IOException("Could not read file " + file)
       // 获取文件名
       val filename = file.getName
-      // 文件以.deleted或.cleaned结尾，删除
+      // 文件以.deleted、.cleaned结尾删除
       if(filename.endsWith(DeletedFileSuffix) || filename.endsWith(CleanedFileSuffix)) {
         // if the file ends in .deleted or .cleaned, delete it
         file.delete()
@@ -179,7 +180,7 @@ class Log(val dir: File,// 日志文件对应的磁盘目录，如：/tmp/kafka-
         // 如果是.index文件，那么删除
         if(baseName.getPath.endsWith(IndexFileSuffix)) {
           file.delete()
-          // 如果是.log文件，删除其对应的.index文件，然后将.log文件记录到swapFiles集合中
+          // 如果是.log文件，删除其对应的.index文件，然后在将对应的.swap文件记录到swapFiles集合中
         } else if(baseName.getPath.endsWith(LogFileSuffix)){
           // delete the index
           val index = new File(CoreUtils.replaceSuffix(baseName.getPath, LogFileSuffix, IndexFileSuffix))
@@ -190,7 +191,7 @@ class Log(val dir: File,// 日志文件对应的磁盘目录，如：/tmp/kafka-
     }
 
     // now do a second pass and load all the .log and .index files
-    // 现在进行第二次遍历，加载所有的.log和.index文件
+    // 第二次遍历，加载所有的.log和.index结尾的文件
     for(file <- dir.listFiles if file.isFile) {
       val filename = file.getName
       // .index结尾
@@ -233,12 +234,13 @@ class Log(val dir: File,// 日志文件对应的磁盘目录，如：/tmp/kafka-
               segment.recover(config.maxMessageSize)
           }
         }
+        // 如果索引文件不存在
         else {
           error("Could not find index file corresponding to log file %s, rebuilding index...".format(segment.log.file.getAbsolutePath))
           // 重建索引
           segment.recover(config.maxMessageSize)
         }
-        // 记录LogSegment的起始位置到跳表中
+        // 记录这个LogSegment的到跳表segments中
         segments.put(start, segment)
       }
     }
@@ -248,11 +250,17 @@ class Log(val dir: File,// 日志文件对应的磁盘目录，如：/tmp/kafka-
     // before the swap file is restored as the new segment file.
     // 处理.swap文件
     for (swapFile <- swapFiles) {
+      // 截取掉.swap后缀
       val logFile = new File(CoreUtils.replaceSuffix(swapFile.getPath, SwapFileSuffix, ""))
+      // 获取文件名
       val fileName = logFile.getName
+      // 获取.log文件的起始偏移量
       val startOffset = fileName.substring(0, fileName.length - LogFileSuffix.length).toLong
+      // 获取.log文件对应的.index文件并追究.swap后缀
       val indexFile = new File(CoreUtils.replaceSuffix(logFile.getPath, LogFileSuffix, IndexFileSuffix) + SwapFileSuffix)
+      // 创建对应的OffsetIndex
       val index =  new OffsetIndex(indexFile, baseOffset = startOffset, maxIndexSize = config.maxIndexSize)
+      // 生成新的LogSegment
       val swapSegment = new LogSegment(new FileMessageSet(file = swapFile),
                                        index = index,
                                        baseOffset = startOffset,
@@ -260,11 +268,15 @@ class Log(val dir: File,// 日志文件对应的磁盘目录，如：/tmp/kafka-
                                        rollJitterMs = config.randomSegmentJitter,
                                        time = time)
       info("Found log file %s from interrupted swap operation, repairing.".format(swapFile.getPath))
+      // 重新构建LogSegment的索引
       swapSegment.recover(config.maxMessageSize)
+      // 查找老的LogSegments文件
       val oldSegments = logSegments(swapSegment.baseOffset, swapSegment.nextOffset)
+      // 替换旧LogSegment未新的LogSegment
       replaceSegments(swapSegment, oldSegments.toSeq, isRecoveredSwapFile = true)
     }
 
+    // 如果跳表segments中没有LogSegment，那么初始化一个
     if(logSegments.size == 0) {
       // no existing segments, create a new mutable segment beginning at offset 0
       segments.put(0L, new LogSegment(dir = dir,
@@ -277,32 +289,40 @@ class Log(val dir: File,// 日志文件对应的磁盘目录，如：/tmp/kafka-
                                      initFileSize = this.initFileSize(),
                                      preallocate = config.preallocate))
     } else {
+      // 恢复日志
       recoverLog()
       // reset the index size of the currently active log segment to allow more entries
+      // 重置当前活动日志段的索引大小，以允许更多的条目
       activeSegment.index.resize(config.maxIndexSize)
     }
 
   }
 
-  // 更新nextOffsetMetadata
+  // 更新nextOffsetMetadata也就是LEO
   private def updateLogEndOffset(messageOffset: Long) {
     nextOffsetMetadata = new LogOffsetMetadata(messageOffset, activeSegment.baseOffset, activeSegment.size.toInt)
   }
 
+  /**
+    * 恢复LogSegments然后重设activetSegment的索引长度
+    */
   private def recoverLog() {
     // if we have the clean shutdown marker, skip recovery
+    // 如果存在.kafka_cleanshutdown文件
     if(hasCleanShutdownFile) {
       this.recoveryPoint = activeSegment.nextOffset
       return
     }
 
     // okay we need to actually recovery this log
+    // 恢复这个日志目录下相关LogSegment
     val unflushed = logSegments(this.recoveryPoint, Long.MaxValue).iterator
     while(unflushed.hasNext) {
       val curr = unflushed.next
       info("Recovering unflushed segment %d in log %s.".format(curr.baseOffset, name))
       val truncatedBytes =
         try {
+          // 重建LogSegment和对应的索引文件
           curr.recover(config.maxMessageSize)
         } catch {
           case e: InvalidOffsetException =>
@@ -996,9 +1016,10 @@ class Log(val dir: File,// 日志文件对应的磁盘目录，如：/tmp/kafka-
    *        on recovery in loadSegments().
    * </ol>
    *
-   * @param newSegment The new log segment to add to the log
-   * @param oldSegments The old log segments to delete from the log
+   * @param newSegment The new log segment to add to the log 要添加到日志中的新日志段
+   * @param oldSegments The old log segments to delete from the log 将旧的日志段从日志中删除
    * @param isRecoveredSwapFile true if the new segment was created from a swap file during recovery after a crash
+    *                            如果新段是在崩溃后的恢复期间从交换文件创建的，则为true
    */
   private[log] def replaceSegments(newSegment: LogSegment, oldSegments: Seq[LogSegment], isRecoveredSwapFile : Boolean = false) {
     lock synchronized {
@@ -1006,17 +1027,22 @@ class Log(val dir: File,// 日志文件对应的磁盘目录，如：/tmp/kafka-
       // if we crash in the middle of this we complete the swap in loadSegments()
       if (!isRecoveredSwapFile)
         newSegment.changeFileSuffixes(Log.CleanedFileSuffix, Log.SwapFileSuffix)
+      // 将新LogSegment加入到segments跳表
       addSegment(newSegment)
 
       // delete the old files
+      // 删除旧的LogSegment
       for(seg <- oldSegments) {
         // remove the index entry
+        // 先从segments跳表删除
         if(seg.baseOffset != newSegment.baseOffset)
           segments.remove(seg.baseOffset)
         // delete segment
+        // 异步任务删除物理文件
         asyncDeleteSegment(seg)
       }
       // okay we are safe now, remove the swap suffix
+      // 将新LogSegment的.swap后缀去掉
       newSegment.changeFileSuffixes(Log.SwapFileSuffix, "")
     }
   }

@@ -182,7 +182,7 @@ class LogSegment(val log: FileMessageSet,// 用于操作对应消息日志文件
 
   /**
    * Run recovery on the given segment. This will rebuild the index from the log file and lop off any invalid bytes from the end of the log and index.
-   * 在给定的段上运行恢复。这将从日志文件重新构建索引，并删除日志和索引末尾的任何无效字节
+   * 在给定的LogSegment上进行恢复。这将从日志文件重新构建索引，并删除日志和索引末尾的任何无效字节
    * @param maxMessageSize A bound the memory allocation in the case of a corrupt message size--we will assume any message larger than this
    * is corrupt.
    *
@@ -190,17 +190,23 @@ class LogSegment(val log: FileMessageSet,// 用于操作对应消息日志文件
    */
   @nonthreadsafe
   def recover(maxMessageSize: Int): Int = {
+    // 将索引截断为已知的条目数，这里为0
     index.truncate()
+    // 重置索引文件的大小
     index.resize(index.maxIndexSize)
     var validBytes = 0
     var lastIndexEntry = 0
     val iter = log.iterator(maxMessageSize)
     try {
+      // 遍历LogSegment对应的FileMessageSet
       while(iter.hasNext) {
         val entry = iter.next
+        // 验证消息是否已验证
         entry.message.ensureValid()
+        // 当验证的消息字节数超过indexIntervalBytes时写一次索引
         if(validBytes - lastIndexEntry > indexIntervalBytes) {
           // we need to decompress the message, if required, to get the offset of the first uncompressed message
+          // 如果消息被压缩那么需要解压缩以便获取对应消息的其实偏移量
           val startOffset =
             entry.message.compressionCodec match {
               case NoCompressionCodec =>
@@ -208,17 +214,23 @@ class LogSegment(val log: FileMessageSet,// 用于操作对应消息日志文件
               case _ =>
                 ByteBufferMessageSet.deepIterator(entry).next().offset
           }
+          // 写索引，消息的位置，消息大小
           index.append(startOffset, validBytes)
+          // 重置lastIndexEntry
           lastIndexEntry = validBytes
         }
+        // 累加已验证的消息
         validBytes += MessageSet.entrySize(entry.message)
       }
     } catch {
       case e: CorruptRecordException =>
         logger.warn("Found invalid messages in log segment %s at byte offset %d: %s.".format(log.file.getAbsolutePath, validBytes, e.getMessage))
     }
+    // 计算要截取消息的字节数
     val truncated = log.sizeInBytes - validBytes
+    // 截取消息
     log.truncateTo(validBytes)
+    // 修改索引
     index.trimToValidSize()
     truncated
   }
