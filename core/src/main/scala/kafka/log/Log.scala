@@ -78,7 +78,7 @@ case class LogAppendInfo(var firstOffset: Long,// 消息集起始offset
 @threadsafe
 class Log(val dir: File,// 日志文件对应的磁盘目录，如：/tmp/kafka-logs/simon-topic-0
           @volatile var config: LogConfig,// 日志配置设置
-          @volatile var recoveryPoint: Long = 0L,// Log对应已刷入磁盘的偏移量，默认0，当存在Log日志时会被初始化为其他值
+          @volatile var recoveryPoint: Long = 0L,// Log对应已刷入磁盘的偏移量，默认0，当存在Log日志时会被初始化为其他值(参考：kafka.log.LogManager.loadLogs())
           scheduler: Scheduler,
           time: Time = SystemTime) extends Logging with KafkaMetricsGroup {
 
@@ -158,8 +158,8 @@ class Log(val dir: File,// 日志文件对应的磁盘目录，如：/tmp/kafka-
 
     // first do a pass through the files in the log directory and remove any temporary files
     // and find any interrupted swap operations
-    // 第一次遍历获取日志目录下的所有.swap结尾的文件记录到swapFiles中
-    // 遍历日志目录dir下的所有的LogSegment文件
+    // 首先遍日志目录dir下的所有.swap结尾的.log文件记录到swapFiles中
+    // 删除所有临时文件以及.swap结尾的索引文件
     for(file <- dir.listFiles if file.isFile) {
       // 不可读抛出异常
       if(!file.canRead)
@@ -167,6 +167,8 @@ class Log(val dir: File,// 日志文件对应的磁盘目录，如：/tmp/kafka-
       // 获取文件名
       val filename = file.getName
       // 文件以.deleted、.cleaned结尾删除
+      // .deleted结尾的文件为待删除的LogSegment,详见kafka.log.Log.asyncDeleteSegment()方法
+      // .cleaned结尾的文件，详见kafka.log.Cleaner.cleanSegments()方法
       if(filename.endsWith(DeletedFileSuffix) || filename.endsWith(CleanedFileSuffix)) {
         // if the file ends in .deleted or .cleaned, delete it
         file.delete()
@@ -191,7 +193,7 @@ class Log(val dir: File,// 日志文件对应的磁盘目录，如：/tmp/kafka-
     }
 
     // now do a second pass and load all the .log and .index files
-    // 第二次遍历，加载所有的.log和.index结尾的文件
+    // 其次再日志目录dir下的文件这次只处理.log和.index结尾的文件
     for(file <- dir.listFiles if file.isFile) {
       val filename = file.getName
       // .index结尾
@@ -210,7 +212,7 @@ class Log(val dir: File,// 日志文件对应的磁盘目录，如：/tmp/kafka-
         val start = filename.substring(0, filename.length - LogFileSuffix.length).toLong
         // 获取.index文件
         val indexFile = Log.indexFilename(dir, start)
-        // 生成对应的LogSegment
+        // 生成对应的LogSegment，调用重载的构造方法
         val segment = new LogSegment(dir = dir,
                                      startOffset = start,
                                      indexIntervalBytes = config.indexInterval,
@@ -240,7 +242,7 @@ class Log(val dir: File,// 日志文件对应的磁盘目录，如：/tmp/kafka-
           // 重建索引
           segment.recover(config.maxMessageSize)
         }
-        // 记录这个LogSegment的到跳表segments中
+        // 记录这个LogSegment到跳表segments中
         segments.put(start, segment)
       }
     }
@@ -248,7 +250,7 @@ class Log(val dir: File,// 日志文件对应的磁盘目录，如：/tmp/kafka-
     // Finally, complete any interrupted swap operations. To be crash-safe,
     // log files that are replaced by the swap segment should be renamed to .deleted
     // before the swap file is restored as the new segment file.
-    // 处理.swap文件
+    // 最后处理.swap文件
     for (swapFile <- swapFiles) {
       // 截取掉.swap后缀
       val logFile = new File(CoreUtils.replaceSuffix(swapFile.getPath, SwapFileSuffix, ""))
@@ -260,7 +262,7 @@ class Log(val dir: File,// 日志文件对应的磁盘目录，如：/tmp/kafka-
       val indexFile = new File(CoreUtils.replaceSuffix(logFile.getPath, LogFileSuffix, IndexFileSuffix) + SwapFileSuffix)
       // 创建对应的OffsetIndex
       val index =  new OffsetIndex(indexFile, baseOffset = startOffset, maxIndexSize = config.maxIndexSize)
-      // 生成新的LogSegment
+      // 生成新的LogSegment，调用默认的构造方法
       val swapSegment = new LogSegment(new FileMessageSet(file = swapFile),
                                        index = index,
                                        baseOffset = startOffset,
@@ -270,13 +272,14 @@ class Log(val dir: File,// 日志文件对应的磁盘目录，如：/tmp/kafka-
       info("Found log file %s from interrupted swap operation, repairing.".format(swapFile.getPath))
       // 重新构建LogSegment的索引
       swapSegment.recover(config.maxMessageSize)
-      // 查找老的LogSegments文件
+      // 查找介于[baseOffset,nextOffset)之间的LogSegments
       val oldSegments = logSegments(swapSegment.baseOffset, swapSegment.nextOffset)
-      // 替换旧LogSegment未新的LogSegment
+      // 替换LogSegments为新的LogSegment
       replaceSegments(swapSegment, oldSegments.toSeq, isRecoveredSwapFile = true)
     }
 
-    // 如果跳表segments中没有LogSegment，那么初始化一个
+    // 如果跳表segments中没有LogSegment，说明上面三部曲鸡毛也没做
+    // 那么初始化一个LogSegment
     if(logSegments.size == 0) {
       // no existing segments, create a new mutable segment beginning at offset 0
       segments.put(0L, new LogSegment(dir = dir,
@@ -288,8 +291,9 @@ class Log(val dir: File,// 日志文件对应的磁盘目录，如：/tmp/kafka-
                                      fileAlreadyExists = false,
                                      initFileSize = this.initFileSize(),
                                      preallocate = config.preallocate))
+    // 上面三部曲获取到了日志，那么kafkaServer可能是崩溃恢复，也可能是正常重启...
     } else {
-      // 恢复日志
+      // 恢复当前Log，一个Log对应一个topic-partition
       recoverLog()
       // reset the index size of the currently active log segment to allow more entries
       // 重置当前活动日志段的索引大小，以允许更多的条目
@@ -304,25 +308,32 @@ class Log(val dir: File,// 日志文件对应的磁盘目录，如：/tmp/kafka-
   }
 
   /**
-    * 恢复LogSegments然后重设activetSegment的索引长度
+    * 恢复当前Log
+    * .kafka_cleanshutdown文件在kafka.log.LogManager#shutdown()方法调用时生成
+    * 还有Log在每次flush的时候虽然消息刷盘了但是recoveryPoint还没有刷盘，
+    * 其需要等待checkpointRecoveryPointOffsets定时任务来执行或正常关闭...
+    * 所以在异常关闭时会存在recoveryPoint < 刷盘消息的可能
     */
   private def recoverLog() {
     // if we have the clean shutdown marker, skip recovery
-    // 如果存在.kafka_cleanshutdown文件
+    // 如果存在.kafka_cleanshutdown文件表示正常关闭
+    // 当前Log的recoveryPoint就是活跃LogSegment的LEO
     if(hasCleanShutdownFile) {
       this.recoveryPoint = activeSegment.nextOffset
       return
     }
 
     // okay we need to actually recovery this log
-    // 恢复这个日志目录下相关LogSegment
+    // 异常关闭,需要借助recovery-point-offset-checkpoint文件来恢复Log
+    // 从当前Log的recoveryPoint开始读取LogSegments
+    // 返回的LogSegments就是要恢复的
     val unflushed = logSegments(this.recoveryPoint, Long.MaxValue).iterator
     while(unflushed.hasNext) {
       val curr = unflushed.next
       info("Recovering unflushed segment %d in log %s.".format(curr.baseOffset, name))
       val truncatedBytes =
         try {
-          // 重建LogSegment和对应的索引文件
+          // 截断LogSegment和重建对应的索引文件
           curr.recover(config.maxMessageSize)
         } catch {
           case e: InvalidOffsetException =>
@@ -331,6 +342,8 @@ class Log(val dir: File,// 日志文件对应的磁盘目录，如：/tmp/kafka-
                  "creating an empty one with starting offset " + startOffset)
             curr.truncateTo(startOffset)
         }
+      // 如果存在截断消息，那么就删除所有的unflushed
+      // 这里为啥删除所有
       if(truncatedBytes > 0) {
         // we had an invalid message, delete all remaining log
         warn("Corruption found in segment %d of log %s, truncating to offset %d.".format(curr.baseOffset, name, curr.nextOffset))
@@ -341,6 +354,8 @@ class Log(val dir: File,// 日志文件对应的磁盘目录，如：/tmp/kafka-
 
   /**
    * Check if we have the "clean shutdown" file
+    * 如果数据目录下有.kafka_cleanshutdown文件就表示是正常关闭，就用不上恢复点了。
+    * 如果上一次关闭是异常关闭的，kafka就会利用checkpoint来修复日志了
    */
   private def hasCleanShutdownFile() = new File(dir.getParentFile, CleanShutdownFile).exists()
 

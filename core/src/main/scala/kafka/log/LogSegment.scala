@@ -228,10 +228,11 @@ class LogSegment(val log: FileMessageSet,// 用于操作对应消息日志文件
     }
     // 计算要截取消息的字节数
     val truncated = log.sizeInBytes - validBytes
-    // 截取消息
+    // 截取log
     log.truncateTo(validBytes)
     // 修改索引
     index.trimToValidSize()
+    // 返回丢弃的字节数
     truncated
   }
 

@@ -1643,16 +1643,22 @@ class PreferredReplicaElectionListener(controller: KafkaController) extends IZkD
     debug("Preferred replica election listener fired for path %s. Record partitions to undergo preferred replica election %s"
             .format(dataPath, data.toString))
     inLock(controllerContext.controllerLock) {
+      // 需要进行分区leader优化的副本
       val partitionsForPreferredReplicaElection = PreferredReplicaLeaderElectionCommand.parsePreferredReplicaElectionData(data.toString)
       if(controllerContext.partitionsUndergoingPreferredReplicaElection.size > 0)
         info("These partitions are already undergoing preferred replica election: %s"
           .format(controllerContext.partitionsUndergoingPreferredReplicaElection.mkString(",")))
+      // 新增需要进行leader优化的副本
       val partitions = partitionsForPreferredReplicaElection -- controllerContext.partitionsUndergoingPreferredReplicaElection
+      // 从新增的需要leader优化的副本中过滤掉主题等待被删除的
       val partitionsForTopicsToBeDeleted = partitions.filter(p => controller.deleteTopicManager.isTopicQueuedUpForDeletion(p.topic))
       if(partitionsForTopicsToBeDeleted.size > 0) {
         error("Skipping preferred replica election for partitions %s since the respective topics are being deleted"
           .format(partitionsForTopicsToBeDeleted))
       }
+      // 将新增的需要leader优化的分区加入到controllerContext.partitionsUndergoingPreferredReplicaElection
+      // 然后如果是被删除的暂停删除
+      // 执行分区leader重选举
       controller.onPreferredReplicaElection(partitions -- partitionsForTopicsToBeDeleted)
     }
   }
