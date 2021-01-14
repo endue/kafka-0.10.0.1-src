@@ -33,12 +33,13 @@ object OffsetCheckpoint {
 
 /**
  * This class saves out a map of topic/partition=>offsets to a file
+  * 这个类将topic-partition=>offset的映射保存到文件中
  */
 class OffsetCheckpoint(val file: File) extends Logging {
   import OffsetCheckpoint._
   // checkpoint文件
   private val path = file.toPath.toAbsolutePath
-  // 临时文件
+  // checkpoint临时文件
   private val tempPath = Paths.get(path.toString + ".tmp")
   private val lock = new Object()
   // 初始化的时候就创建了checkpoint文件
@@ -88,7 +89,7 @@ class OffsetCheckpoint(val file: File) extends Logging {
       } finally {
         writer.close()
       }
-
+      // 交换
       Utils.atomicMoveWithFallback(tempPath, path)
     }
   }
@@ -110,20 +111,25 @@ class OffsetCheckpoint(val file: File) extends Logging {
         line = reader.readLine()
         if (line == null)
           return Map.empty
+        // 转换版本号
         val version = line.toInt
         version match {
           case CurrentVersion =>
             // 读取topic-partition的数量
             line = reader.readLine()
+            // 没有，返回空Map
             if (line == null)
               return Map.empty
+            // 转换topic-partition数量
             val expectedSize = line.toInt
+            // 创建记录topic-partition checkpoint的offsets
             val offsets = mutable.Map[TopicAndPartition, Long]()
-            // 开始循环读取topic-partition的offset
+            // 开始循环读取topic-partition的checkpoint
             line = reader.readLine()
             while (line != null) {
               WhiteSpacesPattern.split(line) match {
                 case Array(topic, partition, offset) =>
+                  // 保存到offsets
                   offsets += TopicAndPartition(topic, partition.toInt) -> offset.toLong
                   line = reader.readLine()
                 case _ => throw malformedLineException(line)
