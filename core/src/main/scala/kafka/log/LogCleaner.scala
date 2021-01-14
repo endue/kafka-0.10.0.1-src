@@ -76,7 +76,7 @@ class LogCleaner(val config: CleanerConfig,
 
   /* a throttle used to limit the I/O of all the cleaner threads to a user-specified maximum rate */
   // 用于将所有cleaner线程的I/O限制为用户指定的最大速率 log.cleaner.io.max.bytes.per.second
-  private val throttler = new Throttler(desiredRatePerSec = config.maxIoBytesPerSecond, 
+  private val throttler = new Throttler(desiredRatePerSec = config.maxIoBytesPerSecond,// Double.MaxValue
                                         checkIntervalMs = 300, 
                                         throttleDown = true, 
                                         "cleaner-io",
@@ -198,12 +198,12 @@ class LogCleaner(val config: CleanerConfig,
       warn("Cannot use more than 2G of cleaner buffer space per cleaner thread, ignoring excess buffer space...")
 
     val cleaner = new Cleaner(id = threadId,// 线程ID，用于标识Cleaner
-                              // log.cleaner.dedupe.buffer.size默认128 * 1024 * 1024L
-                              // hashAlgorithm默认MD5
+                              // log.cleaner.dedupe.buffer.size默认128 * 1024 * 1024L、hashAlgorithm默认MD5
                               offsetMap = new SkimpyOffsetMap(memory = math.min(config.dedupeBufferSize / config.numThreads, Int.MaxValue).toInt, 
-                                                              hashAlgorithm = config.hashAlgorithm),// 用于重复数据删除的map
+                                                              hashAlgorithm = config.hashAlgorithm),
                               // log.cleaner.io.buffer.size默认512 * 1024
-                              ioBufferSize = config.ioBufferSize / config.numThreads / 2,// 要使用的缓冲区大小。内存使用量将是这个数字的两倍，因为有一个读写缓冲区
+                              // 要使用的缓冲区大小。内存使用量将是这个数字的两倍，因为有一个读写缓冲区
+                              ioBufferSize = config.ioBufferSize / config.numThreads / 2,
                               // message.max.bytes默认1000000 + 8 + 4
                               maxIoBufferSize = config.maxMessageSize,
                               // log.cleaner.io.buffer.load.factor默认0.9
@@ -261,6 +261,7 @@ class LogCleaner(val config: CleanerConfig,
           } catch {
             case pe: LogCleaningAbortedException => // task can be aborted, let it go.
           } finally {
+            // 处理完成后，更新topic-partiton已清理的位置
             cleanerManager.doneCleaning(cleanable.topicPartition, cleanable.log.dir.getParentFile, endOffset)
           }
       }
@@ -368,6 +369,7 @@ private[log] class Cleaner(val id: Int,
     // 如果一条消息的key不为null，但是其value为null，那么此消息就是墓碑消息。
     // 日志清理线程发现墓碑消息时会先进行常规的清理，并保留墓碑消息一段时间。
     // 墓碑消息的保留条件是当前墓碑消息所在的日志分段的最近修改时间lastModifiedTime大于deleteHorizonMs，默认24 * 60 * 60 * 1000L
+    // 这里引用场景在：kafka.log.Cleaner.shouldRetainMessage()
     val deleteHorizonMs = 
       log.logSegments(0, cleanable.firstDirtyOffset).lastOption match {
         case None => 0L
@@ -379,7 +381,7 @@ private[log] class Cleaner(val id: Int,
     // 分组需要清理的LogSegments
     // 分组逻辑就是累加各个Segment当满足segment.bytes或segment.index.bytes等时就作为一组，然后计算下一组
     for (group <- groupSegmentsBySize(log.logSegments(0, endOffset), log.config.segmentSize, log.config.maxIndexSize))
-      // 清理
+      // 清理每一组LogSegemnt合并成一个新的LogSegment
       cleanSegments(log, group, offsetMap, deleteHorizonMs)
       
     // record buffer utilization
@@ -463,30 +465,42 @@ private[log] class Cleaner(val id: Int,
                              retainDeletes: Boolean,
                              messageFormatVersion: Byte) {
     var position = 0
+    // 处理LogSegment
     while (position < source.log.sizeInBytes) {
       checkDone(topicAndPartition)
       // read a chunk of messages and copy any that are to be retained to the write buffer to be written out
       readBuffer.clear()
       writeBuffer.clear()
+      // 读去一批LogSegment中消息
       val messages = new ByteBufferMessageSet(source.log.readInto(readBuffer, position))
       throttler.maybeThrottle(messages.sizeInBytes)
       // check each message to see if it is to be retained
       var messagesRead = 0
+      // 遍历读取到的消息
       for (entry <- messages.shallowIterator) {
         val size = MessageSet.entrySize(entry.message)
         stats.readMessage(size)
+        // 消息没有压缩
         if (entry.message.compressionCodec == NoCompressionCodec) {
+          // 判断消息是否保留
           if (shouldRetainMessage(source, map, retainDeletes, entry)) {
+            // 保留消息那么写入到writeBuffer
             ByteBufferMessageSet.writeMessage(writeBuffer, entry.message, entry.offset)
             stats.recopyMessage(size)
           }
+          // 处理下一个
           messagesRead += 1
+        // 消息有压缩
         } else {
           // We use the absolute offset to decide whether to retain the message or not. This is handled by the
           // deep iterator.
+          // 获取压缩的消息
           val messages = ByteBufferMessageSet.deepIterator(entry)
+          // 是否有消息被丢弃
           var writeOriginalMessageSet = true
+          // 要保留的消息
           val retainedMessages = new mutable.ArrayBuffer[MessageAndOffset]
+          // 遍历消息判断去留
           messages.foreach { messageAndOffset =>
             messagesRead += 1
             if (shouldRetainMessage(source, map, retainDeletes, messageAndOffset))
@@ -501,9 +515,10 @@ private[log] class Cleaner(val id: Int,
             compressMessages(writeBuffer, entry.message.compressionCodec, messageFormatVersion, retainedMessages)
         }
       }
-
+      // 获取下一个要读取的位置
       position += messages.validBytes
       // if any messages are to be retained, write them out
+      // 有保留的消息写入到目标LogSegment中
       if (writeBuffer.position > 0) {
         writeBuffer.flip()
         val retained = new ByteBufferMessageSet(writeBuffer)
@@ -512,9 +527,11 @@ private[log] class Cleaner(val id: Int,
       }
       
       // if we read bytes but didn't get even one complete message, our I/O buffer is too small, grow it and try again
+      // 如果我们读了字节，但没有得到一条完整的消息，那么我们的I/O缓冲区太小了，增大它，然后再试一次
       if (readBuffer.limit > 0 && messagesRead == 0)
         growBuffers()
     }
+    // 还原readbuffer、writebuffer
     restoreBuffers()
   }
 
@@ -555,20 +572,35 @@ private[log] class Cleaner(val id: Int,
     }
   }
 
+  /**
+    * 是否保留消息
+    * @param source
+    * @param map
+    * @param retainDeletes
+    * @param entry
+    * @return
+    */
   private def shouldRetainMessage(source: kafka.log.LogSegment,
                                   map: kafka.log.OffsetMap,
                                   retainDeletes: Boolean,
                                   entry: kafka.message.MessageAndOffset): Boolean = {
+    // 获取key
     val key = entry.message.key
+    // key不为null
     if (key != null) {
+      // 获取OffsetMap中的位置
       val foundOffset = map.get(key)
       /* two cases in which we can get rid of a message:
        *   1) if there exists a message with the same key but higher offset
+       *   如果存在一个具有相同键值但偏移量更高的消息
        *   2) if the message is a delete "tombstone" marker and enough time has passed
+       *   如果是个墓碑消息，并且达到了足够的等待时间
        */
       val redundant = foundOffset >= 0 && entry.offset < foundOffset
       val obsoleteDelete = !retainDeletes && entry.message.isNull
+
       !redundant && !obsoleteDelete
+    // key为null直接返回不保留
     } else {
       stats.invalidMessage()
       false
@@ -577,6 +609,7 @@ private[log] class Cleaner(val id: Int,
 
   /**
    * Double the I/O buffer capacity
+    * 扩容readBuffer和writeBuffer
    */
   def growBuffers() {
     if(readBuffer.capacity >= maxIoBufferSize || writeBuffer.capacity >= maxIoBufferSize)
@@ -665,7 +698,7 @@ private[log] class Cleaner(val id: Int,
       checkDone(log.topicAndPartition)
       // 开始清理单个segment，将消息的key和offset添加到map中
       val newOffset = buildOffsetMapForSegment(log.topicAndPartition, segment, map)
-      // 如果不为-1说明处理完了这个segment继续下一个
+      // 如果不为-1说明处理完了这个segment,更新offset
       if (newOffset > -1L)
         offset = newOffset
       // 为-1说明map满了
@@ -705,7 +738,7 @@ private[log] class Cleaner(val id: Int,
       readBuffer.clear()
       // 读取segment，从position位置开始读取
       val messages = new ByteBufferMessageSet(segment.log.readInto(readBuffer, position))
-      // 限制速率？
+      // 限制速率
       throttler.maybeThrottle(messages.sizeInBytes)
       // 记录本次读取的开始位置
       val startPosition = position

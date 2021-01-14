@@ -232,6 +232,11 @@ private[log] class LogCleanerManager(val logDirs: Array[File], val logs: Pool[To
     }
   }
 
+  /**
+    * 更新topic-partiton对应的cleaner-offset-checkpoint
+    * @param dataDir
+    * @param update
+    */
   def updateCheckpoints(dataDir: File, update: Option[(TopicAndPartition,Long)]) {
     inLock(lock) {
       val checkpoint = checkpoints(dataDir)
@@ -254,11 +259,14 @@ private[log] class LogCleanerManager(val logDirs: Array[File], val logs: Pool[To
 
   /**
    * Save out the endOffset and remove the given log from the in-progress set, if not aborted.
+    * 保存偏移量并从正在进行的日志集中删除给定的日志(如果没有中止的话)
    */
   def doneCleaning(topicAndPartition: TopicAndPartition, dataDir: File, endOffset: Long) {
     inLock(lock) {
       inProgress(topicAndPartition) match {
+          // 如果状态为LogCleaningInProgress
         case LogCleaningInProgress =>
+          // 更新cleaner-offset-checkpoint并从inProgress删除
           updateCheckpoints(dataDir,Option(topicAndPartition, endOffset))
           inProgress.remove(topicAndPartition)
         case LogCleaningAborted =>

@@ -624,14 +624,23 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePr
     }
     // read the log configurations from zookeeper
     // 加载日志清理工具的配置参数
-    val cleanerConfig = CleanerConfig(numThreads = config.logCleanerThreads,// 默认1
-                                      dedupeBufferSize = config.logCleanerDedupeBufferSize,// 默认128 * 1024 * 1024L
-                                      dedupeBufferLoadFactor = config.logCleanerDedupeBufferLoadFactor,// 默认0.9d
-                                      ioBufferSize = config.logCleanerIoBufferSize,// 默认 512 * 1024
-                                      maxMessageSize = config.messageMaxBytes,// 默认 1000000 + 8 + 4
-                                      maxIoBytesPerSecond = config.logCleanerIoMaxBytesPerSecond,// 默认 Double.MaxValue
-                                      backOffMs = config.logCleanerBackoffMs,// 默认 15 * 1000
-                                      enableCleaner = config.logCleanerEnable)// 默认 true
+    val cleanerConfig = CleanerConfig(
+        // log.cleaner.threads 默认1
+        numThreads = config.logCleanerThreads,
+        // log.cleaner.dedupe.buffer.size 默认128 * 1024 * 1024L
+        dedupeBufferSize = config.logCleanerDedupeBufferSize,
+        // log.cleaner.io.buffer.load.factor 默认0.9d
+        dedupeBufferLoadFactor = config.logCleanerDedupeBufferLoadFactor,
+        // log.cleaner.io.buffer.size 默认 512 * 1024
+        ioBufferSize = config.logCleanerIoBufferSize,
+        // message.max.bytes 默认 1000000 + 8 + 4
+        maxMessageSize = config.messageMaxBytes,
+        // log.cleaner.io.max.bytes.per.second 默认 Double.MaxValue
+        maxIoBytesPerSecond = config.logCleanerIoMaxBytesPerSecond,
+        // log.cleaner.backoff.ms 默认 15 * 1000
+        backOffMs = config.logCleanerBackoffMs,
+        // log.cleaner.enable 默认 true
+        enableCleaner = config.logCleanerEnable)
     // 生成LogManager
     new LogManager(logDirs = config.logDirs.map(new File(_)).toArray,// 日志目录列表，加载的是"log.dirs"为空则加载"log.dir"
                    topicConfigs = configs,//

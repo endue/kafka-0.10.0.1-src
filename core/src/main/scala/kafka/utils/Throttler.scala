@@ -27,9 +27,9 @@ import scala.math._
  * (the units of the process don't matter, it could be bytes or a count of some other thing), and will sleep for 
  * an appropriate amount of time when maybeThrottle() is called to attain the desired rate.
  * 
- * @param desiredRatePerSec: The rate we want to hit in units/sec
- * @param checkIntervalMs: The interval at which to check our rate
- * @param throttleDown: Does throttling increase or decrease our rate?
+ * @param desiredRatePerSec: The rate we want to hit in units/sec 想要达到的速率单位是/秒
+ * @param checkIntervalMs: The interval at which to check our rate 检查速率的时间间隔ms
+ * @param throttleDown: Does throttling increase or decrease our rate? 增加还是减少速率
  * @param time: The time implementation to use
  */
 @threadsafe
