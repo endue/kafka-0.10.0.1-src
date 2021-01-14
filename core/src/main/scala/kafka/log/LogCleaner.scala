@@ -420,6 +420,7 @@ private[log] class Cleaner(val id: Int,
 
     try {
       // clean segments into the new destination segment
+      // 遍历这个组中所有的LogSegment，然后一个个处理，将保留的消息记录到cleaned中
       for (old <- segments) {
         val retainDeletes = old.lastModified > deleteHorizonMs
         info("Cleaning segment %s in log %s (last modified %s) into %s, %s deletes."
