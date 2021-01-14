@@ -91,7 +91,7 @@ private[log] class LogCleanerManager(val logDirs: Array[File], val logs: Pool[To
     */
   def grabFilthiestLog(): Option[LogToClean] = {
     inLock(lock) {
-      // 获取全部topic-partition的cleaner-offset-checkpoint,返回Map类型
+      // 获取topic-partition的cleaner-offset-checkpoint,返回Map类型
       val lastClean = allCleanerCheckpoints()
       // 遍历topic-partition对应的日志目录过滤掉一些数据，将符合的topic-partiton对应的log封装成一个LogToClean
       // 筛选要清理的log

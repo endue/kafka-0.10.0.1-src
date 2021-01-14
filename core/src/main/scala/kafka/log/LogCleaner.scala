@@ -254,8 +254,9 @@ class LogCleaner(val config: CleanerConfig,
           // 获取清理的起始位置
           var endOffset = cleanable.firstDirtyOffset
           try {
-            // 开始清理
+            // 开始清理,返回已清理的位置
             endOffset = cleaner.clean(cleanable)
+            // 统计相关忽略
             recordStats(cleaner.id, cleanable.log.name, cleanable.firstDirtyOffset, endOffset, cleaner.stats)
           } catch {
             case pe: LogCleaningAbortedException => // task can be aborted, let it go.
@@ -431,6 +432,7 @@ private[log] class Cleaner(val id: Int,
 
       // swap in new segment
       info("Swapping in cleaned segment %d for segment(s) %s in log %s.".format(cleaned.baseOffset, segments.map(_.baseOffset).mkString(","), log.name))
+      //  新LogSegment替换清理操作前的LogSegments
       log.replaceSegments(cleaned, segments)
     } catch {
       case e: LogCleaningAbortedException =>
@@ -634,7 +636,7 @@ private[log] class Cleaner(val id: Int,
    * @param log The log to use 要清理的log
    * @param start The offset at which dirty messages begin 脏数据的起始偏移量
    * @param end The ending offset for the map that is being built 脏数据的结束偏移量
-   * @param map The map in which to store the mappings
+   * @param map The map in which to store the mappings 用来存储消息键和offset的map
    *
    * @return The final offset the map covers
     * 真正清理日志
