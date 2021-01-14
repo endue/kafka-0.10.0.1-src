@@ -50,7 +50,7 @@ class FileMessageSet private[kafka](@volatile var file: File,// 指向底层日�
                                     isSlice: Boolean) extends MessageSet with Logging {// 表示当前FileMessageSet是否为日志文件的分片
 
   /* the size of the message set in bytes */
-  // 消息集合字节数
+  // 已写入消息集字节数
   private val _size =
     if(isSlice)
       new AtomicInteger(end - start) // don't check the file size if this is just a slice view

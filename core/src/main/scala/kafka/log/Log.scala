@@ -401,23 +401,23 @@ class Log(val dir: File,// 日志文件对应的磁盘目录，如：/tmp/kafka-
       return appendInfo
 
     // trim any invalid bytes or partial messages before appending it to the on-disk log
-    // 清理未通过验证的消息
+    // 清理未通过验证的消息(如果存在)，返回一个新的ByteBufferMessageSet记录已包含验证通过的消息
     var validMessages = trimInvalidBytes(messages, appendInfo)
 
     try {
       // they are valid, insert them in the log
       lock synchronized {
-        // 判断是否需要为当前消息集合分配offset
+        // 判断是否需要为当前消息集分配offset，默认true
         if (assignOffsets) {
           // assign offsets to the message set
-          // 计算offset
+          // 计算当前消息集对应的offset
           val offset = new LongRef(nextOffsetMetadata.messageOffset)
-          // 记录消息写入的位置到appendInfo的firstOffset
+          // 修改当前消息集appendInfo的firstOffset为上面分配的offset
           appendInfo.firstOffset = offset.value
           val now = time.milliseconds
-          // 验证
+          // 再次验证
           val (validatedMessages, messageSizesMaybeChanged) = try {
-            // 更新message set的offsets,做消息的进一步验证
+            // 验证并分配消息offset，内部会递增offset，返回一个元组
             validMessages.validateMessagesAndAssignOffsets(offset,
                                                            now,
                                                            appendInfo.sourceCodec,
@@ -430,9 +430,9 @@ class Log(val dir: File,// 日志文件对应的磁盘目录，如：/tmp/kafka-
             case e: IOException => throw new KafkaException("Error in validating messages while appending to log '%s'".format(name), e)
           }
           validMessages = validatedMessages
-          // 更新appendInfo的lastOffset
+          // 修改当前消息集appendInfo的lastOffset
           appendInfo.lastOffset = offset.value - 1
-          // 记录appendInfo添加时间
+          // 修改当前消息集appendInfo添加时间
           if (config.messageTimestampType == TimestampType.LOG_APPEND_TIME)
             appendInfo.timestamp = now
 
@@ -454,7 +454,8 @@ class Log(val dir: File,// 日志文件对应的磁盘目录，如：/tmp/kafka-
 
         } else {
           // we are taking the offsets we are given
-          // 用给定的offset，
+          // 用producer端给定的offset
+          // 如果消息集中消息的offset非递增 或者 producer端给定的offset < LEO那么抛出异常
           if (!appendInfo.offsetsMonotonic || appendInfo.firstOffset < nextOffsetMetadata.messageOffset)
             throw new IllegalArgumentException("Out of order offsets found in " + messages)
         }
@@ -475,12 +476,12 @@ class Log(val dir: File,// 日志文件对应的磁盘目录，如：/tmp/kafka-
         segment.append(appendInfo.firstOffset, validMessages)
 
         // increment the log end offset
-        // 更新nextOffset也是LEO
+        // 重新生成LogOffsetMetadata，更新LEO
         updateLogEndOffset(appendInfo.lastOffset + 1)
 
         trace("Appended message set to log %s with first offset: %d, next offset: %d, and messages: %s"
           .format(this.name, appendInfo.firstOffset, nextOffsetMetadata.messageOffset, validMessages))
-        // 触发flush阈值Long.MaxValue
+        // 触发flush阈值flush.messages，默认Long.MaxValue
         if (unflushedMessages >= config.flushInterval)
           flush()
 
@@ -539,8 +540,10 @@ class Log(val dir: File,// 日志文件对应的磁盘目录，如：/tmp/kafka-
       val m = messageAndOffset.message
 
       // Check if the message sizes are valid.
-      // 检测消息的长度
+      // 检测消息的大小
+      // 获取消息的大小 = MessageSizeLength(4) + OffsetLength(8) + message.size
       val messageSize = MessageSet.entrySize(m)
+      // 如果消息的大小 > max.message.bytes(默认：1000000 + MessageSizeLength + OffsetLength)抛出异常
       if(messageSize > config.maxMessageSize) {
         BrokerTopicStats.getBrokerTopicStats(topicAndPartition.topic).bytesRejectedRate.mark(messages.sizeInBytes)
         BrokerTopicStats.getBrokerAllTopicsStats.bytesRejectedRate.mark(messages.sizeInBytes)
@@ -549,7 +552,7 @@ class Log(val dir: File,// 日志文件对应的磁盘目录，如：/tmp/kafka-
       }
 
       // check the validity of the message by checking CRC
-      // 通过检查CRC校验来验证消息的有效性
+      // 通过检查CRC来验证消息的有效性
       m.ensureValid()
 
       // 通过则增加外层消息数
@@ -566,7 +569,7 @@ class Log(val dir: File,// 日志文件对应的磁盘目录，如：/tmp/kafka-
     // Apply broker-side compression if any
     // 记录服务器端采用的压缩方式
     val targetCodec = BrokerCompressionCodec.getTargetCompressionCodec(config.compressionType, sourceCodec)
-
+    // 生成一个LogAppendInfo
     LogAppendInfo(firstOffset, lastOffset, Message.NoTimestamp, sourceCodec, targetCodec, shallowMessageCount, validBytesCount, monotonic)
   }
 
@@ -582,12 +585,13 @@ class Log(val dir: File,// 日志文件对应的磁盘目录，如：/tmp/kafka-
     val messageSetValidBytes = info.validBytes
     if(messageSetValidBytes < 0)
       throw new CorruptRecordException("Illegal length of message set " + messageSetValidBytes + " Message set cannot be appended to log. Possible causes are corrupted produce requests")
-    // 消息集合大小 = 验证的字节数，返回消息集合
+    // 验证的字节数 == 消息集合大小，返回消息集合即可
     if(messageSetValidBytes == messages.sizeInBytes) {
       messages
     } else {
       // trim invalid bytes
-      // 不相等，截取
+      // 不相等，截取messages
+      // 截取就是通过修改ByteBuffer的limit，最后返回一个新的ByteBufferMessageSet
       val validByteBuffer = messages.buffer.duplicate()
       validByteBuffer.limit(messageSetValidBytes)
       new ByteBufferMessageSet(validByteBuffer)
@@ -610,7 +614,7 @@ class Log(val dir: File,// 日志文件对应的磁盘目录，如：/tmp/kafka-
 
     // Because we don't use lock for reading, the synchronization is a little bit tricky.
     // We create the local variables to avoid race conditions with updates to the log.
-    // 获取下一条消息的offset，也就是LEO
+    // 获取当前的LEO
     val currentNextOffsetMetadata = nextOffsetMetadata
     val next = currentNextOffsetMetadata.messageOffset
     // 要读的startOffset = next(LEO)，无数据可读
@@ -627,9 +631,9 @@ class Log(val dir: File,// 日志文件对应的磁盘目录，如：/tmp/kafka-
     // Do the read on the segment with a base offset less than the target offset
     // but if that segment doesn't contain any messages with an offset greater than that
     // continue to read from successive segments until we get some messages or we reach the end of the log
-    // 从base offset 小于target offset的最近的一个segment开始读取消息
-    // 如果读取的segment不包含任何message的偏移量 > target offset的消息
-    // 继续读取后续segemnt知道读取到一些消息或者log文件的末尾
+    // 从base offset 小于startOffset的最近的一个segment开始读取消息
+    // 如果读取的segment不包含任何message的offset > startOffset
+    // 继续读取后续segemnt直到读取到消息或者读取到log文件的末尾
     while(entry != null) {
       // If the fetch occurs on the active segment, there might be a race condition where two fetch requests occur after
       // the message is appended but before the nextOffsetMetadata is updated. In that case the second fetch may
@@ -638,7 +642,7 @@ class Log(val dir: File,// 日志文件对应的磁盘目录，如：/tmp/kafka-
       // 如果fetch发生在活动段上，可能会有一个竞争条件，即两个fetch请求发生在消息追加之后，但在nextffsetmetadata更新之前。
       // 在这种情况下，第二次取回可能会导致OffsetOutOfRangeException异常。为了解决这个问题，我们将读取限制在暴露的位置，而不是活动段的日志端。
 
-      // 计算segment可读取的位置
+      // 计算当前segment可读取的位置
       val maxPosition = {
         // 如果读取的是活跃segment
         if (entry == segments.lastEntry) {
@@ -658,7 +662,7 @@ class Log(val dir: File,// 日志文件对应的磁盘目录，如：/tmp/kafka-
       }
       // 读取消息
       val fetchInfo = entry.getValue.read(startOffset, maxOffset, maxLength, maxPosition)
-      // 消息为空，或者下一个segment
+      // 消息为空查找下一个segment
       if(fetchInfo == null) {
         entry = segments.higherEntry(entry.getKey)
       } else {
@@ -667,8 +671,12 @@ class Log(val dir: File,// 日志文件对应的磁盘目录，如：/tmp/kafka-
     }
 
     // okay we are beyond the end of the last segment with no data fetched although the start offset is in range,
+    // 虽然起始偏移量在范围内，但我们已经超出了最后一个段的末尾，没有获取任何数据
     // this can happen when all messages with offset larger than start offsets have been deleted.
+    // 当删除了所有偏移量大于start偏移量的消息时，就会发生这种情况。
     // In this case, we will return the empty set with log end offset metadata
+    // 在本例中，我们将返回带有LEO偏移量元数据的空集
+    // 返回一个空的FetchDataInfo，
     FetchDataInfo(nextOffsetMetadata, MessageSet.Empty)
   }
 
@@ -759,8 +767,9 @@ class Log(val dir: File,// 日志文件对应的磁盘目录，如：/tmp/kafka-
    */
   private def maybeRoll(messagesSize: Int): LogSegment = {
     val segment = activeSegment
+    // segment.size返回当前LogSegment中已被占用的字节数
     if (segment.size > config.segmentSize - messagesSize || // 当前活跃segment空间不够
-        segment.size > 0 && time.milliseconds - segment.created > config.segmentMs - segment.rollJitterMs || // LogSegment最长存活时间已经到期
+        segment.size > 0 && time.milliseconds - segment.created > config.segmentMs - segment.rollJitterMs ||
         segment.index.isFull) { // 索引文件满了
       debug("Rolling new log segment in %s (log_size = %d/%d, index_size = %d/%d, age_ms = %d/%d)."
             .format(name,
@@ -795,7 +804,8 @@ class Log(val dir: File,// 日志文件对应的磁盘目录，如：/tmp/kafka-
         warn("Newly rolled segment file " + file.getName + " already exists; deleting it first")
         file.delete()
       }
-
+      // 判断当前segments最后一个LogSegment是否存在
+      // 不存在啥也不干，如果存在那么需要将最后一个LogSegment"封版"了，^_^
       segments.lastEntry() match {
         case null =>
         case entry => {
@@ -820,14 +830,15 @@ class Log(val dir: File,// 日志文件对应的磁盘目录，如：/tmp/kafka-
         throw new KafkaException("Trying to roll a new log segment for topic partition %s with start offset %d while it already exists.".format(name, newOffset))
       // We need to update the segment base offset and append position data of the metadata when log rolls.
       // The next offset should not change.
-      // 更新nextOffsetMetadata，也是leo
-      // 因为新创建了segment
+      // 由于新创建了segment，所以更新nextOffsetMetadata
+      // nextOffsetMetadata记录了当前活跃LogSegment的信息
       updateLogEndOffset(nextOffsetMetadata.messageOffset)
       // schedule an asynchronous flush of the old segment
+      // 为newOffset之前的数据执行flus操作
       scheduler.schedule("flush-log", () => flush(newOffset), delay = 0L)
 
       info("Rolled new log segment for '" + name + "' in %.0f ms.".format((System.nanoTime - start) / (1000.0*1000.0)))
-
+      // 返回新建的LogSegment
       segment
     }
   }
@@ -839,7 +850,7 @@ class Log(val dir: File,// 日志文件对应的磁盘目录，如：/tmp/kafka-
 
   /**
    * Flush all log segments
-    * flush所有的segment
+    * flush所有的segment，注意在执行flus前LEO已经更新
    */
   def flush(): Unit = flush(this.logEndOffset)
 

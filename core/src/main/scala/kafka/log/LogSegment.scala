@@ -77,8 +77,8 @@ class LogSegment(val log: FileMessageSet,// 用于操作对应消息日志文件
    *
    * It is assumed this method is being called from within a lock.
    *
-   * @param offset The first offset in the message set.
-   * @param messages The messages to append.
+   * @param offset The first offset in the message set.消息集的起始偏移量
+   * @param messages The messages to append. 消息集
    */
   // 拼接给定的消息
   // producer一次性传过来的消息就是一个ByteBufferMessageSet，里面包含了客户端的多条消息
@@ -94,7 +94,7 @@ class LogSegment(val log: FileMessageSet,// 用于操作对应消息日志文件
         // 重置累加消息字节数
         this.bytesSinceLastIndexEntry = 0
       }
-      // 拼接消息
+      // 拼接消息集
       // append the messages
       log.append(messages)
       // 为下次更新index做准备

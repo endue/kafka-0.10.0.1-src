@@ -211,6 +211,7 @@ class Message(val buffer: ByteBuffer,
     
   /**
    * Compute the checksum of the message from the message contents
+    * 从消息内容计算消息的校验和
    */
   def computeChecksum: Long =
     CoreUtils.crc32(buffer.array, buffer.arrayOffset + MagicOffset,  buffer.limit - MagicOffset)
@@ -222,6 +223,7 @@ class Message(val buffer: ByteBuffer,
   
     /**
    * Returns true if the crc stored with the message matches the crc computed off the message contents
+      * 如果消息中存储的crc与根据消息内容计算出来的crc匹配，则返回true
    */
   def isValid: Boolean = checksum == computeChecksum
   

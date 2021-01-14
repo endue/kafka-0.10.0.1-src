@@ -420,10 +420,14 @@ class ByteBufferMessageSet(val buffer: ByteBuffer) extends MessageSet with Loggi
 
   /**
    * Update the offsets for this message set and do further validation on messages including:
+    * 更新此消息集的偏移量，并对消息进行进一步的验证，包括
    * 1. Messages for compacted topics must have keys
+    * 属于压缩topic的Messag必须都有key
    * 2. When magic value = 1, inner messages of a compressed message set must have monotonically increasing offsets
    *    starting from 0.
+    * 如果magic = 1，压缩消息集中的消息必须单调递增且从0开始
    * 3. When magic value = 1, validate and maybe overwrite timestamps of messages.
+    * 如果magic = 1，验证并可以覆盖时间戳的消息
    *
    * This method will convert the messages in the following scenarios:
    * A. Magic value of a message = 0 and messageFormatVersion is 1
@@ -442,6 +446,7 @@ class ByteBufferMessageSet(val buffer: ByteBuffer) extends MessageSet with Loggi
                                                       messageFormatVersion: Byte = Message.CurrentMagicValue,
                                                       messageTimestampType: TimestampType,
                                                       messageTimestampDiffMaxMs: Long): (ByteBufferMessageSet, Boolean) = {
+    // 消息不需要压缩
     if (sourceCodec == NoCompressionCodec && targetCodec == NoCompressionCodec) {
       // check the magic value
       if (!isMagicValueInAllWrapperMessages(messageFormatVersion)) {
@@ -453,6 +458,7 @@ class ByteBufferMessageSet(val buffer: ByteBuffer) extends MessageSet with Loggi
         (validateNonCompressedMessagesAndAssignOffsetInPlace(offsetCounter, now, compactedTopic, messageTimestampType,
           messageTimestampDiffMaxMs), false)
       }
+    // 消息需要压缩
     } else {
       // Deal with compressed messages
       // We cannot do in place assignment in one of the following situations:
