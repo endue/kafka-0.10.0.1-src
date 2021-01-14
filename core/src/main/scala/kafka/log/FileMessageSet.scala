@@ -425,7 +425,7 @@ object FileMessageSet
       else {
         // 是否为预分配
         if (preallocate) {
-          // 预分配当前分解，文件大小为默认大小为512 * 1025 *1024
+          // 预分配当前分解，文件大小为默认大小为512 * 1025 *1024,如果文件不存在会创建
           val randomAccessFile = new RandomAccessFile(file, "rw")
           randomAccessFile.setLength(initFileSize)
           randomAccessFile.getChannel()

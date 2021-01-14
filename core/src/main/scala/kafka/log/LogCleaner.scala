@@ -403,12 +403,17 @@ private[log] class Cleaner(val id: Int,
                                  map: OffsetMap, 
                                  deleteHorizonMs: Long) {
     // create a new segment with the suffix .cleaned appended to both the log and index name
+    // 生成对应.log.cleaned和.index.cleaned文件
     val logFile = new File(segments.head.log.file.getPath + Log.CleanedFileSuffix)
     logFile.delete()
     val indexFile = new File(segments.head.index.file.getPath + Log.CleanedFileSuffix)
     indexFile.delete()
+    // 生成一个新FileMessageSet，这里logFile对应的fileAlreadyExists=false
+    // 所以FileMessageSet里会创建logFile文件，注意是以.log.cleaned结尾
     val messages = new FileMessageSet(logFile, fileAlreadyExists = false, initFileSize = log.initFileSize(), preallocate = log.config.preallocate)
+    // 生成一个新OffsetIndex，底层也会创建一个.index.cleaned文件
     val index = new OffsetIndex(indexFile, segments.head.baseOffset, segments.head.index.maxIndexSize)
+    // 创建LogSegment
     val cleaned = new LogSegment(messages, index, segments.head.baseOffset, segments.head.indexIntervalBytes, log.config.randomSegmentJitter, time)
 
     try {
