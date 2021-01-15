@@ -131,7 +131,7 @@ class FileMessageSet private[kafka](@volatile var file: File,// 指向底层日�
   // producer一次性传过来的消息就是一个ByteBufferMessageSet，里面包含了客户端的多条消息
   // FileMessageSet指向日志文件，里面记录了多个MessageSet
   def searchFor(targetOffset: Long, startingPosition: Int): OffsetPosition = {
-    // 记录起始位置
+    // 记录要读取的物理起始位置
     var position = startingPosition
     // 创建一个12字节的buffer
     val buffer = ByteBuffer.allocate(MessageSet.LogOverhead)

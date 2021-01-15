@@ -145,11 +145,14 @@ class OffsetIndex(@volatile private[this] var _file: File, val baseOffset: Long,
    */
   def lookup(targetOffset: Long): OffsetPosition = {
     maybeLock(lock) {
+      // 创建索引文件快照
       val idx = mmap.duplicate
+      // 查找
       val slot = indexSlotFor(idx, targetOffset)
       if(slot == -1)
         OffsetPosition(baseOffset, 0)
       else
+        // 返回targetOffset对offset和消息集大小
         OffsetPosition(baseOffset + relativeOffset(idx, slot), physical(idx, slot))
       }
   }
@@ -163,6 +166,7 @@ class OffsetIndex(@volatile private[this] var _file: File, val baseOffset: Long,
    * 
    * @return The slot found or -1 if the least entry in the index is larger than the target offset or the index is empty
    */
+  // 基于索引文件来查找目标偏移量
   private def indexSlotFor(idx: ByteBuffer, targetOffset: Long): Int = {
     // we only store the difference from the base offset so calculate that
     val relOffset = targetOffset - baseOffset
@@ -176,6 +180,7 @@ class OffsetIndex(@volatile private[this] var _file: File, val baseOffset: Long,
       return -1
       
     // binary search for the entry
+    // 二分查找
     var lo = 0
     var hi = _entries - 1
     while (lo < hi) {
@@ -192,9 +197,11 @@ class OffsetIndex(@volatile private[this] var _file: File, val baseOffset: Long,
   }
   
   /* return the nth offset relative to the base offset */
+  // 返回相对于base offset的第n个offset位置的值
   private def relativeOffset(buffer: ByteBuffer, n: Int): Int = buffer.getInt(n * 8)
   
   /* return the nth physical position */
+  // 返回第n个物理位置的值
   private def physical(buffer: ByteBuffer, n: Int): Int = buffer.getInt(n * 8 + 4)
   
   /**
@@ -214,13 +221,17 @@ class OffsetIndex(@volatile private[this] var _file: File, val baseOffset: Long,
   /**
    * Append an entry for the given offset/location pair to the index. This entry must have a larger offset than all subsequent entries.
     * 添加索引
+    * offset：为消息集中第一个消息的offset
+    * position：为保存消息集FileMessageSet当前的大小(传递进来时还未保存消息集)
    */
   def append(offset: Long, position: Int) {
     inLock(lock) {
       require(!isFull, "Attempt to append to a full index (size = " + _entries + ").")
       if (_entries == 0 || offset > _lastOffset) {
         debug("Adding index entry %d => %d to %s.".format(offset, position, _file.getName))
+        // 写入4个字节的基于baseOffset的偏移量(逻辑偏移量)
         mmap.putInt((offset - baseOffset).toInt)
+        // 写入4个字节的消息集大小(物理偏移量)
         mmap.putInt(position)
         _entries += 1
         _lastOffset = offset

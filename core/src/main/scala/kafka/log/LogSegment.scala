@@ -28,12 +28,15 @@ import java.io.{IOException, File}
 
  /**
  * A segment of the log. Each segment has two components: a log and an index. The log is a FileMessageSet containing
+   * Log的一部分，每个LogSegment包括两部分内容：日志和索引，日志是一个FileMessageSet包含真实的消息
  * the actual messages. The index is an OffsetIndex that maps from logical offsets to physical file positions. Each
+   * 索引是一个从逻辑偏移量映射到物理文件位置的OffsetIndex
  * segment has a base offset which is an offset <= the least offset of any message in this segment and > any offset in
+   * 每一个LogSegment都有一个base offset，它小于这个LogSegment中所有消息的offset，但是 > 上一个LogSegment的所有offset
  * any previous segment.
  *
  * A segment with a base offset of [base_offset] would be stored in two files, a [base_offset].index and a [base_offset].log file.
- *
+ * LogSegment会基于自己的base offset日志和索引文件，base_offset.index和base_offset.log
  * @param log The message set containing log entries
  * @param index The offset index
  * @param baseOffset A lower bound on the offsets in this segment
@@ -41,10 +44,10 @@ import java.io.{IOException, File}
  * @param time The time instance
  */
 @nonthreadsafe
-class LogSegment(val log: FileMessageSet,// 用于操作对应消息日志文件的FileMessageSet对象
-                 val index: OffsetIndex,// 用于操作对应offset 索引文件的 OffsetIndex对象
-                 val baseOffset: Long,// 每一个日志文件的第一个消息的offset
-                 val indexIntervalBytes: Int,// 索引项之间间隔的最小字节数，也就是隔多少字节写一次索引 默认10 * 1024 * 1024
+class LogSegment(val log: FileMessageSet,// 存储消息集的FileMessageSet对象
+                 val index: OffsetIndex,// 索引文件的OffsetIndex对象
+                 val baseOffset: Long,// LogSegment第一个消息的offset
+                 val indexIntervalBytes: Int,// 隔多少字节写一次索引 默认10 * 1024 * 1024
                  val rollJitterMs: Long,
                  time: Time) extends Logging {
 
@@ -68,7 +71,7 @@ class LogSegment(val log: FileMessageSet,// 用于操作对应消息日志文件
          time)
 
   /* Return the size in bytes of this log segment */
-   // 返回该日志段的大小(以字节为单位)
+   // 返回该日志段目前消息集的大小(以字节为单位)
   def size: Long = log.sizeInBytes()
 
   /**
@@ -89,7 +92,7 @@ class LogSegment(val log: FileMessageSet,// 用于操作对应消息日志文件
       // append an entry to the index (if needed)
       // 判断是否更新index索引
       if(bytesSinceLastIndexEntry > indexIntervalBytes) {
-        // 添加索引，消息的起始位置，消息大小
+        // 添加索引，消息集第一个消息的offset，当前FileMessageSet已保存的消息字节数
         index.append(offset, log.sizeInBytes())
         // 重置累加消息字节数
         this.bytesSinceLastIndexEntry = 0
@@ -104,7 +107,6 @@ class LogSegment(val log: FileMessageSet,// 用于操作对应消息日志文件
 
   /**
    * Find the physical file position for the first message with offset >= the requested offset.
-   * 找到第一个带有偏移量>=请求偏移量的消息的物理文件位置
    * The lowerBound argument is an optimization that can be used if we already know a valid starting position
    * in the file higher than the greatest-lower-bound from the index.
    *
@@ -114,9 +116,13 @@ class LogSegment(val log: FileMessageSet,// 用于操作对应消息日志文件
    *
    * @return The position in the log storing the message with the least offset >= the requested offset or null if no message meets this criteria.
    */
+  // offset：要查找消息集的逻辑位置
+  // startingFilePosition：要查找消息集的物理位置
   @threadsafe
   private[log] def translateOffset(offset: Long, startingFilePosition: Int = 0): OffsetPosition = {
+    // 从index索引文件获取对应的逻辑位置<-->物理位置映射关系mapping
     val mapping = index.lookup(offset)
+    // 从log日志文件中查找指定范围的
     log.searchFor(offset, max(mapping.position, startingFilePosition))
   }
 
