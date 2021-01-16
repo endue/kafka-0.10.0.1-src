@@ -76,11 +76,13 @@ class OffsetIndex(@volatile private[this] var _file: File, val baseOffset: Long,
       if (newlyCreated) {
         if (maxIndexSize < 8)
           throw new IllegalArgumentException("Invalid max index size: " + maxIndexSize)
+        // 找到一个比maxIndexSize数字小并且最接近8的倍数的数字
         raf.setLength(roundToExactMultiple(maxIndexSize, 8))
       }
 
       /* memory-map the file */
       val len = raf.length()
+      // 映射底层.index文件
       val idx = raf.getChannel.map(FileChannel.MapMode.READ_WRITE, 0, len)
 
       /* set the position in the index for the next entry */
@@ -98,12 +100,12 @@ class OffsetIndex(@volatile private[this] var _file: File, val baseOffset: Long,
   }
 
   /* the number of eight-byte entries currently in the index */
-  // 索引中当前的8字节条目数
+  // 一个索引占8个字节，这里计算索引文件已存储的索引数量
   @volatile
   private[this] var _entries = mmap.position / 8
 
   /* The maximum number of eight-byte entries this index can hold */
-  // 该索引可以容纳的最大8字节条目数
+  // 一个索引占8个字节，这里计算索引文件可存储的索引数量
   @volatile
   private[this] var _maxEntries = mmap.limit / 8
 
@@ -115,21 +117,27 @@ class OffsetIndex(@volatile private[this] var _file: File, val baseOffset: Long,
     .format(_file.getAbsolutePath, _maxEntries, maxIndexSize, _entries, _lastOffset, mmap.position))
 
   /** The maximum number of entries this index can hold */
+  // 可存储的索引数量
   def maxEntries: Int = _maxEntries
 
   /** The last offset in the index */
+  // 最后一条索引的逻辑偏移量
   def lastOffset: Long = _lastOffset
 
   /** The index file */
+  // 索引文件
   def file: File = _file
 
   /**
    * The last entry in the index
+    * 读取最后一条索引记录的偏移量
    */
   def readLastEntry(): OffsetPosition = {
     inLock(lock) {
       _entries match {
+         // 没有存储索引，返回的就是当前索引文件的baseOffset，物理偏移量为0
         case 0 => OffsetPosition(baseOffset, 0)
+        // 有存储索引，返回的就是最后一条索引的逻辑偏移量和物理偏移量
         case s => OffsetPosition(baseOffset + relativeOffset(mmap, s - 1), physical(mmap, s - 1))
       }
     }
@@ -151,7 +159,7 @@ class OffsetIndex(@volatile private[this] var _file: File, val baseOffset: Long,
     maybeLock(lock) {
       // 创建索引文件快照
       val idx = mmap.duplicate
-      // 二分查找targetOffset在索引文件中属于第几个条目
+      // 二分查找逻辑偏移量targetOffset在索引文件中属于第几个条目
       val slot = indexSlotFor(idx, targetOffset)
       if(slot == -1)
         OffsetPosition(baseOffset, 0)
@@ -241,6 +249,7 @@ class OffsetIndex(@volatile private[this] var _file: File, val baseOffset: Long,
         // 写入4个字节的消息集大小(物理偏移量)
         mmap.putInt(position)
         _entries += 1
+        // 更新_lastOffset为最新加入消息的offset
         _lastOffset = offset
         require(_entries * 8 == mmap.position, _entries + " entries but file position in index is " + mmap.position + ".")
       } else {
@@ -289,11 +298,15 @@ class OffsetIndex(@volatile private[this] var _file: File, val baseOffset: Long,
 
   /**
    * Truncates index to a known number of entries.
+    * 截取索引为指定的条数
    */
   private def truncateToEntries(entries: Int) {
     inLock(lock) {
+      // 更新目前记录的索引条数
       _entries = entries
+      // 更新文件的写入文章
       mmap.position(_entries * 8)
+      // 更新最后一条索引的逻辑偏移量
       _lastOffset = readLastEntry.offset
     }
   }
@@ -313,20 +326,26 @@ class OffsetIndex(@volatile private[this] var _file: File, val baseOffset: Long,
    * trimToValidSize() which is called at closing the segment or new segment being rolled; (2) at
    * loading segments from disk or truncating back to an old segment where a new log segment became active;
    * we want to reset the index size to maximum index size to avoid rolling new segment.
+    * 重置索引大小
    */
   def resize(newSize: Int) {
     inLock(lock) {
       val raf = new RandomAccessFile(_file, "rw")
+      // 基于newSize查找到一个最接近8的倍数的roundedNewSize
       val roundedNewSize = roundToExactMultiple(newSize, 8)
+      // mmap对应buffer的position
       val position = mmap.position
       
       /* Windows won't let us modify the file length while the file is mmapped :-( */
       if (Os.isWindows)
+        // 强制释放MappedByteBuffer
         forceUnmap(mmap)
       try {
+        // 重新生成mmap并设置缓存区大小为roundedNewSize
         raf.setLength(roundedNewSize)
         mmap = raf.getChannel().map(FileChannel.MapMode.READ_WRITE, 0, roundedNewSize)
         _maxEntries = mmap.limit / 8
+        // 设置mmap写入的起始位置
         mmap.position(position)
       } finally {
         CoreUtils.swallow(raf.close())
@@ -404,7 +423,7 @@ class OffsetIndex(@volatile private[this] var _file: File, val baseOffset: Long,
   /**
    * Round a number to the greatest exact multiple of the given factor less than the given number.
    * E.g. roundToExactMultiple(67, 8) == 64
-    * 找到一个比number数字小并且最接近factor的数字
+    * 找到一个比number数字小并且最接近factor倍数的数字
    */
   private def roundToExactMultiple(number: Int, factor: Int) = factor * (number / factor)
   
