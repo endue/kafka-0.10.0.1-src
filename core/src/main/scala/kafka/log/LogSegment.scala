@@ -100,7 +100,7 @@ class LogSegment(val log: FileMessageSet,// 存储消息集的FileMessageSet对�
       // 拼接消息集
       // append the messages
       log.append(messages)
-      // 为下次更新index做准备
+      // 更新bytesSinceLastIndexEntry一遍判断后续是否需要写索引
       this.bytesSinceLastIndexEntry += messages.sizeInBytes
     }
   }
@@ -116,13 +116,19 @@ class LogSegment(val log: FileMessageSet,// 存储消息集的FileMessageSet对�
    *
    * @return The position in the log storing the message with the least offset >= the requested offset or null if no message meets this criteria.
    */
-  // offset：要查找消息集的逻辑位置
-  // startingFilePosition：要查找消息集的物理位置
+  // 转换一下，参数如下：
+  // offset：消息的逻辑位置，也就是每条消息的offset
+  // startingFilePosition：消息的物理偏移量，也就是从FileMessageSet的第几个字节开始读取
+  // 转换逻辑就是：
+  //  1.查找逻辑结束位置offset的物理结束位置，返回一个元组
+  //  2.基于将逻辑结束偏移量offset转换为物理结束位置，将物理开始偏移量startingFilePosition转换为物理开始偏移量
   @threadsafe
   private[log] def translateOffset(offset: Long, startingFilePosition: Int = 0): OffsetPosition = {
-    // 从index索引文件获取对应的逻辑位置<-->物理位置映射关系mapping
+    // 基于消息的逻辑偏移量offset，查找它对于的物理偏移量或最接近它的物理偏移量
     val mapping = index.lookup(offset)
-    // 从log日志文件中查找指定范围的
+    // 从log日志文件中查找
+    // offset为逻辑结束偏移量
+    // max(mapping.position, startingFilePosition)计算最大的物理逻辑开始偏移量
     log.searchFor(offset, max(mapping.position, startingFilePosition))
   }
 
@@ -130,10 +136,10 @@ class LogSegment(val log: FileMessageSet,// 存储消息集的FileMessageSet对�
    * Read a message set from this segment beginning with the first offset >= startOffset. The message set will include
    * no more than maxSize bytes and will end before maxOffset if a maxOffset is specified.
    *
-   * @param startOffset A lower bound on the first offset to include in the message set we read 消息读取起始偏移量
+   * @param startOffset A lower bound on the first offset to include in the message set we read 消息读取逻辑起始偏移量
    * @param maxSize The maximum number of bytes to include in the message set we read 消息读取最大字节数
-   * @param maxOffset An optional maximum offset for the message set we read 消息读取最大偏移量
-   * @param maxPosition The maximum position in the log segment that should be exposed for read LongSegment中可读取的最大偏移量
+   * @param maxOffset An optional maximum offset for the message set we read 消息读取逻辑最大偏移量
+   * @param maxPosition The maximum position in the log segment that should be exposed for read  LongSegment中可读取的最大物理偏移量
    *
    * @return The fetched data and the offset metadata of the first message whose offset is >= startOffset,
    *         or null if the startOffset is larger than the largest offset in this log
@@ -142,31 +148,32 @@ class LogSegment(val log: FileMessageSet,// 存储消息集的FileMessageSet对�
   def read(startOffset: Long, maxOffset: Option[Long], maxSize: Int, maxPosition: Long = size): FetchDataInfo = {
     if(maxSize < 0)
       throw new IllegalArgumentException("Invalid max size for log read (%d)".format(maxSize))
-    // 读取日志大小
+    // 当前FileMessageSet中存储的消息字节数
     val logSize = log.sizeInBytes // this may change, need to save a consistent copy
-    // 计算要读取的消息的物理文件位置,将startOffset准换成物理地址
+    // 基于逻辑开始偏移量startOffset转换为其物理起始位置
     val startPosition = translateOffset(startOffset)
 
     // if the start position is already off the end of the log, return null
-    // 如果起始偏移量已经在日志的末尾返回null
+    // 索引文件中没找到，返回null
     if(startPosition == null)
       return null
-
+    // 封装一个LogOffsetMetadata
     val offsetMetadata = new LogOffsetMetadata(startOffset, this.baseOffset, startPosition.position)
 
     // if the size is zero, still return a log segment but with zero size
-    // 如果大小为0，仍然返回一个大小为0的日志段
+    // 如果大小为0，一条消息不读，返回一个空
     if(maxSize == 0)
       return FetchDataInfo(offsetMetadata, MessageSet.Empty)
 
     // calculate the length of the message set to read based on whether or not they gave us a maxOffset
-    // 判断maxOffset是否为空
-    // 也就是读取消息的最大偏移量
+    // 计算可读取的最大字节数
     val length = maxOffset match {
+        // maxOffset没传值，那么基于maxPosition和maxSize来计算
       case None =>
         // no max offset, just read until the max position
-        // 为空，计算可读消息的长度
+        // 在要读取的最大物理偏移量 - 要读取的起始物理偏移量  和 maxSize 两者中取最小
         min((maxPosition - startPosition.position).toInt, maxSize)
+        // maxOffset指定了值，那么就转换逻辑偏移量offset为物理偏移量
       case Some(offset) =>
         // there is a max offset, translate it to a file position and use that to calculate the max read size;
         // when the leader of a partition changes, it's possible for the new leader's high watermark to be less than the
@@ -174,15 +181,19 @@ class LogSegment(val log: FileMessageSet,// 存储消息集的FileMessageSet对�
         // offset between new leader's high watermark and the log end offset, we want to return an empty response.
         if(offset < startOffset)
           return FetchDataInfo(offsetMetadata, MessageSet.Empty)
+        // 将逻辑结束偏移量offset转换为物理偏移量
         val mapping = translateOffset(offset, startPosition.position)
         val endPosition =
+          // 为空那就读取当前LogSegment中可读取的最大物理偏移量
           if(mapping == null)
             logSize // the max offset is off the end of the log, use the end of the file
           else
+          // 不为空就返回结束物理偏移量
             mapping.position
+        // 结束物理偏移量 - 开始物理偏移量就是可读取的最大字节数
         min(min(maxPosition, endPosition) - startPosition.position, maxSize).toInt
     }
-    // 返回数据
+    // 返回数据，数据基于物理起始偏移量和可读取的最大字节数查找读取
     FetchDataInfo(offsetMetadata, log.read(startPosition.position, length))
   }
 
@@ -190,29 +201,33 @@ class LogSegment(val log: FileMessageSet,// 存储消息集的FileMessageSet对�
    * Run recovery on the given segment. This will rebuild the index from the log file and lop off any invalid bytes from the end of the log and index.
    * 在给定的LogSegment上进行恢复。这将从日志文件重新构建索引，并删除日志和索引末尾的任何无效字节
    * @param maxMessageSize A bound the memory allocation in the case of a corrupt message size--we will assume any message larger than this
-   * is corrupt.
+   * is corrupt. 超过参数maxMessageSize大小的消息都会丢弃掉
    *
    * @return The number of bytes truncated from the log
    */
   @nonthreadsafe
   def recover(maxMessageSize: Int): Int = {
-    // 将索引截断为已知的条目数，这里为0
+    // 截断整个索引，删除所有条目，也就是清空了.index索引文件
     index.truncate()
-    // 重置索引文件的大小
+    // 调整.index索引文件
     index.resize(index.maxIndexSize)
+    // 已验证消息的字节数
     var validBytes = 0
+    // 上一次写索引的物理偏移量
     var lastIndexEntry = 0
+    // 构建一个迭代器
     val iter = log.iterator(maxMessageSize)
     try {
-      // 遍历LogSegment对应的FileMessageSet
+      // 迭代FileMessageSet中一个个消息集
+      // 当遍历的消息超过maxMessageSize大小后，会抛出一个CorruptRecordException异常
       while(iter.hasNext) {
         val entry = iter.next
-        // 验证消息是否已验证
+        // 根据消息内容计算出来的crc和消息中存储的crc做比较，是否相等，不等抛出InvalidMessageException异常
         entry.message.ensureValid()
         // 当验证的消息字节数超过indexIntervalBytes时写一次索引
         if(validBytes - lastIndexEntry > indexIntervalBytes) {
           // we need to decompress the message, if required, to get the offset of the first uncompressed message
-          // 如果消息被压缩那么需要解压缩以便获取对应消息的其实偏移量
+          // 如果消息被压缩那么需要解压缩以便获取对应消息的起始逻辑偏移量
           val startOffset =
             entry.message.compressionCodec match {
               case NoCompressionCodec =>
@@ -220,23 +235,23 @@ class LogSegment(val log: FileMessageSet,// 存储消息集的FileMessageSet对�
               case _ =>
                 ByteBufferMessageSet.deepIterator(entry).next().offset
           }
-          // 写索引，消息的位置，消息大小
+          // 写索引，消息集第一条消息的offset，当前已验证消息的字节数
           index.append(startOffset, validBytes)
-          // 重置lastIndexEntry
+          // 更新lastIndexEntry
           lastIndexEntry = validBytes
         }
-        // 累加已验证的消息
+        // 累加已验证的消息字节数
         validBytes += MessageSet.entrySize(entry.message)
       }
     } catch {
       case e: CorruptRecordException =>
         logger.warn("Found invalid messages in log segment %s at byte offset %d: %s.".format(log.file.getAbsolutePath, validBytes, e.getMessage))
     }
-    // 计算要截取消息的字节数
+    // 计算要截取FileMessageSet中的字节数
     val truncated = log.sizeInBytes - validBytes
-    // 截取log
+    // 截取FileMessageSet，起始就是修改内容channel的position到validBytes
     log.truncateTo(validBytes)
-    // 修改索引
+    // 调整.index索引文件
     index.trimToValidSize()
     // 返回丢弃的字节数
     truncated
@@ -252,15 +267,21 @@ class LogSegment(val log: FileMessageSet,// 存储消息集的FileMessageSet对�
    */
   @nonthreadsafe
   def truncateTo(offset: Long): Int = {
+    // 转移逻辑偏移量offset
     val mapping = translateOffset(offset)
     if(mapping == null)
       return 0
+    // 截断索引
     index.truncateTo(offset)
     // after truncation, reset and allocate more space for the (new currently  active) index
+    // 调整.index索引文件
     index.resize(index.maxIndexSize)
+    // 截取FileMessageSet，这里获取offset对应的物理偏移量
     val bytesTruncated = log.truncateTo(mapping.position)
+    // 截取FileMessageSet后没内容了，那么更新created
     if(log.sizeInBytes == 0)
       created = time.milliseconds
+    // 重新计算索引累加值
     bytesSinceLastIndexEntry = 0
     bytesTruncated
   }
@@ -268,6 +289,7 @@ class LogSegment(val log: FileMessageSet,// 存储消息集的FileMessageSet对�
   /**
    * Calculate the offset that would be used for the next message to be append to this segment.
    * Note that this is expensive.
+    * 计算LEO
    */
   @threadsafe
   def nextOffset(): Long = {
@@ -296,6 +318,7 @@ class LogSegment(val log: FileMessageSet,// 存储消息集的FileMessageSet对�
 
   /**
    * Change the suffix for the index and log file for this log segment
+    * 修改.index和.log文件的后缀
    */
   def changeFileSuffixes(oldSuffix: String, newSuffix: String) {
 

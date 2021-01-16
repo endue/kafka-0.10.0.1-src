@@ -98,13 +98,16 @@ class OffsetIndex(@volatile private[this] var _file: File, val baseOffset: Long,
   }
 
   /* the number of eight-byte entries currently in the index */
+  // 索引中当前的8字节条目数
   @volatile
   private[this] var _entries = mmap.position / 8
 
   /* The maximum number of eight-byte entries this index can hold */
+  // 该索引可以容纳的最大8字节条目数
   @volatile
   private[this] var _maxEntries = mmap.limit / 8
 
+  // 最后一条索引记录的逻辑偏移量offset
   @volatile
   private[this] var _lastOffset = readLastEntry.offset
   
@@ -142,17 +145,18 @@ class OffsetIndex(@volatile private[this] var _file: File, val baseOffset: Long,
    * If the target offset is smaller than the least entry in the index (or the index is empty),
    * the pair (baseOffset, 0) is returned.
     * 查找
+    * targetOffset为消息的逻辑偏移量offset
    */
   def lookup(targetOffset: Long): OffsetPosition = {
     maybeLock(lock) {
       // 创建索引文件快照
       val idx = mmap.duplicate
-      // 查找
+      // 二分查找targetOffset在索引文件中属于第几个条目
       val slot = indexSlotFor(idx, targetOffset)
       if(slot == -1)
         OffsetPosition(baseOffset, 0)
       else
-        // 返回targetOffset对offset和消息集大小
+        // 返回targetOffset对应消息的逻辑偏移量offset和物理偏移量
         OffsetPosition(baseOffset + relativeOffset(idx, slot), physical(idx, slot))
       }
   }
@@ -169,20 +173,23 @@ class OffsetIndex(@volatile private[this] var _file: File, val baseOffset: Long,
   // 基于索引文件来查找目标偏移量
   private def indexSlotFor(idx: ByteBuffer, targetOffset: Long): Int = {
     // we only store the difference from the base offset so calculate that
+    // 计算targetOffset相对索引文件baseOffset的实际偏移量
     val relOffset = targetOffset - baseOffset
     
     // check if the index is empty
+    // 索引文件没内容，直接返回-1，没找到
     if (_entries == 0)
       return -1
     
     // check if the target offset is smaller than the least offset
+    // 如果要查找的实际偏移量比当前索引的baseOffset还小，那也是不需要查找了，直接返回-1
     if (relativeOffset(idx, 0) > relOffset)
       return -1
       
     // binary search for the entry
     // 二分查找
-    var lo = 0
-    var hi = _entries - 1
+    var lo = 0// 起始
+    var hi = _entries - 1// 最大(从0开始的，所以这里-1)
     while (lo < hi) {
       val mid = ceil(hi/2.0 + lo/2.0).toInt
       val found = relativeOffset(idx, mid)
@@ -197,11 +204,11 @@ class OffsetIndex(@volatile private[this] var _file: File, val baseOffset: Long,
   }
   
   /* return the nth offset relative to the base offset */
-  // 返回相对于base offset的第n个offset位置的值
+  // 返回相对于base offset的第n个位置的逻辑偏移量offset
   private def relativeOffset(buffer: ByteBuffer, n: Int): Int = buffer.getInt(n * 8)
   
   /* return the nth physical position */
-  // 返回第n个物理位置的值
+  // 返回第n个位置的物理偏移量
   private def physical(buffer: ByteBuffer, n: Int): Int = buffer.getInt(n * 8 + 4)
   
   /**
@@ -250,11 +257,13 @@ class OffsetIndex(@volatile private[this] var _file: File, val baseOffset: Long,
   
   /**
    * Truncate the entire index, deleting all entries
+    * 截断整个索引，删除所有条目
    */
   def truncate() = truncateToEntries(0)
   
   /**
    * Remove all entries from the index which have an offset greater than or equal to the given offset.
+    * 从索引中删除所有偏移量大于或等于给定偏移量的项
    * Truncating to an offset larger than the largest in the index has no effect.
    */
   def truncateTo(offset: Long) {
@@ -395,6 +404,7 @@ class OffsetIndex(@volatile private[this] var _file: File, val baseOffset: Long,
   /**
    * Round a number to the greatest exact multiple of the given factor less than the given number.
    * E.g. roundToExactMultiple(67, 8) == 64
+    * 找到一个比number数字小并且最接近factor的数字
    */
   private def roundToExactMultiple(number: Int, factor: Int) = factor * (number / factor)
   

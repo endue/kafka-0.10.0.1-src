@@ -215,8 +215,8 @@ class Log(val dir: File,// 日志文件对应的磁盘目录，如：/tmp/kafka-
         // 生成对应的LogSegment，调用重载的构造方法
         val segment = new LogSegment(dir = dir,
                                      startOffset = start,
-                                     indexIntervalBytes = config.indexInterval,
-                                     maxIndexSize = config.maxIndexSize,
+                                     indexIntervalBytes = config.indexInterval,// index.interval.bytes 4096
+                                     maxIndexSize = config.maxIndexSize,// segment.index.bytes 10 * 1024 * 1024
                                      rollJitterMs = config.randomSegmentJitter,
                                      time = time,
                                      fileAlreadyExists = true)

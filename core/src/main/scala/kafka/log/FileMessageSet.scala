@@ -127,9 +127,11 @@ class FileMessageSet private[kafka](@volatile var file: File,// 指向底层日�
    * @param targetOffset The offset to search for.
    * @param startingPosition The starting position in the file to begin searching from.
    */
-  // 基于offset查找消息
-  // producer一次性传过来的消息就是一个ByteBufferMessageSet，里面包含了客户端的多条消息
-  // FileMessageSet指向日志文件，里面记录了多个MessageSet
+  // 从物理位置startingPosition开始查找，当找到targetOffset逻辑位置时，返回
+
+  // 这里就是从物理起始位置startingPosition开始查找目标逻辑结束位置targetOffset
+  // 找到第一个逻辑位置offset >= 逻辑结束位置targetOffset的物理位置position，然后返回，返回内容就是
+  // (物理结束位置position的逻辑位置offset，物理结束位置position)
   def searchFor(targetOffset: Long, startingPosition: Int): OffsetPosition = {
     // 记录要读取的物理起始位置
     var position = startingPosition
@@ -158,7 +160,7 @@ class FileMessageSet private[kafka](@volatile var file: File,// 指向底层日�
       val messageSize = buffer.getInt()
       if(messageSize < Message.MinMessageOverhead)
         throw new IllegalStateException("Invalid message size: " + messageSize)
-      // 获取下一个MessageSet的其实位置
+      // 获取下一个MessageSet的物理位置位置
       position += MessageSet.LogOverhead + messageSize
     }
     null
