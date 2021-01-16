@@ -35,6 +35,7 @@ import scala.collection.mutable.ArrayBuffer
 
 /**
  * An on-disk message set. An optional start and end position can be applied to the message set
+  * 磁盘上的消息集合
  * which will allow slicing a subset of the file.
  * @param file The file name for the underlying log data
  * @param channel the underlying file channel used
@@ -43,14 +44,14 @@ import scala.collection.mutable.ArrayBuffer
  * @param isSlice Should the start and end parameters be used for slicing?
  */
 @nonthreadsafe
-class FileMessageSet private[kafka](@volatile var file: File,// 指向底层日志文件
+class FileMessageSet private[kafka](@volatile var file: File,// 指向底层日志文件,如：xxxx.log
                                     private[log] val channel: FileChannel,// FileChannel类型，读写日志文件
-                                    private[log] val start: Int,// FileMessageSet对象除了表示一个完整的日志文件，还可以表示日志文件的分片，start表示分片的开始位置
-                                    private[log] val end: Int,// 分片的结束位置
+                                    private[log] val start: Int,// FileMessageSet中存储消息的物理起始偏移量
+                                    private[log] val end: Int,// FileMessageSet中存储消息的物理结束偏移量
                                     isSlice: Boolean) extends MessageSet with Logging {// 表示当前FileMessageSet是否为日志文件的分片
 
   /* the size of the message set in bytes */
-  // 已写入消息集字节数
+  // FileMessageSet中存储的字节数
   private val _size =
     if(isSlice)
       new AtomicInteger(end - start) // don't check the file size if this is just a slice view
@@ -58,6 +59,7 @@ class FileMessageSet private[kafka](@volatile var file: File,// 指向底层日�
       new AtomicInteger(math.min(channel.size.toInt, end) - start)
 
   /* if this is not a slice, update the file pointer to the end of the file */
+  // 当前如果不是分片，那么将文件position指向文件末尾
   if (!isSlice)
     /* set the file position to the last byte in the file */
     channel.position(math.min(channel.size.toInt, end))
@@ -109,6 +111,7 @@ class FileMessageSet private[kafka](@volatile var file: File,// 指向底层日�
    * @param size The number of bytes after the start position to include
    *
    * @return A sliced wrapper on this message set limited based on the given position and size
+    * 读取消息，这个重新创建了一个FileMessageSet对象，属于分片isSlice = true，后续读取消息可以通过channel以及start和end来读取
    */
   def read(position: Int, size: Int): FileMessageSet = {
     if(position < 0)
@@ -137,13 +140,13 @@ class FileMessageSet private[kafka](@volatile var file: File,// 指向底层日�
     var position = startingPosition
     // 创建一个12字节的buffer
     val buffer = ByteBuffer.allocate(MessageSet.LogOverhead)
-    // 获取当前FileMessageSet的大小
+    // 获取当前FileMessageSet存储消息的大小
     val size = sizeInBytes()
-    // 从起始位置开始读取
+    // 从起始位置开始读取，如果 position + 消息LogOverhead >= size那就没消息可读了
     while(position + MessageSet.LogOverhead < size) {
-      // 重置buffer的position指针，准备写buffer
+      // 重置buffer的position指针，准备写内容到buffer
       buffer.rewind()
-      // 读取12个字节的LogOverhead
+      // 读取消息12个字节的LogOverhead
       channel.read(buffer, position)
       // 没有读取到，报错
       if(buffer.hasRemaining)
@@ -151,16 +154,18 @@ class FileMessageSet private[kafka](@volatile var file: File,// 指向底层日�
                                         .format(targetOffset, startingPosition, file.getAbsolutePath))
       // 重置buffer的position指针，准备读buffer
       buffer.rewind()
-      // 获取MessageSet的offset,8个字节
+      // 获取消息的offset,8个字节
       val offset = buffer.getLong()
+      // 如果读取的消息的逻辑偏移量offset >= targetOffset那么此时就返回这个最接近targetOffset的offset和对应的物理偏移量
       if(offset >= targetOffset)
         // 读取MessageSet的offset >= 读取位置,返回
         return OffsetPosition(offset, position)
-      // 获取MessageSet的size,4个字节
+      // 获取消息的size,4个字节
       val messageSize = buffer.getInt()
+      // 消息有问题
       if(messageSize < Message.MinMessageOverhead)
         throw new IllegalStateException("Invalid message size: " + messageSize)
-      // 获取下一个MessageSet的物理位置位置
+      // 获取下一个消息的物理偏移量
       position += MessageSet.LogOverhead + messageSize
     }
     null
@@ -168,24 +173,30 @@ class FileMessageSet private[kafka](@volatile var file: File,// 指向底层日�
 
   /**
    * Write some of this set to the given channel.
-   * @param destChannel The channel to write to.
-   * @param writePosition The position in the message set to begin writing from.
+   * @param destChannel The channel to write to. 接收数据的目标channel
+   * @param writePosition The position in the message set to begin writing from. 写入的起始位置
    * @param size The maximum number of bytes to write 要写入消息的字节数
    * @return The number of bytes actually written. 实际写入的字节数
    */
-  // 写入消息到FileMessageSet
+  // 写入消息到destChannel
   def writeTo(destChannel: GatheringByteChannel, writePosition: Long, size: Int): Int = {
     // Ensure that the underlying size has not changed.
+    // 确保文件大小没有改变，如果发生了改变那么一定是被truncate了
     val newSize = math.min(channel.size.toInt, end) - start
     if (newSize < _size.get()) {
       throw new KafkaException("Size of FileMessageSet %s has been truncated during write: old size %d, new size %d"
         .format(file.getAbsolutePath, _size.get(), newSize))
     }
-    // 获取写入位置
+    // 获取写入起始偏移量
     val position = start + writePosition
+    // 取要写入目标channel的字节数和当前FileMessageSet存储的字节数中最小的那个
     val count = math.min(size, sizeInBytes)
+    // 基于destChannel类型来调用不同的拷贝方法，将channel中的数据拷贝到destChannel中
+    // 返回写入的字节数
     val bytesTransferred = (destChannel match {
+        // 从channel的0开始读，读取count字节，然后从tl的position开始写入
       case tl: TransportLayer => tl.transferFrom(channel, position, count)
+        // 从channel的position开始读，读取count字节，然后从dc的0开始写入
       case dc => channel.transferTo(position, count, dc)
     }).toInt
     trace("FileMessageSet " + file.getAbsolutePath + " : bytes transferred : " + bytesTransferred
@@ -197,27 +208,55 @@ class FileMessageSet private[kafka](@volatile var file: File,// 指向底层日�
     * This method is called before we write messages to the socket using zero-copy transfer. We need to
     * make sure all the messages in the message set have the expected magic value.
     *
-    * @param expectedMagicValue the magic value expected
+    * @param expectedMagicValue the magic value expected 期待的魔法值
     * @return true if all messages have expected magic value, false otherwise
     */
   override def isMagicValueInAllWrapperMessages(expectedMagicValue: Byte): Boolean = {
+    // 获取当前FileMessageSet消息的起始偏移量
     var location = start
+    // 消息的头信息
     val offsetAndSizeBuffer = ByteBuffer.allocate(MessageSet.LogOverhead)
+    // 消息的头信息，这里具体参考一条Message的结构
+    // 4 byte CRC32 of the message
+    // 1 byte "magic" identifier to allow format changes, value is 0 or 1
+    // 1 byte "attributes" identifier to allow annotations on the message independent of the version
+    // bit 0 ~ 2 : Compression codec.
+    //   0 : no compression
+    //   1 : gzip
+    //   2 : snappy
+    //   3 : lz4
+    // bit 3 : Timestamp type
+    //   0 : create time
+    //   1 : log append time
+    // bit 4 ~ 7 : reserved
+    // (Optional) 8 byte timestamp only if "magic" identifier is greater than 0
+    // 4 byte key length, containing length K
+    // K byte key
+    // 4 byte payload length, containing length V
+    // V byte payload
+    // 这里主要是定义一个Buffer，准备读取CRC32和magic
     val crcAndMagicByteBuffer = ByteBuffer.allocate(Message.CrcLength + Message.MagicLength)
     while (location < end) {
+      // 读取消息的头信息做一些校验
       offsetAndSizeBuffer.rewind()
       channel.read(offsetAndSizeBuffer, location)
+      // offsetAndSizeBuffer还有剩余空间，说明根本就没有消息，返回true就可以
       if (offsetAndSizeBuffer.hasRemaining)
         return true
       offsetAndSizeBuffer.rewind()
+      // 先读取8个字节，跳过消息偏移量OffsetLength
       offsetAndSizeBuffer.getLong // skip offset field
+      // 读取消息的字节数并验证
       val messageSize = offsetAndSizeBuffer.getInt
       if (messageSize < Message.MinMessageOverhead)
         throw new IllegalStateException("Invalid message size: " + messageSize)
+      // 读取消息的CRC32和magic
       crcAndMagicByteBuffer.rewind()
       channel.read(crcAndMagicByteBuffer, location + MessageSet.LogOverhead)
+      // 不等于期望值返回false
       if (crcAndMagicByteBuffer.get(Message.MagicOffset) != expectedMagicValue)
         return false
+      // 继续处理下一条消息
       location += (MessageSet.LogOverhead + messageSize)
     }
     true
@@ -364,9 +403,9 @@ class FileMessageSet private[kafka](@volatile var file: File,// 指向底层日�
    * @param targetSize The size to truncate to. Must be between 0 and sizeInBytes.
    * @return The number of bytes truncated off
    */
-  // 剪裁FileMessageSet
+  // 截断FileMessageSet到指定大小
   def truncateTo(targetSize: Int): Int = {
-    // 当前FileMessageSet大小
+    // 当前FileMessageSet存储的字节数
     val originalSize = sizeInBytes
     if(targetSize > originalSize || targetSize < 0)
       throw new KafkaException("Attempt to truncate log segment to " + targetSize + " bytes failed, " +
@@ -377,7 +416,7 @@ class FileMessageSet private[kafka](@volatile var file: File,// 指向底层日�
       channel.position(targetSize)
       _size.set(targetSize)
     }
-    // 返回剪裁掉的字节数
+    // 返回截断的字节数
     originalSize - targetSize
   }
 
@@ -417,7 +456,7 @@ object FileMessageSet
    */
   // 基于给定的文件创建一个FileChannel
   def openChannel(file: File, mutable: Boolean, fileAlreadyExists: Boolean = false, initFileSize: Int = 0, preallocate: Boolean = false): FileChannel = {
-    // 文件是否可写
+    // 文件是否随机访问
     if (mutable) {
       // 文件已经存在
       if (fileAlreadyExists)
