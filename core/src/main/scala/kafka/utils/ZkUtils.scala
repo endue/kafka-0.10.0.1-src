@@ -170,6 +170,7 @@ class ZkUtils(val zkClient: ZkClient,
     ReplicationUtils.getLeaderIsrAndEpochForPartition(this, topic, partition).map(_.leaderAndIsr)
   }
 
+  // 创建一些永久公共必要的路径
   def setupCommonPaths() {
     for(path <- persistentZkPaths)
       makeSurePersistentPathExists(path)
@@ -329,6 +330,7 @@ class ZkUtils(val zkClient: ZkClient,
 
   /**
    *  make sure a persistent path exists in ZK. Create the path if not exist.
+    *  确保ZK中存在一个持久路径。如果不存在，请创建路径
    */
   def makeSurePersistentPathExists(path: String, acls: java.util.List[ACL] = DefaultAcls) {
     //Consumer path is kept open as different consumers will write under this node.

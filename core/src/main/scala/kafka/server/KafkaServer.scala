@@ -119,7 +119,7 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePr
   var authorizer: Option[Authorizer] = None
   var socketServer: SocketServer = null
   var requestHandlerPool: KafkaRequestHandlerPool = null
-
+  // 日志管理组件
   var logManager: LogManager = null
 
   var replicaManager: ReplicaManager = null
@@ -136,7 +136,7 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePr
 
   var kafkaHealthcheck: KafkaHealthcheck = null
   val metadataCache: MetadataCache = new MetadataCache(config.brokerId)
-
+  // ZkUtils
   var zkUtils: ZkUtils = null
   val correlationId: AtomicInteger = new AtomicInteger(0)
   val brokerMetaPropsFile = "meta.properties"
@@ -184,7 +184,7 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePr
         kafkaScheduler.startup()
 
         /* setup zookeeper */
-        // 启动zk相关
+        // 初始化zk工具类并创建了一些永久节点
         zkUtils = initZk()
 
         /* start log manager */
@@ -294,9 +294,11 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePr
     }
   }
 
+  // 初始化ZkUtils并创建一个永久的根路径chroot
   private def initZk(): ZkUtils = {
+    // config.zkConnect 取的 zookeeper.connect的配置值
     info("Connecting to zookeeper on " + config.zkConnect)
-
+    // 获取根目录
     val chroot = {
       if (config.zkConnect.indexOf("/") > 0)
         config.zkConnect.substring(config.zkConnect.indexOf("/"))
@@ -311,19 +313,22 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePr
     }
     if (chroot.length > 1) {
       val zkConnForChrootCreation = config.zkConnect.substring(0, config.zkConnect.indexOf("/"))
+      // 初始化ZkUtils
       val zkClientForChrootCreation = ZkUtils(zkConnForChrootCreation,
                                               config.zkSessionTimeoutMs,
                                               config.zkConnectionTimeoutMs,
                                               secureAclsEnabled)
+      // 创建一个永远的根路径chroot
       zkClientForChrootCreation.makeSurePersistentPathExists(chroot)
       info("Created zookeeper path " + chroot)
       zkClientForChrootCreation.zkClient.close()
     }
-
+    // 创建一个ZkUtils
     val zkUtils = ZkUtils(config.zkConnect,
                           config.zkSessionTimeoutMs,
                           config.zkConnectionTimeoutMs,
                           secureAclsEnabled)
+    // 创建一些永久公共必要的路径
     zkUtils.setupCommonPaths()
     zkUtils
   }
