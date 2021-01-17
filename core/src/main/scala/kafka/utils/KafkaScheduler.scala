@@ -71,6 +71,7 @@ class KafkaScheduler(val threads: Int,
   private var executor: ScheduledThreadPoolExecutor = null
   private val schedulerThreadId = new AtomicInteger(0)
 
+  // 初始化executor
   override def startup() {
     debug("Initializing task scheduler.")
     this synchronized {
@@ -85,7 +86,8 @@ class KafkaScheduler(val threads: Int,
                                 })
     }
   }
-  
+
+  // 关闭executor
   override def shutdown() {
     debug("Shutting down task scheduler.")
     // We use the local variable to avoid NullPointerException if another thread shuts down scheduler at same time.
@@ -99,6 +101,8 @@ class KafkaScheduler(val threads: Int,
     }
   }
 
+  // executor调度任务
+  // 任务根据delay的值来判断是否以固定周期执行，否则就执行一次，这个可以在以后的项目中作为参考
   def schedule(name: String, fun: ()=>Unit, delay: Long, period: Long, unit: TimeUnit) = {
     debug("Scheduling task %s with initial delay %d ms and period %d ms."
         .format(name, TimeUnit.MILLISECONDS.convert(delay, unit), TimeUnit.MILLISECONDS.convert(period, unit)))

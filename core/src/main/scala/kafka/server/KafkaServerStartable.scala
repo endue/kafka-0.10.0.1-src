@@ -30,6 +30,7 @@ object KafkaServerStartable {
 }
 
 class KafkaServerStartable(val serverConfig: KafkaConfig) extends Logging {
+  // 基于配置构建一个KafkaServer
   private val server = new KafkaServer(serverConfig)
 
   // 启动kafkaServer

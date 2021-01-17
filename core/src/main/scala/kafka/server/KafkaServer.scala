@@ -239,6 +239,7 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePr
         Mx4jLoader.maybeLoad()
 
         /* start dynamic config manager */
+        // 加载动态配置管理器
         dynamicConfigHandlers = Map[String, ConfigHandler](ConfigType.Topic -> new TopicConfigHandler(logManager, config),
                                                            ConfigType.Client -> new ClientIdConfigHandler(apis.quotaManagers))
 
@@ -249,6 +250,7 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePr
         }
 
         // Create the config manager. start listening to notifications
+        // 启动动态配置管理器
         dynamicConfigManager = new DynamicConfigManager(zkUtils, dynamicConfigHandlers)
         dynamicConfigManager.startup()
 
@@ -259,12 +261,18 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePr
           else
             (protocol, endpoint)
         }
-        //
+        // 启动健康检查
         kafkaHealthcheck = new KafkaHealthcheck(config.brokerId, listeners, zkUtils, config.rack,
-          config.interBrokerProtocolVersion)
+          config.interBrokerProtocolVersion)// inter.broker.protocol.version
         kafkaHealthcheck.startup()
 
         // Now that the broker id is successfully registered via KafkaHealthcheck, checkpoint it
+        // 写入检查点信息到meta.properties文件中,内容大体如下：
+        // #
+        // #Sun Jan 17 16:14:47 CST 2021
+        // cluster.id=6TTT9G81Tp-ljtt5mYe3Pw
+        // version=0
+        // broker.id=2
         checkpointBrokerId(config.brokerId)
 
         /* register broker metrics */
