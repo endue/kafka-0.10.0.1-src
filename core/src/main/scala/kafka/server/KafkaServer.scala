@@ -118,6 +118,7 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePr
   var apis: KafkaApis = null
   var authorizer: Option[Authorizer] = None
   var socketServer: SocketServer = null
+  // 创建处理请求线程池池，将KafkaApis传递进去，默认8个线程
   var requestHandlerPool: KafkaRequestHandlerPool = null
   // 日志管理组件
   var logManager: LogManager = null
@@ -231,7 +232,7 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePr
         // KafkaApis封装了处理各种请求的业务逻辑
         apis = new KafkaApis(socketServer.requestChannel, replicaManager, groupCoordinator,
           kafkaController, zkUtils, config.brokerId, config, metadataCache, metrics, authorizer)
-        // 创建处理请求线程池池，将KafkaApis传递进去，默认8个线程
+        // 创建处理请求线程池池，将KafkaApis传递进去，num.io.threads默认8个线程
         requestHandlerPool = new KafkaRequestHandlerPool(config.brokerId, socketServer.requestChannel, apis, config.numIoThreads)
         // 设置broker状态为RunningAsBroker
         brokerState.newState(RunningAsBroker)
