@@ -184,8 +184,11 @@ object RequestChannel extends Logging {
   */
 class RequestChannel(val numProcessors: Int, val queueSize: Int) extends KafkaMetricsGroup {
   private var responseListeners: List[(Int) => Unit] = Nil
+  // 初始化requestQueue的大小
   private val requestQueue = new ArrayBlockingQueue[RequestChannel.Request](queueSize)
+  // 初始化responseQueues数组的大小
   private val responseQueues = new Array[BlockingQueue[RequestChannel.Response]](numProcessors)
+  // 初始化responseQueues数组中的元素
   for(i <- 0 until numProcessors)
     responseQueues(i) = new LinkedBlockingQueue[RequestChannel.Response]()
 

@@ -96,7 +96,7 @@ class SocketServer(val config: KafkaConfig, val metrics: Metrics, val time: Time
       endpoints.values.foreach { endpoint =>
         // 获取请求类型
         val protocol = endpoint.protocolType
-        // numProcessorThreads 默认为3
+        // num.network.threads 默认为3
         val processorEndIndex = processorBeginIndex + numProcessorThreads
         // 创建三个Processor然后记录到processors数组中
         for (i <- processorBeginIndex until processorEndIndex)
@@ -249,12 +249,12 @@ private[kafka] abstract class AbstractServerThread(connectionQuotas: ConnectionQ
  * Thread that accepts and configures new connections. There is one of these per endpoint.
   * Acceptor，负责接收和配置新的连接请求，每个endpoint对应一个
  */
-private[kafka] class Acceptor(val endPoint: EndPoint,
-                              val sendBufferSize: Int,
-                              val recvBufferSize: Int,
+private[kafka] class Acceptor(val endPoint: EndPoint,// 负责的服务信息
+                              val sendBufferSize: Int,// 发送缓存区
+                              val recvBufferSize: Int,// 接收缓存区
                               brokerId: Int,
-                              processors: Array[Processor],
-                              connectionQuotas: ConnectionQuotas) extends AbstractServerThread(connectionQuotas) with KafkaMetricsGroup {
+                              processors: Array[Processor],// Processor数组
+                              connectionQuotas: ConnectionQuotas) extends AbstractServerThread(connectionQuotas) with KafkaMetricsGroup {// 每个IP的最大连接数
   // 创建一个nioSelector
   private val nioSelector = NSelector.open()
   // 建立socket连接
@@ -414,6 +414,7 @@ private[kafka] class Processor(val id: Int,
     }
   }
 
+  // 基于参数创建一个ConnectionId
   private case class ConnectionId(localHost: String, localPort: Int, remoteHost: String, remotePort: Int) {
     override def toString: String = s"$localHost:$localPort-$remoteHost:$remotePort"
   }
@@ -479,9 +480,7 @@ private[kafka] class Processor(val id: Int,
     shutdownComplete()
   }
 
-  /**
-    * 处理响应消息
-    */
+  // 处理响应消息
   private def processNewResponses() {
     // 基于processor的id获取响应队列responseQueues中对于的BlockingQueue的头节点并返回
     // 返回类型RequestChannel.Response
@@ -494,7 +493,7 @@ private[kafka] class Processor(val id: Int,
             // that are sitting in the server's socket buffer
             curr.request.updateRequestMetrics
             trace("Socket server received empty response to send, registering for read: " + curr)
-            // 如果没有响应消息，则关注OP_READ事件
+            // 如果没有响应消息，则增加关注OP_READ事件
             selector.unmute(curr.request.connectionId)
           case RequestChannel.SendAction =>
             // 发送响应
@@ -513,6 +512,7 @@ private[kafka] class Processor(val id: Int,
   }
 
   /* `protected` for test usage */
+  // 发送响应
   protected[network] def sendResponse(response: RequestChannel.Response) {
     trace(s"Socket server received response to send, registering for write and sending data: $response")
     val channel = selector.channel(response.responseSend.destination)
@@ -522,12 +522,14 @@ private[kafka] class Processor(val id: Int,
       response.request.updateRequestMetrics()
     }
     else {
-      // 准备发送消息并关系OP_WRITE事件
+      // 准备发送消息并增加关系OP_WRITE事件
+      // 将数据赋值到要发送node节点的channel的send属性
       selector.send(response.responseSend)
       inflightResponses += (response.request.connectionId -> response)
     }
   }
 
+  // 阻塞等待各种事件，阻塞最长300ms
   private def poll() {
     try selector.poll(300)
     catch {
@@ -539,6 +541,7 @@ private[kafka] class Processor(val id: Int,
     }
   }
 
+  // 处理已接收到的请求
   private def processCompletedReceives() {
     selector.completedReceives.asScala.foreach { receive =>
       try {
@@ -565,7 +568,7 @@ private[kafka] class Processor(val id: Int,
         throw new IllegalStateException(s"Send for ${send.destination} completed, but not in `inflightResponses`")
       }
       resp.request.updateRequestMetrics()
-      // 关注OP_READ事件
+      // 增加关注OP_READ事件
       selector.unmute(send.destination)
     }
   }
