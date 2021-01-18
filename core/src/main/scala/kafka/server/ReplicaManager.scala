@@ -110,11 +110,12 @@ class ReplicaManager(val config: KafkaConfig,
                      val isShuttingDown: AtomicBoolean,
                      threadNamePrefix: Option[String] = None) extends Logging with KafkaMetricsGroup {
   /* epoch of the controller that last changed the leader */
-  // 记录leader发生变化是controller的epoch,epoch存储在zk中的/Controller_epoch中
+  // 记录leader发生变化时controller的epoch,epoch存储在zk中的/Controller_epoch中
   @volatile var controllerEpoch: Int = KafkaController.InitialControllerEpoch - 1
   // 记录当前broker的ID
   private val localBrokerId = config.brokerId
   // 保存所有的topic <--> partition映射关系
+  // 记录了某主题的某分区的相关信息
   private val allPartitions = new Pool[(String, Int), Partition](valueFactory = Some { case (t, p) =>
     new Partition(t, p, time, this)
   })
@@ -123,11 +124,12 @@ class ReplicaManager(val config: KafkaConfig,
   val replicaFetcherManager = new ReplicaFetcherManager(config, this, metrics, jTime, threadNamePrefix)
   // HW相关
   private val highWatermarkCheckPointThreadStarted = new AtomicBoolean(false)
+  // replication-offset-checkpoint文件，记录各个topic-partition的hw
   val highWatermarkCheckpoints = config.logDirs.map(dir => (new File(dir).getAbsolutePath, new OffsetCheckpoint(new File(dir, ReplicaManager.HighWatermarkFilename)))).toMap
   private var hwThreadInitialized = false
   this.logIdent = "[Replica Manager on Broker " + localBrokerId + "]: "
   val stateChangeLogger = KafkaController.stateChangeLogger
-  // ISR变更列表
+  // ISR变更列表，记录某个isr发生变更的topic-partition
   private val isrChangeSet: mutable.Set[TopicAndPartition] = new mutable.HashSet[TopicAndPartition]()
   // ISR列表最后变更时间戳
   private val lastIsrChangeMs = new AtomicLong(System.currentTimeMillis())
@@ -166,10 +168,13 @@ class ReplicaManager(val config: KafkaConfig,
   val isrExpandRate = newMeter("IsrExpandsPerSec",  "expands", TimeUnit.SECONDS)
   val isrShrinkRate = newMeter("IsrShrinksPerSec",  "shrinks", TimeUnit.SECONDS)
 
+  // 获取ISR != AR的topic-partition数量
   def underReplicatedPartitionCount(): Int = {
       getLeaderPartitions().count(_.isUnderReplicated)
   }
 
+  // 定时任务,定时处理各个topic-partition的hw
+  // replica.high.watermark.checkpoint.interval.ms默认5000L
   def startHighWaterMarksCheckPointThread() = {
     if(highWatermarkCheckPointThreadStarted.compareAndSet(false, true))
       scheduler.schedule("highwatermark-checkpoint", checkpointHighWatermarks, period = config.replicaHighWatermarkCheckpointIntervalMs, unit = TimeUnit.MILLISECONDS)
@@ -181,6 +186,7 @@ class ReplicaManager(val config: KafkaConfig,
     */
   def recordIsrChange(topicAndPartition: TopicAndPartition) {
     isrChangeSet synchronized {
+      // 记录到isrChangeSet中
       isrChangeSet += topicAndPartition
       lastIsrChangeMs.set(System.currentTimeMillis())
     }
@@ -197,12 +203,15 @@ class ReplicaManager(val config: KafkaConfig,
   def maybePropagateIsrChanges() {
     val now = System.currentTimeMillis()
     isrChangeSet synchronized {
-      if (isrChangeSet.nonEmpty && // ISR列表发生变更但还没有被广播出去
-        (lastIsrChangeMs.get() + ReplicaManager.IsrChangePropagationBlackOut < now || // 最近5秒内没有ISR变化
+      // isrChangeSet列表不为空 && (isrChangeSet最近5s没有变化 || isrChangeSet自上次传播后已过去60s )
+      if (isrChangeSet.nonEmpty && // isrChangeSet集合列表不为空
+        (lastIsrChangeMs.get() + ReplicaManager.IsrChangePropagationBlackOut < now || // 最近5秒内isrChangeSet列表没有变化
           lastIsrPropagationMs.get() + ReplicaManager.IsrChangePropagationInterval < now)) { // 自上次ISR传播以来已经超过60秒
-        // 广播到ZK
+        // 将集合列表中的数据，发布到zk ： /isr_change_notification/isr_change_{序列号isrChangeSet} 上
         ReplicationUtils.propagateIsrChanges(zkUtils, isrChangeSet)
+        // 清空isrChangeSet集合列表
         isrChangeSet.clear()
+        // 更新最后传播时间
         lastIsrPropagationMs.set(now)
       }
     }
@@ -236,9 +245,9 @@ class ReplicaManager(val config: KafkaConfig,
   // 启动两个线程，维护ISR列表相关
   def startup() {
     // start ISR expiration thread 启动ISR过期线程
-    // ISR过期线程，配置replica.lag.time.max.ms，默认10000L，也就是10000ms
+    // 周期性检查ISRL列表是否有replica过期需要从ISRL列表中移除，配置replica.lag.time.max.ms，默认10000L，也就是10000ms
     scheduler.schedule("isr-expiration", maybeShrinkIsr, period = config.replicaLagTimeMaxMs, unit = TimeUnit.MILLISECONDS)
-    // 把isr的变化内容更新到zk中，执行时间写死，2500ms执行一次
+    // 周期性检查是不是有topic-partition的isr需要变动,如果需要,就更新到zk上,来触发controller，执行时间写死，2500ms执行一次
     scheduler.schedule("isr-change-propagation", maybePropagateIsrChanges, period = 2500L, unit = TimeUnit.MILLISECONDS)
   }
 
@@ -490,45 +499,58 @@ class ReplicaManager(val config: KafkaConfig,
 
   /**
    * Fetch messages from the leader replica, and wait until enough data can be fetched and return;
+    * 从leader replica中获取消息，并等待足够的数据被获取并返回
    * the callback function will be triggered either when timeout or required fetch info is satisfied
+    * 回调函数将在超时或所需的获取信息满足时被触发
    */
-  def fetchMessages(timeout: Long,
-                    replicaId: Int,
-                    fetchMinBytes: Int,
-                    fetchInfo: immutable.Map[TopicAndPartition, PartitionFetchInfo],
-                    responseCallback: Map[TopicAndPartition, FetchResponsePartitionData] => Unit) {
+  // 处理ApiKeys.FETCH请求
+  // 从 leader 拉取数据,等待拉取到足够的数据或者达到 timeout 时间后返回拉取的结果
+  def fetchMessages(timeout: Long,// 超时时间
+                    replicaId: Int,// 副本ID
+                    fetchMinBytes: Int,// 拉取的最小字节数
+                    fetchInfo: immutable.Map[TopicAndPartition, PartitionFetchInfo],// 拉取的一些信息
+                    responseCallback: Map[TopicAndPartition, FetchResponsePartitionData] => Unit) {// 回调
+    // 判断请求是来自follower还是consumer(-1)
     val isFromFollower = replicaId >= 0
+    // 是否从leader副本拉取消息
     val fetchOnlyFromLeader: Boolean = replicaId != Request.DebuggingConsumerId
+    // 是否只拉取committed的消息
+    // 如果拉取请求来自 consumer（true）,只拉取 HW 以内的数据,如果是来自Replica同步,则没有该限制（false）
     val fetchOnlyCommitted: Boolean = ! Request.isValidBrokerId(replicaId)
 
     // read from local logs
-    // 从本地拉取消息日志返回给follower
+    // 从副本拉取消息日志返回给follower
     val logReadResults = readFromLocalLog(fetchOnlyFromLeader, fetchOnlyCommitted, fetchInfo)
 
     // if the fetch comes from the follower,
     // update its corresponding log end offset
-    // 如果请求是从follow发出的，则更新本地follower副本的LEO，并推进HW
+    // 如果请求是从follow发出的，则更新本地记录的follower副本的LEO，并推进HW
     if(Request.isValidBrokerId(replicaId))
+      // 这里也是重点
       updateFollowerLogReadResults(replicaId, logReadResults)
 
     // check if this fetch request can be satisfied right away
+    // 获取读取的字节数
     val bytesReadable = logReadResults.values.map(_.info.messageSet.sizeInBytes).sum
     val errorReadingData = logReadResults.values.foldLeft(false) ((errorIncurred, readResult) =>
       errorIncurred || (readResult.errorCode != Errors.NONE.code))
 
-    // respond immediately if 1) fetch request does not want to wait
-    //                        2) fetch request does not require any data
-    //                        3) has enough data to respond
-    //                        4) some error happens while reading data
-    // 返回请求
+    // respond immediately if 1) fetch request does not want to wait  fetch请求不需要等待，等待超时了
+    //                        2) fetch request does not require any data fetch请求不需要任何数据，拉取结果为空
+    //                        3) has enough data to respond 拉取到足够的数据
+    //                        4) some error happens while reading data 读取消息遇到异常
+    // 超时 || 拉取消息为空 || 拉取到足够的数据 || 读取消息异常
     if(timeout <= 0 || fetchInfo.size <= 0 || bytesReadable >= fetchMinBytes || errorReadingData) {
+      // 构建返回的数据
       val fetchPartitionData = logReadResults.mapValues(result =>
-        // 返回了自身当前的HW
+        // 返回数据中记录当前副本的HW
         FetchResponsePartitionData(result.errorCode, result.hw, result.info.messageSet))
+      // 执行回调方法并将数据返回
       responseCallback(fetchPartitionData)
     // 没有数据，等待
     } else {
       // construct the fetch results from the read results
+      // 其他情况，构建延迟发送结果
       val fetchPartitionStatus = logReadResults.map { case (topicAndPartition, result) =>
         (topicAndPartition, FetchPartitionStatus(result.info.fetchOffsetMetadata, fetchInfo.get(topicAndPartition).get))
       }
@@ -548,7 +570,9 @@ class ReplicaManager(val config: KafkaConfig,
 
   /**
    * Read from a single topic/partition at the given offset upto maxSize bytes
+    * 从单个主题/分区中以给定偏移量读取最大maxSize字节
    */
+  // 从副本拉取消息
   def readFromLocalLog(fetchOnlyFromLeader: Boolean,
                        readOnlyCommitted: Boolean,
                        readPartitionInfo: Map[TopicAndPartition, PartitionFetchInfo]): Map[TopicAndPartition, LogReadResult] = {
@@ -562,12 +586,17 @@ class ReplicaManager(val config: KafkaConfig,
           trace("Fetching log segment for topic %s, partition %d, offset %d, size %d".format(topic, partition, offset, fetchSize))
 
           // decide whether to only fetch from leader
+          // 获取要从哪个副本拉取消息并决定是否只从leader拉取
           val localReplica = if (fetchOnlyFromLeader)
+            // 获取leader副本的Replica
             getLeaderReplicaIfLocal(topic, partition)
           else
+            // 获取本机副本的Replica
             getReplicaOrException(topic, partition)
 
           // decide whether to only fetch committed data (i.e. messages below high watermark)
+          // 获取要拉取消息的最大偏移量并决定是否只获取已提交的数据
+          // 如果是consumer拉取消息那就是HW，如果是其他副本那就没有限制
           val maxOffsetOpt = if (readOnlyCommitted)
             Some(localReplica.highWatermark.messageOffset)
           else
@@ -579,7 +608,9 @@ class ReplicaManager(val config: KafkaConfig,
            * where data gets appended to the log immediately after the replica has consumed from it
            * This can cause a replica to always be out of sync.
            */
+          // 获取被拉取消息副本的logEndOffsetMetadata，里面记录了LEO
           val initialLogEndOffset = localReplica.logEndOffset
+          // 读取消息
           val logReadInfo = localReplica.log match {
             case Some(log) =>
               log.read(offset, fetchSize, maxOffsetOpt)
@@ -587,9 +618,9 @@ class ReplicaManager(val config: KafkaConfig,
               error("Leader for partition [%s,%d] does not have a local log".format(topic, partition))
               FetchDataInfo(LogOffsetMetadata.UnknownOffsetMetadata, MessageSet.Empty)
           }
-
+          // 被拉取消息副本的LEO - 被拉取消息的startOffset <= 0 如果成立，那么说明已经没有消息可拉取了
           val readToEndOfLog = initialLogEndOffset.messageOffset - logReadInfo.fetchOffsetMetadata.messageOffset <= 0
-
+          // 封装一个LogReadResult返回
           LogReadResult(logReadInfo, localReplica.highWatermark.messageOffset, fetchSize, readToEndOfLog, None)
         } catch {
           // NOTE: Failed fetch requests metric is not incremented for known exceptions since it
@@ -903,15 +934,15 @@ class ReplicaManager(val config: KafkaConfig,
     partitionsToMakeFollower
   }
 
-  // 评估分区的ISR列表，查看哪些副本可以从ISR中删除
+  // 评估分区的ISR列表，查看哪些副本可以从ISR列表中删除
   private def maybeShrinkIsr(): Unit = {
     trace("Evaluating ISR list of partitions to see which replicas can be removed from the ISR")
-    // 遍历所有的分区
+    // 遍历所有的topic-partiton的副本
     allPartitions.values.foreach(partition => partition.maybeShrinkIsr(config.replicaLagTimeMaxMs))
   }
 
   /**
-    * 更新本地follower副本的leo
+    * 更新本地follower副本的LEO和推动HW
     * @param replicaId 副本ID
     * @param readResults 要返回给副本的日志列表
     */
@@ -925,7 +956,7 @@ class ReplicaManager(val config: KafkaConfig,
 
           // for producer requests with ack > 1, we need to check
           // if they can be unblocked after some follower's log end offsets have moved
-          // 尝试执行producer的消息回调
+
           tryCompleteDelayedProduce(new TopicPartitionOperationKey(topicAndPartition))
         case None =>
           warn("While recording the replica LEO, the partition %s hasn't been created.".format(topicAndPartition))
@@ -933,17 +964,24 @@ class ReplicaManager(val config: KafkaConfig,
     }
   }
 
+  // 过滤出leader副本在当前broker上的所有分区
   private def getLeaderPartitions() : List[Partition] = {
     allPartitions.values.filter(_.leaderReplicaIfLocal().isDefined).toList
   }
 
   // Flushes the highwatermark value for all partitions to the highwatermark file
+  // 将各个分区的hw写入replication-offset-checkpoint文件
   def checkpointHighWatermarks() {
+    // 获取所有分区
     val replicas = allPartitions.values.flatMap(_.getReplica(config.brokerId))
+    // 过滤出log对象不为空的副本，然后获取对应的路径
     val replicasByDir = replicas.filter(_.log.isDefined).groupBy(_.log.get.dir.getParentFile.getAbsolutePath)
+    // 遍历
     for ((dir, reps) <- replicasByDir) {
+      // hw
       val hwms = reps.map(r => new TopicAndPartition(r) -> r.highWatermark.messageOffset).toMap
       try {
+        // 写入文件
         highWatermarkCheckpoints(dir).write(hwms)
       } catch {
         case e: IOException =>

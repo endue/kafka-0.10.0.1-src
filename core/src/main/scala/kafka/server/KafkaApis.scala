@@ -438,7 +438,7 @@ class KafkaApis(val requestChannel: RequestChannel,
     }
 
     // the callback for sending a fetch response
-    // 回调
+    // 回调函数
     def sendResponseCallback(responsePartitionData: Map[TopicAndPartition, FetchResponsePartitionData]) {
 
       val convertedPartitionData =
@@ -501,6 +501,7 @@ class KafkaApis(val requestChannel: RequestChannel,
       sendResponseCallback(Map.empty)
     else {
       // call the replica manager to fetch messages from the local replica
+      // 拉取消息
       replicaManager.fetchMessages(
         fetchRequest.maxWait.toLong,
         fetchRequest.replicaId,

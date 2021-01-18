@@ -28,7 +28,7 @@ class Replica(val brokerId: Int,
               val partition: Partition,
               time: Time = SystemTime,
               initialHighWatermarkValue: Long = 0L,
-              val log: Option[Log] = None) extends Logging {
+              val log: Option[Log] = None) extends Logging {// 只有leader副本才会创建Log,参考：kafka.cluster.Partition.makeLeader->kafka.cluster.Partition.getOrCreateReplica
   // the high watermark offset value, in non-leader replicas only its message offsets are kept
   @volatile private[this] var highWatermarkMetadata: LogOffsetMetadata = new LogOffsetMetadata(initialHighWatermarkValue)
   // the log end offset value, kept in all replicas;
@@ -45,7 +45,8 @@ class Replica(val brokerId: Int,
     }
   }
 
-  // 副表拉取信息后更新该时间戳
+  // 当副表拉取消息时拉取到了leader 副本的LEO时更新该时间戳
+  // 意味着副本已经完全跟上了。
   private[this] val lastCaughtUpTimeMsUnderlying = new AtomicLong(time.milliseconds)
 
   def lastCaughtUpTimeMs = lastCaughtUpTimeMsUnderlying.get()
