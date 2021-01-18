@@ -515,6 +515,7 @@ class KafkaApis(val requestChannel: RequestChannel,
    * Handle an offset request
     *
     * 处理LIST_OFFSETS请求
+    * 拉取偏移量请求
    */
   def handleOffsetRequest(request: RequestChannel.Request) {
     val correlationId = request.header.correlationId
@@ -545,9 +546,11 @@ class KafkaApis(val requestChannel: RequestChannel,
                                         topicPartition,
                                         partitionData.timestamp,
                                         partitionData.maxNumOffsets)
+          // 如果不是Consumer，那么返回所有偏移量的数据
           if (offsetRequest.replicaId != ListOffsetRequest.CONSUMER_REPLICA_ID) {
             allOffsets
           } else {
+            // 获取HW
             val hw = localReplica.highWatermark.messageOffset
             if (allOffsets.exists(_ > hw))
               hw +: allOffsets.dropWhile(_ > hw)

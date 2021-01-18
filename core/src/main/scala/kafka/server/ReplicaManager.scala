@@ -111,7 +111,7 @@ class ReplicaManager(val config: KafkaConfig,
                      val isShuttingDown: AtomicBoolean,
                      threadNamePrefix: Option[String] = None) extends Logging with KafkaMetricsGroup {
   /* epoch of the controller that last changed the leader */
-  // 记录leader发生变化时controller的epoch,epoch存储在zk中的/Controller_epoch中
+  // 记录controller的epoch,epoch存储在zk中的/Controller_epoch中
   @volatile var controllerEpoch: Int = KafkaController.InitialControllerEpoch - 1
   // 记录当前broker的ID
   private val localBrokerId = config.brokerId
@@ -324,6 +324,7 @@ class ReplicaManager(val config: KafkaConfig,
       Some(partition)
   }
 
+  // 获取对应topic-partition的副本
   def getReplicaOrException(topic: String, partition: Int): Replica = {
     val replicaOpt = getReplica(topic, partition)
     if(replicaOpt.isDefined)
@@ -332,6 +333,7 @@ class ReplicaManager(val config: KafkaConfig,
       throw new ReplicaNotAvailableException("Replica %d is not available for partition [%s,%d]".format(config.brokerId, topic, partition))
   }
 
+  // 如果当前broker真好是对应topic-partition的leader副本那么返回
   def getLeaderReplicaIfLocal(topic: String, partitionId: Int): Replica =  {
     val partitionOpt = getPartition(topic, partitionId)
     partitionOpt match {
@@ -347,6 +349,7 @@ class ReplicaManager(val config: KafkaConfig,
     }
   }
 
+  // 获取对应topic-partition的副本列表，然后从副本列表中获取当前replicaId的副本
   def getReplica(topic: String, partitionId: Int, replicaId: Int = config.brokerId): Option[Replica] =  {
     val partitionOpt = getPartition(topic, partitionId)
     partitionOpt match {
@@ -654,8 +657,10 @@ class ReplicaManager(val config: KafkaConfig,
       replica.log.map(_.config.messageFormatVersion.messageFormatVersion)
     }
 
+  // 处理ApiKeys.UPDATE_METADATA_KEY请求
   def maybeUpdateMetadataCache(correlationId: Int, updateMetadataRequest: UpdateMetadataRequest, metadataCache: MetadataCache) {
     replicaStateChangeLock synchronized {
+      // 过期controller发送的请求，不处理
       if(updateMetadataRequest.controllerEpoch < controllerEpoch) {
         val stateControllerEpochErrorMessage = ("Broker %d received update metadata request with correlation id %d from an " +
           "old controller %d with epoch %d. Latest known controller epoch is %d").format(localBrokerId,
@@ -664,6 +669,7 @@ class ReplicaManager(val config: KafkaConfig,
         stateChangeLogger.warn(stateControllerEpochErrorMessage)
         throw new ControllerMovedException(stateControllerEpochErrorMessage)
       } else {
+        // 更新metadataCache信息
         metadataCache.updateCache(correlationId, updateMetadataRequest)
         controllerEpoch = updateMetadataRequest.controllerEpoch
       }

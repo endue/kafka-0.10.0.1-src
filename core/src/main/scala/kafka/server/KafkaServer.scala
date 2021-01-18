@@ -136,6 +136,7 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePr
   val kafkaScheduler = new KafkaScheduler(config.backgroundThreads)// 默认10
 
   var kafkaHealthcheck: KafkaHealthcheck = null
+  // 缓存的元数据
   val metadataCache: MetadataCache = new MetadataCache(config.brokerId)
   // ZkUtils
   var zkUtils: ZkUtils = null

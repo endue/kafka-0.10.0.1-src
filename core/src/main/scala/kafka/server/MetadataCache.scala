@@ -38,9 +38,13 @@ import org.apache.kafka.common.requests.{MetadataResponse, PartitionState, Updat
  */
 private[server] class MetadataCache(brokerId: Int) extends Logging {
   private val stateChangeLogger = KafkaController.stateChangeLogger
+  // key是topic，value中的key是partitionId
   private val cache = mutable.Map[String, mutable.Map[Int, PartitionStateInfo]]()
+  // 记录controllerId
   private var controllerId: Option[Int] = None
+  // 记录活跃的broker，key是brokerId
   private val aliveBrokers = mutable.Map[Int, Broker]()
+  // 记录活跃的Node
   private val aliveNodes = mutable.Map[Int, collection.Map[SecurityProtocol, Node]]()
   private val partitionMetadataLock = new ReentrantReadWriteLock()
 
@@ -144,6 +148,7 @@ private[server] class MetadataCache(brokerId: Int) extends Logging {
     }
   }
 
+  // 添加或更新对应topic-partition的PartitionStateInfo
   private def addOrUpdatePartitionInfo(topic: String,
                                        partitionId: Int,
                                        stateInfo: PartitionStateInfo) {
@@ -161,12 +166,14 @@ private[server] class MetadataCache(brokerId: Int) extends Logging {
 
   def getControllerId: Option[Int] = controllerId
 
+  // 更新缓存
   def updateCache(correlationId: Int, updateMetadataRequest: UpdateMetadataRequest) {
     inWriteLock(partitionMetadataLock) {
       controllerId = updateMetadataRequest.controllerId match {
           case id if id < 0 => None
           case id => Some(id)
         }
+      // 清空aliveNodes和aliveBrokers,准备更新为最新的记录
       aliveNodes.clear()
       aliveBrokers.clear()
       updateMetadataRequest.liveBrokers.asScala.foreach { broker =>
@@ -209,6 +216,7 @@ private[server] class MetadataCache(brokerId: Int) extends Logging {
     }
   }
 
+  // 删除对应的topic-partition
   private def removePartitionInfo(topic: String, partitionId: Int): Boolean = {
     cache.get(topic).map { infos =>
       infos.remove(partitionId)
