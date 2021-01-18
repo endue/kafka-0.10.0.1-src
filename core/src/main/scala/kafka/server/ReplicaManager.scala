@@ -100,6 +100,7 @@ object ReplicaManager {
   val IsrChangePropagationInterval = 60000L
 }
 
+// 复制管理当前broker上的所有副本
 class ReplicaManager(val config: KafkaConfig,
                      metrics: Metrics,
                      time: Time,
@@ -114,7 +115,7 @@ class ReplicaManager(val config: KafkaConfig,
   @volatile var controllerEpoch: Int = KafkaController.InitialControllerEpoch - 1
   // 记录当前broker的ID
   private val localBrokerId = config.brokerId
-  // 保存所有的topic <--> partition映射关系
+  // 保存所有的(topic,partitionId) <--> partition映射关系
   // 记录了某主题的某分区的相关信息
   private val allPartitions = new Pool[(String, Int), Partition](valueFactory = Some { case (t, p) =>
     new Partition(t, p, time, this)
@@ -360,15 +361,17 @@ class ReplicaManager(val config: KafkaConfig,
    * Append messages to leader replicas of the partition, and wait for them to be replicated to other replicas;
    * the callback function will be triggered either when timeout or the required acks are satisfied
    */
-  def appendMessages(timeout: Long,
-                     requiredAcks: Short,
-                     internalTopicsAllowed: Boolean,
-                     messagesPerPartition: Map[TopicPartition, MessageSet],
-                     responseCallback: Map[TopicPartition, PartitionResponse] => Unit) {
-    // 验证acks配置
+  // 处理ApiKeys.PRODUCE请求
+  // 处理的是Producer发送过来的消息集
+  def appendMessages(timeout: Long,// 超时时间
+                     requiredAcks: Short,// acks类型
+                     internalTopicsAllowed: Boolean,// 是否允许操作kafka内部topic
+                     messagesPerPartition: Map[TopicPartition, MessageSet],// 消息集和对应的topic-partition
+                     responseCallback: Map[TopicPartition, PartitionResponse] => Unit) {// 回调
+    // 验证acks是否有效
     if (isValidRequiredAcks(requiredAcks)) {
       val sTime = SystemTime.milliseconds
-      // 添加消息到本地文件
+      // 添加消息到本地日志文件
       val localProduceResults = appendToLocalLog(internalTopicsAllowed, messagesPerPartition, requiredAcks)
       debug("Produce to local log in %d ms".format(SystemTime.milliseconds - sTime))
 
@@ -401,12 +404,14 @@ class ReplicaManager(val config: KafkaConfig,
     } else {
       // If required.acks is outside accepted range, something is wrong with the client
       // Just return an error and don't handle the request at all
+      // 如果acks配置错误返回一个错误，不处理任何请求
       val responseStatus = messagesPerPartition.map {
         case (topicAndPartition, messageSet) =>
           (topicAndPartition -> new PartitionResponse(Errors.INVALID_REQUIRED_ACKS.code,
                                                       LogAppendInfo.UnknownLogAppendInfo.firstOffset,
                                                       Message.NoTimestamp))
       }
+      // 执行回调
       responseCallback(responseStatus)
     }
   }
@@ -431,23 +436,24 @@ class ReplicaManager(val config: KafkaConfig,
    * Append the messages to the local replica logs
     * 将消息追加到本地副本日志文件
    */
-  private def appendToLocalLog(internalTopicsAllowed: Boolean,
+  private def appendToLocalLog(internalTopicsAllowed: Boolean,// 是否允许操作kafka内部topic
                                messagesPerPartition: Map[TopicPartition, MessageSet],
                                requiredAcks: Short): Map[TopicPartition, LogAppendResult] = {
     trace("Append [%s] to local log ".format(messagesPerPartition))
+    // 遍历所有要写入消息的topic-partition
     messagesPerPartition.map { case (topicPartition, messages) =>
       BrokerTopicStats.getBrokerTopicStats(topicPartition.topic).totalProduceRequestRate.mark()
       BrokerTopicStats.getBrokerAllTopicsStats().totalProduceRequestRate.mark()
 
       // reject appending to internal topics if it is not allowed
-      // 验证是否将消息添加到内部队列并且还不允许添加，那么需要返回给客户端异常
+      // 如果是将消息添加到kafka内部队列并且不是"__admin_client"中存储的节点ID，那么抛出异常
       if (Topic.isInternal(topicPartition.topic) && !internalTopicsAllowed) {
         (topicPartition, LogAppendResult(
           LogAppendInfo.UnknownLogAppendInfo,
           Some(new InvalidTopicException("Cannot append to internal topic %s".format(topicPartition.topic)))))
       } else {
         try {
-          // 基于主题和分区号获取对应的Partition对象
+          // 获取对应主题和分区号下的Partition
           val partitionOpt = getPartition(topicPartition.topic, topicPartition.partition)
           val info = partitionOpt match {
             case Some(partition) =>
@@ -664,6 +670,14 @@ class ReplicaManager(val config: KafkaConfig,
     }
   }
 
+  /**
+    * 处理ApiKeys.LEADER_AND_ISR请求
+    * @param correlationId
+    * @param leaderAndISRRequest
+    * @param metadataCache
+    * @param onLeadershipChange
+    * @return
+    */
   def becomeLeaderOrFollower(correlationId: Int,leaderAndISRRequest: LeaderAndIsrRequest,
                              metadataCache: MetadataCache,
                              onLeadershipChange: (Iterable[Partition], Iterable[Partition]) => Unit): BecomeLeaderOrFollowerResult = {

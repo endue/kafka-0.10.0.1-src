@@ -398,7 +398,7 @@ class KafkaApis(val requestChannel: RequestChannel,
     if (authorizedRequestInfo.isEmpty)
       sendResponseCallback(Map.empty)
     else {
-      // 是否运行消息添加到kafka内部队列
+      // 是否将消息添加到kafka内部队列，只有请求的客户端是"__admin_client"才可以
       val internalTopicsAllowed = request.header.clientId == AdminUtils.AdminClientId
 
       // Convert ByteBuffer to ByteBufferMessageSet
