@@ -87,9 +87,12 @@ class Partition(val topic: String,
     }
   }
 
+  // 获取或者创建Replica实例
   def getOrCreateReplica(replicaId: Int = localBrokerId): Replica = {
+    // 从assignedReplicaMap列表获取Replica
     val replicaOpt = getReplica(replicaId)
     replicaOpt match {
+        // 有就返回
       case Some(replica) => replica
       case None =>
         if (isReplicaLocal(replicaId)) {
@@ -103,7 +106,9 @@ class Partition(val topic: String,
           val offset = offsetMap.getOrElse(TopicAndPartition(topic, partitionId), 0L).min(log.logEndOffset)
           val localReplica = new Replica(replicaId, this, time, offset, Some(log))
           addReplicaIfNotExists(localReplica)
+        // 没有但不是当前broker
         } else {
+          // 创建一个Replica并添加到assignedReplicaMap中
           val remoteReplica = new Replica(replicaId, this, time)
           addReplicaIfNotExists(remoteReplica)
         }
@@ -170,20 +175,26 @@ class Partition(val topic: String,
    * from the time when this broker was the leader last time) and setting the new leader and ISR.
    * If the leader replica id does not change, return false to indicate the replica manager.
    */
+  // 将当前副本设置为leader, 如果leader不变,向ReplicaManager返回false
   def makeLeader(controllerId: Int, partitionStateInfo: PartitionState, correlationId: Int): Boolean = {
     val (leaderHWIncremented, isNewLeader) = inWriteLock(leaderIsrUpdateLock) {
+      // 获取新的ar副本列表
       val allReplicas = partitionStateInfo.replicas.asScala.map(_.toInt)
       // record the epoch of the controller that made the leadership decision. This is useful while updating the isr
       // to maintain the decision maker controller's epoch in the zookeeper path
       controllerEpoch = partitionStateInfo.controllerEpoch
       // add replicas that are new
+      // 如果新副本中有不存在的，那么为新的replica创建副本实例
       allReplicas.foreach(replica => getOrCreateReplica(replica))
+      // 获取新的isr列表
       val newInSyncReplicas = partitionStateInfo.isr.asScala.map(r => getOrCreateReplica(r)).toSet
       // remove assigned replicas that have been removed by the controller
+      // 将当前AR列表中不在存在的副本删除
       (assignedReplicas().map(_.brokerId) -- allReplicas).foreach(removeReplica(_))
       inSyncReplicas = newInSyncReplicas
       leaderEpoch = partitionStateInfo.leaderEpoch
       zkVersion = partitionStateInfo.zkVersion
+      // 判断是否是新的leader
       val isNewLeader =
         if (leaderReplicaIdOpt.isDefined && leaderReplicaIdOpt.get == localBrokerId) {
           false
@@ -191,12 +202,15 @@ class Partition(val topic: String,
           leaderReplicaIdOpt = Some(localBrokerId)
           true
         }
+      // 获取当前broker的Replica
       val leaderReplica = getReplica().get
       // we may need to increment high watermark since ISR could be down to 1
       if (isNewLeader) {
         // construct the high watermark metadata for the new leader replica
+        // 为新的leader replica构建high watermark metadata
         leaderReplica.convertHWToLocalOffsetMetadata()
         // reset log end offset for remote replicas
+        // 重置远程replicas的LEO
         assignedReplicas.filter(_.brokerId != localBrokerId).foreach(_.updateLogReadResult(LogReadResult.UnknownLogReadResult))
       }
       (maybeIncrementLeaderHW(leaderReplica), isNewLeader)

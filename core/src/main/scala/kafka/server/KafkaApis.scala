@@ -125,14 +125,17 @@ class KafkaApis(val requestChannel: RequestChannel,
     val leaderAndIsrRequest = request.body.asInstanceOf[LeaderAndIsrRequest]
 
     try {
+      // 回调方法
       def onLeadershipChange(updatedLeaders: Iterable[Partition], updatedFollowers: Iterable[Partition]) {
         // for each new leader or follower, call coordinator to handle consumer group migration.
         // this callback is invoked under the replica state change lock to ensure proper order of
         // leadership changes
+        // __consumer_offset 是 leader 的情况，读取相应 group 的 offset 信息
         updatedLeaders.foreach { partition =>
           if (partition.topic == TopicConstants.GROUP_METADATA_TOPIC_NAME)
             coordinator.handleGroupImmigration(partition.partitionId)
         }
+        // __consumer_offset 是 follower 的情况，如果之前是 leader，那么移除这个 partition 对应的信息
         updatedFollowers.foreach { partition =>
           if (partition.topic == TopicConstants.GROUP_METADATA_TOPIC_NAME)
             coordinator.handleGroupEmigration(partition.partitionId)
