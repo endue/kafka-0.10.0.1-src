@@ -101,6 +101,13 @@ object ReplicaManager {
 }
 
 // 复制管理当前broker上的所有副本
+// 处理：
+// LeaderAndIsr请求
+// StopReplica请求
+// UpdateMetadata请求
+// Produce请求
+// Fetch请求
+// ListOffset请求
 class ReplicaManager(val config: KafkaConfig,
                      metrics: Metrics,
                      time: Time,
@@ -118,12 +125,13 @@ class ReplicaManager(val config: KafkaConfig,
   // 保存所有的(topic,partitionId) <--> partition映射关系
   // 记录了某主题的某分区的相关信息
   private val allPartitions = new Pool[(String, Int), Partition](valueFactory = Some { case (t, p) =>
+    // 这里的valueFactory是根据topic和partition创建一个Partition
     new Partition(t, p, time, this)
   })
   private val replicaStateChangeLock = new Object
   // 分区成为follow后，就创建一个线程开始复制消息，这个线程会不断往leader发送FETCH请求拉取数据
   val replicaFetcherManager = new ReplicaFetcherManager(config, this, metrics, jTime, threadNamePrefix)
-  // HW相关
+  // HW定时checkpoint线程启动标识
   private val highWatermarkCheckPointThreadStarted = new AtomicBoolean(false)
   // replication-offset-checkpoint文件，记录各个topic-partition的hw
   val highWatermarkCheckpoints = config.logDirs.map(dir => (new File(dir).getAbsolutePath, new OffsetCheckpoint(new File(dir, ReplicaManager.HighWatermarkFilename)))).toMap
@@ -182,7 +190,7 @@ class ReplicaManager(val config: KafkaConfig,
   }
 
   /**
-    * 记录变更的TopicAndPartition
+    * 记录发生变更的topic-partition
     * @param topicAndPartition
     */
   def recordIsrChange(topicAndPartition: TopicAndPartition) {
@@ -209,6 +217,7 @@ class ReplicaManager(val config: KafkaConfig,
         (lastIsrChangeMs.get() + ReplicaManager.IsrChangePropagationBlackOut < now || // 最近5秒内isrChangeSet列表没有变化
           lastIsrPropagationMs.get() + ReplicaManager.IsrChangePropagationInterval < now)) { // 自上次ISR传播以来已经超过60秒
         // 将集合列表中的数据，发布到zk ： /isr_change_notification/isr_change_{序列号isrChangeSet} 上
+        // 触发kafka.controller.IsrChangeNotificationListener事件
         ReplicationUtils.propagateIsrChanges(zkUtils, isrChangeSet)
         // 清空isrChangeSet集合列表
         isrChangeSet.clear()
@@ -243,22 +252,26 @@ class ReplicaManager(val config: KafkaConfig,
     debug("Request key %s unblocked %d fetch requests.".format(key.keyLabel, completed))
   }
 
-  // 启动两个线程，维护ISR列表相关
+  // 启动两个线程，维护ISR列表
   def startup() {
-    // start ISR expiration thread 启动ISR过期线程
-    // 周期性检查ISRL列表是否有replica过期需要从ISRL列表中移除，配置replica.lag.time.max.ms，默认10000L，也就是10000ms
+    // start ISR expiration thread
+    // 周期性检查topic-partition的ISR列表是否有replica过期需要从ISR列表中移除，配置replica.lag.time.max.ms默认10000L
     scheduler.schedule("isr-expiration", maybeShrinkIsr, period = config.replicaLagTimeMaxMs, unit = TimeUnit.MILLISECONDS)
-    // 周期性检查是不是有topic-partition的isr需要变动,如果需要,就更新到zk上,来触发controller，执行时间写死，2500ms执行一次
+    // 周期性检查是不是有topic-partition的ISR有变动,如果有就更新到zk上来触发controller，2500ms执行一次
     scheduler.schedule("isr-change-propagation", maybePropagateIsrChanges, period = 2500L, unit = TimeUnit.MILLISECONDS)
   }
 
+  // 停止当前副本
   def stopReplica(topic: String, partitionId: Int, deletePartition: Boolean): Short  = {
     stateChangeLogger.trace("Broker %d handling stop replica (delete=%s) for partition [%s,%d]".format(localBrokerId,
       deletePartition.toString, topic, partitionId))
     val errorCode = Errors.NONE.code
+    // 从allPartitions获取对应的topic-partition
     getPartition(topic, partitionId) match {
       case Some(partition) =>
+        // 判断是否需要删除
         if(deletePartition) {
+          // 从allPartitions去掉topic-partition的Partition
           val removedPartition = allPartitions.remove((topic, partitionId))
           if (removedPartition != null) {
             removedPartition.delete() // this will delete the local log
@@ -272,7 +285,7 @@ class ReplicaManager(val config: KafkaConfig,
         // This could happen when topic is being deleted while broker is down and recovers.
         if(deletePartition) {
           val topicAndPartition = TopicAndPartition(topic, partitionId)
-
+          // 删除本地记录的日志
           if(logManager.getLog(topicAndPartition).isDefined) {
               logManager.deleteLog(topicAndPartition)
           }
@@ -285,19 +298,28 @@ class ReplicaManager(val config: KafkaConfig,
     errorCode
   }
 
+  // 处理ApiKeys.STOP_REPLICA请求：关闭broker、删除副本、副本下线
+  // 参考：kafka.controller.ReplicaStateMachine.handleStateChange
+  // 关闭副本的剔除replicaFetcher请求
+  // 在依旧stopReplicaRequest.deletePartitions判断是否需要删除本地Log日志
   def stopReplicas(stopReplicaRequest: StopReplicaRequest): (mutable.Map[TopicPartition, Short], Short) = {
     replicaStateChangeLock synchronized {
       val responseMap = new collection.mutable.HashMap[TopicPartition, Short]
+      // 判断controller的epoch
       if(stopReplicaRequest.controllerEpoch() < controllerEpoch) {
         stateChangeLogger.warn("Broker %d received stop replica request from an old controller epoch %d. Latest known controller epoch is %d"
           .format(localBrokerId, stopReplicaRequest.controllerEpoch, controllerEpoch))
         (responseMap, Errors.STALE_CONTROLLER_EPOCH.code)
       } else {
+        // 获取要停止的partitions
         val partitions = stopReplicaRequest.partitions.asScala
+        // 更新controller epoch
         controllerEpoch = stopReplicaRequest.controllerEpoch
         // First stop fetchers for all partitions, then stop the corresponding replicas
+        // 删除去要暂停partitions的replicaFetcher请求
         replicaFetcherManager.removeFetcherForPartitions(partitions.map(r => TopicAndPartition(r.topic, r.partition)))
         for(topicPartition <- partitions){
+          // 停止
           val errorCode = stopReplica(topicPartition.topic, topicPartition.partition, stopReplicaRequest.deletePartitions)
           responseMap.put(topicPartition, errorCode)
         }
@@ -868,6 +890,7 @@ class ReplicaManager(val config: KafkaConfig,
    * the error message will be set on each partition since we do not know which partition caused it. Otherwise,
    * return the set of partitions that are made follower due to this method
    */
+  // 当当前broker成为给定partitions的follower
   private def makeFollowers(controllerId: Int,
                             epoch: Int,
                             partitionState: Map[Partition, PartitionState],
@@ -975,7 +998,7 @@ class ReplicaManager(val config: KafkaConfig,
   // 评估分区的ISR列表，查看哪些副本可以从ISR列表中删除
   private def maybeShrinkIsr(): Unit = {
     trace("Evaluating ISR list of partitions to see which replicas can be removed from the ISR")
-    // 遍历所有的topic-partiton的副本
+    // 遍历所有的topic-partiton的replica
     allPartitions.values.foreach(partition => partition.maybeShrinkIsr(config.replicaLagTimeMaxMs))
   }
 
@@ -1030,12 +1053,14 @@ class ReplicaManager(val config: KafkaConfig,
   }
 
   // High watermark do not need to be checkpointed only when under unit tests
+  // 关闭
   def shutdown(checkpointHW: Boolean = true) {
     info("Shutting down")
     replicaFetcherManager.shutdown()
     delayedFetchPurgatory.shutdown()
     delayedProducePurgatory.shutdown()
     if (checkpointHW)
+      // 关闭之前写各个topic-partition的hw
       checkpointHighWatermarks()
     info("Shut down completely")
   }

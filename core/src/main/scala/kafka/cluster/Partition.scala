@@ -38,12 +38,16 @@ import org.apache.kafka.common.requests.PartitionState
 
 /**
  * Data structure that represents a topic partition. The leader maintains the AR, ISR, CUR, RAR
+  * 表示topic partition的结构，leader节点用来维护AR, ISR, CUR, RAR
+  * 定义topic后会设置多个partition，每个partition有通过多个broker构建leader和follower的集合体
  */
-class Partition(val topic: String,
-                val partitionId: Int,
+class Partition(val topic: String,// topic
+                val partitionId: Int,// partition ID，也就是编号
                 time: Time,
-                replicaManager: ReplicaManager) extends Logging with KafkaMetricsGroup {
+                replicaManager: ReplicaManager) extends Logging with KafkaMetricsGroup {// 当前broker上的ReplicaManager
+  // 当前brokerID
   private val localBrokerId = replicaManager.config.brokerId
+  // 日志管理器
   private val logManager = replicaManager.logManager
   private val zkUtils = replicaManager.zkUtils
   // 记录的副本信息 key是副本ID
@@ -51,8 +55,9 @@ class Partition(val topic: String,
   // The read lock is only required when multiple reads are executed and needs to be in a consistent manner
   private val leaderIsrUpdateLock = new ReentrantReadWriteLock()
   private var zkVersion: Int = LeaderAndIsr.initialZKVersion
+  // partition的leader副本epoch
   @volatile private var leaderEpoch: Int = LeaderAndIsr.initialLeaderEpoch - 1
-  // 记录分区的leaderID
+  // 记录partition的leader副本ID
   @volatile var leaderReplicaIdOpt: Option[Int] = None
   // ISR列表
   @volatile var inSyncReplicas: Set[Replica] = Set.empty[Replica]
@@ -62,6 +67,7 @@ class Partition(val topic: String,
    * the controller sends it a start replica command containing the leader for each partition that the broker hosts.
    * In addition to the leader, the controller can also send the epoch of the controller that elected the leader for
    * each partition. */
+  // 记录controller的epochID
   private var controllerEpoch: Int = KafkaController.InitialControllerEpoch - 1
   this.logIdent = "Partition [%s,%d] on broker %d: ".format(topic, partitionId, localBrokerId)
 
@@ -149,6 +155,7 @@ class Partition(val topic: String,
     assignedReplicaMap.remove(replicaId)
   }
 
+  // 删除当前Partition
   def delete() {
     // need to hold the lock to prevent appendMessagesToLeader() from hitting I/O exceptions due to log being deleted
     inWriteLock(leaderIsrUpdateLock) {
@@ -409,13 +416,14 @@ class Partition(val topic: String,
     replicaManager.tryCompleteDelayedProduce(requestKey)
   }
 
-  // 参数默认10000L
+  // 判断是否需要收缩ISR列表，也就是剔除过期的replica
+  // 参数默认10000
   def maybeShrinkIsr(replicaMaxLagTimeMs: Long) {
     val leaderHWIncremented = inWriteLock(leaderIsrUpdateLock) {
-      // 先检查当前的broker是否为topic-partition的leader
+      // 先检查当前的broker是否为topic-partition的leader replica
       leaderReplicaIfLocal() match {
         case Some(leaderReplica) =>
-          // 获取超时的ISR列表
+          // 从ISR列表过滤滞后的replicas
           val outOfSyncReplicas = getOutOfSyncReplicas(leaderReplica, replicaMaxLagTimeMs)
           if(outOfSyncReplicas.size > 0) {
             // 获取新的ISR列表
@@ -424,16 +432,16 @@ class Partition(val topic: String,
             info("Shrinking ISR for partition [%s,%d] from %s to %s".format(topic, partitionId,
               inSyncReplicas.map(_.brokerId).mkString(","), newInSyncReplicas.map(_.brokerId).mkString(",")))
             // update ISR in zk and in cache
-            // 替换本地ISR列表并更新到zk：/brokers/topics/{topic}/partitions/{partitionId}/state路径下数据
+            // 替换本地ISR列表并更新到zk：/brokers/topics/{topic}/partitions/{partitionId}/state路径下数据 触发相关事件
             updateIsr(newInSyncReplicas)
             // we may need to increment high watermark since ISR could be down to 1
             replicaManager.isrShrinkRate.mark()
-            // 可能需要更新topic-partition的HW
+            // 由于删除了之后的replicas所以这里判断一下是否需要更新topic-partition的HW
             maybeIncrementLeaderHW(leaderReplica)
           } else {
             false
           }
-
+        // 如果是follower什么也不做
         case None => false // do nothing if no longer leader
       }
     }
@@ -443,7 +451,7 @@ class Partition(val topic: String,
       tryCompleteDelayedRequests()
   }
 
-  // 从ISR列表获取超时的replica
+  // 从ISR列表获取滞后的replicas
   def getOutOfSyncReplicas(leaderReplica: Replica, maxLagMs: Long): Set[Replica] = {
     /**
      * there are two cases that will be handled here -
@@ -460,13 +468,14 @@ class Partition(val topic: String,
      **/
       // 获取leader的LEO
     val leaderLogEndOffset = leaderReplica.logEndOffset
-    // 获取剔除leader副本之后的副本集合
+    // 获取ISR列表中剔除leader副本之后的集合
     val candidateReplicas = inSyncReplicas - leaderReplica
-    // 当前时间 - lastCaughtUpTimeMs > replicaMaxLagTimeMs 的副本筛选出来
+    // 遍历candidateReplicas集合，通过条件：当前时间 - lastCaughtUpTimeMs > replicaMaxLagTimeMs
+    // 过滤出滞后的replicas
     val laggingReplicas = candidateReplicas.filter(r => (time.milliseconds - r.lastCaughtUpTimeMs) > maxLagMs)
     if(laggingReplicas.size > 0)
       debug("Lagging replicas for partition %s are %s".format(TopicAndPartition(topic, partitionId), laggingReplicas.map(_.brokerId).mkString(",")))
-
+    // 返回滞后的replicas
     laggingReplicas
   }
 
@@ -525,6 +534,7 @@ class Partition(val topic: String,
   private def updateIsr(newIsr: Set[Replica]) {
     val newLeaderAndIsr = new LeaderAndIsr(localBrokerId, leaderEpoch, newIsr.map(r => r.brokerId).toList, zkVersion)
     // 更新zk上的节点 ：/brokers/topics/{topic}/partitions/{partitionId}/state
+    // 触发kafka.controller.ReassignedPartitionsIsrChangeListener事件，执行分区重分配
     val (updateSucceeded,newVersion) = ReplicationUtils.updateLeaderAndIsr(zkUtils, topic, partitionId,
       newLeaderAndIsr, controllerEpoch, zkVersion)
 

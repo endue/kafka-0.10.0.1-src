@@ -234,7 +234,7 @@ class ReplicaFetcherThread(name: String,
     * @param fetchRequest
     * @return
     */
-  protected def fetch(fetchRequest: FetchRequest): Map[TopicAndPartition, PartitionData] = {
+  protected def fetch(fetchRequest: FetchRequest): Map[TopicAndPartition, PartitionData] =  {
     // 发送fetch请求并获取响应
     val clientResponse = sendRequest(ApiKeys.FETCH, Some(fetchRequestVersion), fetchRequest.underlying)
     new FetchResponse(clientResponse.responseBody).responseData.asScala.map { case (key, value) =>

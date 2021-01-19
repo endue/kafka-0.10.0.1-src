@@ -211,7 +211,7 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
   private val partitionReassignedListener = new PartitionsReassignedListener(this)
   // leader副本优化监听器
   private val preferredReplicaElectionListener = new PreferredReplicaElectionListener(this)
-  // ISR列表变更通知器
+  // ISR列表变更通知器,/isr_change_notification
   private val isrChangeNotificationListener = new IsrChangeNotificationListener(this)
 
   newGauge(
@@ -1495,6 +1495,7 @@ class PartitionsReassignedListener(controller: KafkaController) extends IZkDataL
   }
 }
 
+// 监听ISR列表的变化，节点路径：/brokers/topics/{topic}/partitions/{partitionId}/state节点
 class ReassignedPartitionsIsrChangeListener(controller: KafkaController, topic: String, partition: Int,
                                             reassignedReplicas: Set[Int])
   extends IZkDataListener with Logging {
@@ -1513,18 +1514,23 @@ class ReassignedPartitionsIsrChangeListener(controller: KafkaController, topic: 
       val topicAndPartition = TopicAndPartition(topic, partition)
       try {
         // check if this partition is still being reassigned or not
+        // 检查这个分区是否仍在重新分配中
         controllerContext.partitionsBeingReassigned.get(topicAndPartition) match {
           case Some(reassignedPartitionContext) =>
             // need to re-read leader and isr from zookeeper since the zkclient callback doesn't return the Stat object
+            // 从zk获取最新的leader和ISR信息
             val newLeaderAndIsrOpt = zkUtils.getLeaderAndIsrForPartition(topic, partition)
             newLeaderAndIsrOpt match {
+                /// 加入了新副本
               case Some(leaderAndIsr) => // check if new replicas have joined ISR
                 val caughtUpReplicas = reassignedReplicas & leaderAndIsr.isr.toSet
+                // 新分配的副本已经全部在ISR中了
                 if(caughtUpReplicas == reassignedReplicas) {
                   // resume the partition reassignment process
                   info("%d/%d replicas have caught up with the leader for partition %s being reassigned."
                     .format(caughtUpReplicas.size, reassignedReplicas.size, topicAndPartition) +
                     "Resuming partition reassignment")
+                  // 执行分区重分配
                   controller.onPartitionReassignment(topicAndPartition, reassignedPartitionContext)
                 }
                 else {

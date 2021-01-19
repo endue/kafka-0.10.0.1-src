@@ -393,6 +393,7 @@ object AdminUtils extends Logging {
     brokerMetadatas.sortBy(_.id)
   }
 
+  // 创建topic
   def createTopic(zkUtils: ZkUtils,
                   topic: String,
                   partitions: Int,
@@ -433,10 +434,12 @@ object AdminUtils extends Logging {
     if (!update) {
       // write out the config if there is any, this isn't transactional with the partition assignments
       LogConfig.validate(config)
+      // 写到zk上的：/config/{entityType}/{entity}
       writeEntityConfig(zkUtils, ConfigType.Topic, topic, config)
     }
 
     // create the partition assignment
+    // 写到zk上的：/brokers/topics/{topic}
     writeTopicPartitionAssignment(zkUtils, topic, partitionReplicaAssignment, update)
   }
 
