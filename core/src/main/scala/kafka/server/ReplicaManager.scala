@@ -724,21 +724,26 @@ class ReplicaManager(val config: KafkaConfig,
           correlationId, leaderAndISRRequest.controllerEpoch, controllerEpoch))
         }
         BecomeLeaderOrFollowerResult(responseMap, Errors.STALE_CONTROLLER_EPOCH.code)
+      // 开始处理请求
       } else {
         val controllerId = leaderAndISRRequest.controllerId
+        // 更新controllerEpoch
         controllerEpoch = leaderAndISRRequest.controllerEpoch
 
         // First check partition's leader epoch
+        // 记录所有ar列表包括当前broker的Partition和对应的状态信息PartitionState
         val partitionState = new mutable.HashMap[Partition, PartitionState]()
+        // 遍历leaderAndISRRequest请求，获取topic-partition的PartitionState对象
         leaderAndISRRequest.partitionStates.asScala.foreach { case (topicPartition, stateInfo) =>
-          // 获取对应topic的partition，没有就创建一个
+          // 获取当前broker上记录的对应topic的Partition对象，没有那么就创建一个Partition对象
           val partition = getOrCreatePartition(topicPartition.topic, topicPartition.partition)
-          // 获取对应topic的partition的leaderEpoch
+          // 获取对应topic的Partition对象的leaderEpoch
           val partitionLeaderEpoch = partition.getLeaderEpoch()
           // If the leader epoch is valid record the epoch of the controller that made the leadership decision.
           // This is useful while updating the isr to maintain the decision maker controller's epoch in the zookeeper path
-          // 小于当前请求中的leaderEpoch，更新分区的状态信息
+          // 如果小于当前请求中的leaderEpoch，更新分区的状态信息
           if (partitionLeaderEpoch < stateInfo.leaderEpoch) {
+            // 验证一下，如果请求中topic的AR列表包括当前broker，那么记录最新的topic的stateInfo到partitionState中
             if(stateInfo.replicas.contains(config.brokerId))
               // 记录到map中，k是分区，value是分区状态信息
               partitionState.put(partition, stateInfo)
@@ -750,6 +755,7 @@ class ReplicaManager(val config: KafkaConfig,
                   topicPartition.topic, topicPartition.partition, stateInfo.replicas.asScala.mkString(",")))
               responseMap.put(topicPartition, Errors.UNKNOWN_TOPIC_OR_PARTITION.code)
             }
+          // 如果小于当前请求中的leaderEpoch，不处理
           } else {
             // Otherwise record the error code in response
             stateChangeLogger.warn(("Broker %d ignoring LeaderAndIsr request from controller %d with correlation id %d " +
@@ -760,18 +766,18 @@ class ReplicaManager(val config: KafkaConfig,
           }
         }
 
-        // 过滤出partition的leader副本设置为当前broker的所有partition
+        // 过滤出leader副本为当前broker的所有分区的状态信息
         val partitionsTobeLeader = partitionState.filter { case (partition, stateInfo) =>
           stateInfo.leader == config.brokerId
         }
-        // 过滤出partition的follower部分设置为当前broker的所有partition
+        // 过滤出follower副本为当前broker的所有分区的状态信息
         val partitionsToBeFollower = (partitionState -- partitionsTobeLeader.keys)
-        // 操作leader副本为当前broker的partitions
         val partitionsBecomeLeader = if (!partitionsTobeLeader.isEmpty)
+          // 设置对应Partition对象为leader，然后删除replicaFetcherManager中记录的replicaFetcher线程
           makeLeaders(controllerId, controllerEpoch, partitionsTobeLeader, correlationId, responseMap)
         else
           Set.empty[Partition]
-        // 操作follower副本为当前broker的partitions
+        //
         val partitionsBecomeFollower = if (!partitionsToBeFollower.isEmpty)
           makeFollowers(controllerId, controllerEpoch, partitionsToBeFollower, correlationId, responseMap, metadataCache)
         else
@@ -780,6 +786,7 @@ class ReplicaManager(val config: KafkaConfig,
         // we initialize highwatermark thread after the first leaderisrrequest. This ensures that all the partitions
         // have been completely populated before starting the checkpointing there by avoiding weird race conditions
         // 如果hw Checkpoint线程没有初始化启动，那么初始化并启动
+        // 定时刷新各个topic-partition消息的HW到文件
         if (!hwThreadInitialized) {
           startHighWaterMarksCheckPointThread()
           hwThreadInitialized = true
@@ -812,22 +819,23 @@ class ReplicaManager(val config: KafkaConfig,
   // 当当前broker成为给定partitions的leader
   private def makeLeaders(controllerId: Int,
                           epoch: Int,
-                          partitionState: Map[Partition, PartitionState],
+                          partitionState: Map[Partition, PartitionState],// leader副本为当前broker的分区状态信息
                           correlationId: Int,
                           responseMap: mutable.Map[TopicPartition, Short]): Set[Partition] = {
     partitionState.foreach(state =>
       stateChangeLogger.trace(("Broker %d handling LeaderAndIsr request correlationId %d from controller %d epoch %d " +
         "starting the become-leader transition for partition %s")
         .format(localBrokerId, correlationId, controllerId, epoch, TopicAndPartition(state._1.topic, state._1.partitionId))))
-
+    // 响应
     for (partition <- partitionState.keys)
       responseMap.put(new TopicPartition(partition.topic, partition.partitionId), Errors.NONE.code)
-
+    // 记录为leader的Partition对象
     val partitionsToMakeLeaders: mutable.Set[Partition] = mutable.Set()
 
     try {
       // First stop fetchers for all the partitions
-      // 从fetcherThreadMap中删除当前partition的replicaFetcher线程
+      // 从fetcherThreadMap中删除掉当前partition的replicaFetcher线程
+      // 因为现在当前broker是这些副本的leader了，不再需要fetch
       replicaFetcherManager.removeFetcherForPartitions(partitionState.keySet.map(new TopicAndPartition(_)))
       // Update the partition information to be the leader
       // 遍历partitionState获取所有leader副本是当前broker的partitions

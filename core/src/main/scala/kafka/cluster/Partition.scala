@@ -54,10 +54,11 @@ class Partition(val topic: String,// topic
   private val assignedReplicaMap = new Pool[Int, Replica]
   // The read lock is only required when multiple reads are executed and needs to be in a consistent manner
   private val leaderIsrUpdateLock = new ReentrantReadWriteLock()
+  // zk版本，每次ISR列表发生变更时会更新
   private var zkVersion: Int = LeaderAndIsr.initialZKVersion
   // partition的leader副本epoch
   @volatile private var leaderEpoch: Int = LeaderAndIsr.initialLeaderEpoch - 1
-  // 记录partition的leader副本ID
+  // 记录topic-partition的leader副本ID
   @volatile var leaderReplicaIdOpt: Option[Int] = None
   // ISR列表
   @volatile var inSyncReplicas: Set[Replica] = Set.empty[Replica]
@@ -191,7 +192,7 @@ class Partition(val topic: String,// topic
       // to maintain the decision maker controller's epoch in the zookeeper path
       controllerEpoch = partitionStateInfo.controllerEpoch
       // add replicas that are new
-      // 如果新副本中有不存在的，那么为新的replica创建副本实例
+      // 如果新副本中有不存在的Replica对象，那么为新的replica创建Replica对象
       allReplicas.foreach(replica => getOrCreateReplica(replica))
       // 获取新的isr列表
       val newInSyncReplicas = partitionStateInfo.isr.asScala.map(r => getOrCreateReplica(r)).toSet
@@ -539,8 +540,11 @@ class Partition(val topic: String,// topic
       newLeaderAndIsr, controllerEpoch, zkVersion)
 
     if(updateSucceeded) {
+      // 记录到ReplicaManager的isrChangeSet集合中
       replicaManager.recordIsrChange(new TopicAndPartition(topic, partitionId))
+      // 更新ISR列表
       inSyncReplicas = newIsr
+      // 更新zkVersion
       zkVersion = newVersion
       trace("ISR updated to [%s] and zkVersion updated to [%d]".format(newIsr.mkString(","), zkVersion))
     } else {
