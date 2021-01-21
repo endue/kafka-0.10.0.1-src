@@ -70,7 +70,7 @@ class ReplicaFetcherThread(name: String,
   private val fetchSize = brokerConfig.replicaFetchMaxBytes
 
   private def clientId = name
-
+  // 记录要拉取的leader副本的相关信息
   private val sourceNode = new Node(sourceBroker.id, sourceBroker.host, sourceBroker.port)
 
   // we need to include both the broker id and the fetcher id
@@ -242,6 +242,7 @@ class ReplicaFetcherThread(name: String,
 
   // any logic for partitions whose leader has changed
   def handlePartitionsWithErrors(partitions: Iterable[TopicAndPartition]) {
+    // replica.fetch.backoff.ms,默认1000
     delayPartitions(partitions, brokerConfig.replicaFetchBackoffMs.toLong)
   }
 
@@ -315,6 +316,7 @@ class ReplicaFetcherThread(name: String,
     val requestMap = mutable.Map.empty[TopicPartition, JFetchRequest.PartitionData]
     // 构建拉取每个topic-partition的requestMap
     partitionMap.foreach { case ((TopicAndPartition(topic, partition), partitionFetchState)) =>
+      // 过滤出活跃的PartitionFetchState
       if (partitionFetchState.isActive)
         // 拉取的时候从PartitionFetchState中获取从哪个offset开始拉取以及拉取的最大字节数默认1M
         requestMap(new TopicPartition(topic, partition)) = new JFetchRequest.PartitionData(partitionFetchState.offset, fetchSize)

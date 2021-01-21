@@ -214,12 +214,14 @@ abstract class AbstractFetcherThread(name: String,
     } finally partitionMapLock.unlock()
   }
 
+  // 将topic-partition的PartitionFetchState更新为延迟的
   def delayPartitions(partitions: Iterable[TopicAndPartition], delay: Long) {
     partitionMapLock.lockInterruptibly()
     try {
       for (partition <- partitions) {
         partitionMap.get(partition).foreach (currentPartitionFetchState =>
           if (currentPartitionFetchState.isActive)
+            // 更新
             partitionMap.put(partition, new PartitionFetchState(currentPartitionFetchState.offset, new DelayedItem(delay)))
         )
       }
@@ -335,11 +337,12 @@ case class ClientIdTopicPartition(clientId: String, topic: String, partitionId: 
 
 /**
   * case class to keep partition offset and its state(active , inactive)
+  * 保留了分区的偏移量和对应的状态
   */
 case class PartitionFetchState(offset: Long, delay: DelayedItem) {
-
+  // 默认为alive
   def this(offset: Long) = this(offset, new DelayedItem(0))
-
+  // 判断是否为alive，只有到期的才会变为alive
   def isActive: Boolean = { delay.getDelay(TimeUnit.MILLISECONDS) == 0 }
 
   override def toString = "%d-%b".format(offset, isActive)
