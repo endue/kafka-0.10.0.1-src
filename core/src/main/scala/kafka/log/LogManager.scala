@@ -259,11 +259,13 @@ class LogManager(val logDirs: Array[File],// 日志目录列表，加载的是"l
     val jobs = mutable.Map.empty[File, Seq[Future[_]]]
 
     // stop the cleaner first
+    // cleaner线程不为空，那么关闭它
     if (cleaner != null) {
       CoreUtils.swallow(cleaner.shutdown())
     }
 
     // close logs in each dir
+    // 遍历所有的LogDirs
     for (dir <- this.logDirs) {
       debug("Flushing and closing logs at " + dir)
 
@@ -271,7 +273,7 @@ class LogManager(val logDirs: Array[File],// 日志目录列表，加载的是"l
       threadPools.append(pool)
 
       val logsInDir = logsByDir.getOrElse(dir.toString, Map()).values
-
+      // 创建任务，功能是获取目录下的Log对象，然后刷盘并关闭
       val jobsForDir = logsInDir map { log =>
         CoreUtils.runnable {
           // flush the log to ensure latest possible recovery point
@@ -279,21 +281,25 @@ class LogManager(val logDirs: Array[File],// 日志目录列表，加载的是"l
           log.close()
         }
       }
-
+      // 提交任务到线程池
       jobs(dir) = jobsForDir.map(pool.submit).toSeq
     }
 
 
     try {
+      // 遍历任务
       for ((dir, dirJobs) <- jobs) {
+        // 获取结果
         dirJobs.foreach(_.get)
 
         // update the last flush point
         debug("Updating recovery points at " + dir)
+        // 更新checkpoint
         checkpointLogsInDir(dir)
 
         // mark that the shutdown was clean by creating marker file
         debug("Writing clean shutdown marker at " + dir)
+        // 写.kafka_cleanshutdown文件
         CoreUtils.swallow(new File(dir, Log.CleanShutdownFile).createNewFile())
       }
     } catch {
@@ -304,6 +310,7 @@ class LogManager(val logDirs: Array[File],// 日志目录列表，加载的是"l
     } finally {
       threadPools.foreach(_.shutdown())
       // regardless of whether the close succeeded, we need to unlock the data directories
+      // 最后关闭所有的文件锁
       dirLocks.foreach(_.destroy())
     }
 
@@ -313,20 +320,28 @@ class LogManager(val logDirs: Array[File],// 日志目录列表，加载的是"l
 
   /**
    * Truncate the partition logs to the specified offsets and checkpoint the recovery point to this offset
+    * 将分区日志截断到指定的偏移量，并将恢复点检查点设置为该偏移量
    *
-   * @param partitionAndOffsets Partition logs that need to be truncated
+   * @param partitionAndOffsets Partition logs that need to be truncated 需要被截断的topic-partition
    */
   def truncateTo(partitionAndOffsets: Map[TopicAndPartition, Long]) {
     for ((topicAndPartition, truncateOffset) <- partitionAndOffsets) {
+      // 获取对应topic-partition的Log实例
       val log = logs.get(topicAndPartition)
       // If the log does not exist, skip it
       if (log != null) {
         //May need to abort and pause the cleaning of the log, and resume after truncation is done.
+        // 可能需要中止和暂停清理日志，并在截断完成后恢复
+        // 如果被截取的offset小于活跃segmetn的baseOffset，那么说明此事可能存在cleaner线程
         val needToStopCleaner: Boolean = (truncateOffset < log.activeSegment.baseOffset)
         if (needToStopCleaner && cleaner != null)
+          // 终止掉cleaner线程的执行
           cleaner.abortAndPauseCleaning(topicAndPartition)
+        // 截断日志到指定的offset
         log.truncateTo(truncateOffset)
+        // 如果暂停了清理日志，那么现在就给它恢复一些
         if (needToStopCleaner && cleaner != null) {
+          // 节点checkpoint文件中记录的信息
           cleaner.maybeTruncateCheckpoint(log.dir.getParentFile, topicAndPartition, log.activeSegment.baseOffset)
           cleaner.resumeCleaning(topicAndPartition)
         }

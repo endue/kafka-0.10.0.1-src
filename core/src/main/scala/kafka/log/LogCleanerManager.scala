@@ -245,13 +245,19 @@ private[log] class LogCleanerManager(val logDirs: Array[File], val logs: Pool[To
     }
   }
 
+  // 截断checkpoint文件
   def maybeTruncateCheckpoint(dataDir: File, topicAndPartition: TopicAndPartition, offset: Long) {
     inLock(lock) {
+      // 判断对应topic-partiton的日志类型是否为compact
       if (logs.get(topicAndPartition).config.compact) {
+        // 获取对应的OffsetCheckpoint
         val checkpoint = checkpoints(dataDir)
+        // 读取OffsetCheckpoint中的内容，返回类型为Map[TopicAndPartition, Long]
         val existing = checkpoint.read()
-
+        // 获取对应topic-partition当前checkpoint的offset，没有就返回0
+        // 如果写入的checkpoint的offset > 截断的目标offset
         if (existing.getOrElse(topicAndPartition, 0L) > offset)
+          // 重新写入当前topic-partition最新的checkpoint offset
           checkpoint.write(existing + (topicAndPartition -> offset))
       }
     }

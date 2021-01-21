@@ -895,6 +895,7 @@ class Log(val dir: File,// 日志文件对应的磁盘目录，如：/tmp/kafka-
   /**
    * Truncate this log so that it ends with the greatest offset < targetOffset.
    * @param targetOffset The offset to truncate to, an upper bound on all offsets in the log after truncation is complete.
+    * 截断日志，使其偏移量 < targetOffset
    */
   private[log] def truncateTo(targetOffset: Long) {
     info("Truncating log %s to offset %d.".format(name, targetOffset))
@@ -905,13 +906,20 @@ class Log(val dir: File,// 日志文件对应的磁盘目录，如：/tmp/kafka-
       return
     }
     lock synchronized {
+      // 如果其实segment的起始offset > targetOffset
+      // 那么这说明那就是清空所有的日志
       if(segments.firstEntry.getValue.baseOffset > targetOffset) {
         truncateFullyAndStartAt(targetOffset)
       } else {
+        // 获取所有的LogSegment，然后将baseOffset > targetOffset的Segment清理掉
         val deletable = logSegments.filter(segment => segment.baseOffset > targetOffset)
+        // 删除需要清理的Segment
         deletable.foreach(deleteSegment(_))
+        // 将活跃Segment截取到targetOffset
         activeSegment.truncateTo(targetOffset)
+        // 更新当前LEO为targetOffset
         updateLogEndOffset(targetOffset)
+        // 更新当前Log对应最新的recoveryPoint
         this.recoveryPoint = math.min(targetOffset, this.recoveryPoint)
       }
     }

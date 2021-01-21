@@ -128,6 +128,7 @@ class LogCleaner(val config: CleanerConfig,
   /**
    *  Abort the cleaning of a particular partition, if it's in progress. This call blocks until the cleaning of
    *  the partition is aborted.
+    *  中断当前topic-partition的celaner线程,如果当前分区在inProgress集合中那么删除
    */
   def abortCleaning(topicAndPartition: TopicAndPartition) {
     cleanerManager.abortCleaning(topicAndPartition)
@@ -135,6 +136,7 @@ class LogCleaner(val config: CleanerConfig,
 
   /**
    * Update checkpoint file, removing topics and partitions that no longer exist
+    * 更新检查点文件，删除不再存在的topic-partition
    */
   def updateCheckpoints(dataDir: File) {
     cleanerManager.updateCheckpoints(dataDir, update=None)
@@ -142,6 +144,7 @@ class LogCleaner(val config: CleanerConfig,
 
   /**
    * Truncate cleaner offset checkpoint for the given partition if its checkpointed offset is larger than the given offset
+    * 如果给定topic-partition的checkpoint offset > 给定的offset，则多余的checkpoint offset
    */
   def maybeTruncateCheckpoint(dataDir: File, topicAndPartition: TopicAndPartition, offset: Long) {
     cleanerManager.maybeTruncateCheckpoint(dataDir, topicAndPartition, offset)
@@ -150,6 +153,7 @@ class LogCleaner(val config: CleanerConfig,
   /**
    *  Abort the cleaning of a particular partition if it's in progress, and pause any future cleaning of this partition.
    *  This call blocks until the cleaning of the partition is aborted and paused.
+    *  中断当前topic-partition的celaner线程，等待恢复
    */
   def abortAndPauseCleaning(topicAndPartition: TopicAndPartition) {
     cleanerManager.abortAndPauseCleaning(topicAndPartition)
@@ -157,6 +161,7 @@ class LogCleaner(val config: CleanerConfig,
 
   /**
    *  Resume the cleaning of a paused partition. This call blocks until the cleaning of a partition is resumed.
+    *  从inProgress集合中删除当前topic-partition
    */
   def resumeCleaning(topicAndPartition: TopicAndPartition) {
     cleanerManager.resumeCleaning(topicAndPartition)
