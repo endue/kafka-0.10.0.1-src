@@ -47,7 +47,7 @@ abstract class AbstractFetcherThread(name: String,
 
   type REQ <: FetchRequest
   type PD <: PartitionData
-
+  // 记录topic-partition对应的PartitionFetchState，里面记录了下次拉取消息的offset
   private val partitionMap = new mutable.HashMap[TopicAndPartition, PartitionFetchState] // a (topic, partition) -> partitionFetchState map
   private val partitionMapLock = new ReentrantLock
   private val partitionMapCond = partitionMapLock.newCondition()
@@ -84,28 +84,33 @@ abstract class AbstractFetcherThread(name: String,
   }
 
   override def doWork() {
-
+    // 构建fetchRequest
     val fetchRequest = inLock(partitionMapLock) {
       // 构建fetch请求
       val fetchRequest = buildFetchRequest(partitionMap)
       if (fetchRequest.isEmpty) {
         trace("There are no active partitions. Back off for %d ms before sending a fetch request".format(fetchBackOffMs))
+        // 阻塞等待replica.fetch.backoff.ms，默认1000
         partitionMapCond.await(fetchBackOffMs, TimeUnit.MILLISECONDS)
       }
+      // 返回fetchRequest
       fetchRequest
     }
-
+    // 如果fetchRequest不为空，发送
     if (!fetchRequest.isEmpty)
       // 处理fetchRequest
       processFetchRequest(fetchRequest)
   }
 
+  // 处理发送fetchRequest
   private def processFetchRequest(fetchRequest: REQ) {
+    // 记录拉取失败的topic-partition
     val partitionsWithError = new mutable.HashSet[TopicAndPartition]
     var responseData: Map[TopicAndPartition, PD] = Map.empty
 
     try {
       trace("Issuing to broker %d of fetch request %s".format(sourceBroker.id, fetchRequest))
+      // 发送并等待响应
       responseData = fetch(fetchRequest)
     } catch {
       case t: Throwable =>
@@ -119,29 +124,37 @@ abstract class AbstractFetcherThread(name: String,
         }
     }
     fetcherStats.requestRate.mark()
-
+    // 响应记录不为空
     if (responseData.nonEmpty) {
       // process fetched data
       inLock(partitionMapLock) {
-
+        // 处理响应记录
+        // 遍历响应获取每个topic-partition的响应数据PartitionData
         responseData.foreach { case (topicAndPartition, partitionData) =>
           val TopicAndPartition(topic, partitionId) = topicAndPartition
+          // 从partitionMap中获取对应topic-partition的PartitionFetchState
           partitionMap.get(topicAndPartition).foreach(currentPartitionFetchState =>
             // we append to the log if the current offset is defined and it is the same as the offset requested during fetch
+            // 如果对应topic-partition的fetchRequest中的起始offset和PartitionFetchState中记录的offset一致，那么才继续处理响应
             if (fetchRequest.offset(topicAndPartition) == currentPartitionFetchState.offset) {
               Errors.forCode(partitionData.errorCode) match {
+                  // 正常情况下
                 case Errors.NONE =>
                   try {
+                    // 从响应数据PartitionData中获取消息日志
                     val messages = partitionData.toByteBufferMessageSet
                     val validBytes = messages.validBytes
+                    // 获取下次fetch的offset
                     val newOffset = messages.shallowIterator.toSeq.lastOption match {
                       case Some(m: MessageAndOffset) => m.nextOffset
                       case None => currentPartitionFetchState.offset
                     }
+                    // 创建新的PartitionFetchState，替换旧的，也就是更新下次fetch的起始offset(follower的LEO)
                     partitionMap.put(topicAndPartition, new PartitionFetchState(newOffset))
                     fetcherLagStats.getAndMaybePut(topic, partitionId).lag = Math.max(0L, partitionData.highWatermark - newOffset)
                     fetcherStats.byteRate.mark(validBytes)
                     // Once we hand off the partition data to the subclass, we can't mess with it any more in this thread
+                    // 处理数据
                     processPartitionData(topicAndPartition, currentPartitionFetchState.offset, partitionData)
                   } catch {
                     case ime: CorruptRecordException =>
@@ -154,9 +167,12 @@ abstract class AbstractFetcherThread(name: String,
                       throw new KafkaException("error processing data for partition [%s,%d] offset %d"
                         .format(topic, partitionId, currentPartitionFetchState.offset), e)
                   }
+                  // 请求的偏移量超过了leader存储的偏移量
                 case Errors.OFFSET_OUT_OF_RANGE =>
                   try {
+                    // 计算fetch的起始offset，这里分为两种情况
                     val newOffset = handleOffsetOutOfRange(topicAndPartition)
+                    // 创建新的PartitionFetchState，替换旧的，也就是更新下次fetch的起始offset(follower的LEO)
                     partitionMap.put(topicAndPartition, new PartitionFetchState(newOffset))
                     error("Current offset %d for partition [%s,%d] out of range; reset offset to %d"
                       .format(currentPartitionFetchState.offset, topic, partitionId, newOffset))

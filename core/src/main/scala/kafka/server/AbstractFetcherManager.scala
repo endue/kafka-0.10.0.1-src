@@ -72,14 +72,19 @@ abstract class AbstractFetcherManager(protected val name: String, clientId: Stri
   // to be defined in subclass to create a specific fetcher
   def createFetcherThread(fetcherId: Int, sourceBroker: BrokerEndPoint): AbstractFetcherThread
 
-  // 针对一批分区创建一个拉取副本数据的线程
+  // 创建分区的AbstractFetcherThread线程
   def addFetcherForPartitions(partitionAndOffsets: Map[TopicAndPartition, BrokerAndInitialOffset]) {
     mapLock synchronized {
+      // 按照topic-partition进行分组，创建对应的BrokerAndFetcherId
+      // 返回类型为[BrokerAndFetcherId,Map[TopicAndPartition, BrokerAndInitialOffset]]
       val partitionsPerFetcher = partitionAndOffsets.groupBy{ case(topicAndPartition, brokerAndInitialOffset) =>
+        // 计算topic-partition的fetcherId
         BrokerAndFetcherId(brokerAndInitialOffset.broker, getFetcherId(topicAndPartition.topic, topicAndPartition.partition))}
+      // 遍历partitionsPerFetcher
       for ((brokerAndFetcherId, partitionAndOffsets) <- partitionsPerFetcher) {
         var fetcherThread: AbstractFetcherThread = null
-        // 记录到fetcherThreadMap
+        // 创建对应topic-partition的AbstractFetcherThread并记录到fetcherThreadMap
+        // 同时启动该线程
         fetcherThreadMap.get(brokerAndFetcherId) match {
           case Some(f) => fetcherThread = f
           case None =>
@@ -87,7 +92,7 @@ abstract class AbstractFetcherManager(protected val name: String, clientId: Stri
             fetcherThreadMap.put(brokerAndFetcherId, fetcherThread)
             fetcherThread.start
         }
-
+        // 拿到对应topic-partition的AbstractFetcherThread，然后记录topic-partition的PartitionFetchState
         fetcherThreadMap(brokerAndFetcherId).addPartitions(partitionAndOffsets.map { case (topicAndPartition, brokerAndInitOffset) =>
           topicAndPartition -> brokerAndInitOffset.initOffset
         })
@@ -98,24 +103,31 @@ abstract class AbstractFetcherManager(protected val name: String, clientId: Stri
       "[" + topicAndPartition + ", initOffset " + brokerAndInitialOffset.initOffset + " to broker " + brokerAndInitialOffset.broker + "] "}))
   }
 
+  // 删除对某个topic-partition的fetch请求
   def removeFetcherForPartitions(partitions: Set[TopicAndPartition]) {
     mapLock synchronized {
+      // 获取对应的fetcher thread
       for ((key, fetcher) <- fetcherThreadMap) {
+        // 从fetcher thread中删除对应的分区
         fetcher.removePartitions(partitions)
       }
     }
     info("Removed fetcher for partitions %s".format(partitions.mkString(",")))
   }
 
+  // 关闭没有拉取topic-partition任务的拉取线程
   def shutdownIdleFetcherThreads() {
     mapLock synchronized {
       val keysToBeRemoved = new mutable.HashSet[BrokerAndFetcherId]
       for ((key, fetcher) <- fetcherThreadMap) {
+        // 没有要拉取的分区了
         if (fetcher.partitionCount <= 0) {
+          // 关闭当前fetcher线程
           fetcher.shutdown()
           keysToBeRemoved += key
         }
       }
+      // 从fetcherThread中去掉没有分区的fetcher线程
       fetcherThreadMap --= keysToBeRemoved
     }
   }

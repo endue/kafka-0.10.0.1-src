@@ -64,13 +64,16 @@ public class FetchResponse extends AbstractRequestResponse {
 
     public static final long INVALID_HIGHWATERMARK = -1L;
     public static final ByteBuffer EMPTY_RECORD_SET = ByteBuffer.allocate(0);
-
+    // 针对topic-partition的响应数据PartitionData
     private final Map<TopicPartition, PartitionData> responseData;
     private final int throttleTime;
 
     public static final class PartitionData {
+        // 错误信息
         public final short errorCode;
+        // leader副本的HW
         public final long highWatermark;
+        // 消息记录
         public final ByteBuffer recordSet;
 
         public PartitionData(short errorCode, long highWatermark, ByteBuffer recordSet) {
