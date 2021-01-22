@@ -59,6 +59,7 @@ class Replica(val brokerId: Int,
      * set the lastCaughtUpTimeMsUnderlying to the current time.
      * This means that the replica is fully caught up.
      */
+    // 如果读取到被拉取副本的LEO，那么修改lastCaughtUpTimeMsUnderlying为当前时间，表示该副本已经追上了被拉取消息的副本
     if(logReadResult.isReadFromLogEnd) {
       lastCaughtUpTimeMsUnderlying.set(time.milliseconds)
     }

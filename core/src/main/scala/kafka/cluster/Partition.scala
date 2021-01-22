@@ -45,18 +45,19 @@ class Partition(val topic: String,// topic
                 val partitionId: Int,// partition ID，也就是编号
                 time: Time,
                 replicaManager: ReplicaManager) extends Logging with KafkaMetricsGroup {// 当前broker上的ReplicaManager
-  // 当前brokerID
+  // brokerID
   private val localBrokerId = replicaManager.config.brokerId
   // 日志管理器
   private val logManager = replicaManager.logManager
+  // zk工具
   private val zkUtils = replicaManager.zkUtils
-  // 记录的副本信息 key是副本ID
+  // 记录topic-partition里的副本集 key是副本ID，value是副本实例
   private val assignedReplicaMap = new Pool[Int, Replica]
   // The read lock is only required when multiple reads are executed and needs to be in a consistent manner
   private val leaderIsrUpdateLock = new ReentrantReadWriteLock()
   // zk版本，每次ISR列表发生变更时会更新
   private var zkVersion: Int = LeaderAndIsr.initialZKVersion
-  // partition的leader副本epoch
+  // topic-partition副本集中的leader副本的epoch，当leader发生变更后会更新
   @volatile private var leaderEpoch: Int = LeaderAndIsr.initialLeaderEpoch - 1
   // 记录topic-partition的leader副本ID
   @volatile var leaderReplicaIdOpt: Option[Int] = None
@@ -68,7 +69,7 @@ class Partition(val topic: String,// topic
    * the controller sends it a start replica command containing the leader for each partition that the broker hosts.
    * In addition to the leader, the controller can also send the epoch of the controller that elected the leader for
    * each partition. */
-  // 记录controller的epochID
+  // 记录controller的epoch
   private var controllerEpoch: Int = KafkaController.InitialControllerEpoch - 1
   this.logIdent = "Partition [%s,%d] on broker %d: ".format(topic, partitionId, localBrokerId)
 
@@ -102,6 +103,8 @@ class Partition(val topic: String,// topic
         // 有就返回
       case Some(replica) => replica
       case None =>
+        // 如果参数replicaId记录的就是当前broker
+        // 也就是说当前broker是该topic-partition的一个Replica
         if (isReplicaLocal(replicaId)) {
           val config = LogConfig.fromProps(logManager.defaultConfig.originals,
                                            AdminUtils.fetchEntityConfig(zkUtils, ConfigType.Topic, topic))
@@ -113,7 +116,8 @@ class Partition(val topic: String,// topic
           val offset = offsetMap.getOrElse(TopicAndPartition(topic, partitionId), 0L).min(log.logEndOffset)
           val localReplica = new Replica(replicaId, this, time, offset, Some(log))
           addReplicaIfNotExists(localReplica)
-        // 没有但不是当前broker
+          // 如果参数replicaId记录的不是当前broker
+          // 也就是说replicaId时远程的恶一个副本
         } else {
           // 创建一个Replica并添加到assignedReplicaMap中
           val remoteReplica = new Replica(replicaId, this, time)
