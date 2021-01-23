@@ -75,6 +75,8 @@ class Replica(val brokerId: Int,
     }
   }
 
+  // 返回LEO
+  // 如果有Log实例对象就返回，没有就返回logEndOffsetMetadata
   def logEndOffset =
     if (isLocal)
       log.get.logEndOffsetMetadata
