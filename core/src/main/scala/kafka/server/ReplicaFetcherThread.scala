@@ -179,7 +179,8 @@ class ReplicaFetcherThread(name: String,
      *
      * There is a potential for a mismatch between the logs of the two replicas here. We don't fix this mismatch as of now.
      */
-      // 获取leader副本上一定范围内LogSegment中最大的baseOffset
+      // 获取leader副本上activeSegment的LEO，如果存在activeSegment
+      // 否则返回的是最后一个LogSegment的baseOffset
     val leaderEndOffset: Long = earliestOrLatestOffset(topicAndPartition, ListOffsetRequest.LATEST_TIMESTAMP,
       brokerConfig.brokerId)
     // 如果获取的leaderEndOffset比当前副本的LEO还要小
@@ -232,7 +233,8 @@ class ReplicaFetcherThread(name: String,
       // 计算当前副本fetch请求的起始offset
       val offsetToFetch = Math.max(leaderStartOffset, replica.logEndOffset.messageOffset)
       // Only truncate log when current leader's log start offset is greater than follower's log end offset.
-      // leaderStartOffset大于当前副本的LEO，清空本地的log数据，从leaderStartOffset开始拉取数据
+      // leaderStartOffset大于当前副本的LEO，起始也就是远程leader副本的起始startOffset > 当前follower副本的LEO
+      // 清空本地的log数据，从leaderStartOffset开始拉取数据
       if (leaderStartOffset > replica.logEndOffset.messageOffset)
         replicaMgr.logManager.truncateFullyAndStartAt(topicAndPartition, leaderStartOffset)
       offsetToFetch

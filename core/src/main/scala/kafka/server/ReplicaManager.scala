@@ -263,7 +263,7 @@ class ReplicaManager(val config: KafkaConfig,
     scheduler.schedule("isr-change-propagation", maybePropagateIsrChanges, period = 2500L, unit = TimeUnit.MILLISECONDS)
   }
 
-  // 停止当前副本
+  // 删除对应topic-partition的Partition实例对象
   def stopReplica(topic: String, partitionId: Int, deletePartition: Boolean): Short  = {
     stateChangeLogger.trace("Broker %d handling stop replica (delete=%s) for partition [%s,%d]".format(localBrokerId,
       deletePartition.toString, topic, partitionId))
@@ -1071,7 +1071,7 @@ class ReplicaManager(val config: KafkaConfig,
   def checkpointHighWatermarks() {
     // 获取所有在当前broker上的分区
     val replicas = allPartitions.values.flatMap(_.getReplica(config.brokerId))
-    // 过滤出log对象不为空的副本，也就是leader，然后获取对应的路径
+    // 过滤出log对象不为空的副本，也就是leader，然后在根据Log目录进行分组
     val replicasByDir = replicas.filter(_.log.isDefined).groupBy(_.log.get.dir.getParentFile.getAbsolutePath)
     // 遍历每一个路径
     for ((dir, reps) <- replicasByDir) {

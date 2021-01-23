@@ -614,6 +614,7 @@ class KafkaApis(val requestChannel: RequestChannel,
     else
       offsetTimeArray = new Array[(Long, Long)](segsArray.length)
     // 遍历所有LogSegment的baseOffset记录到offsetTimeArray数组中
+    // 如果有activeSegment，那么就回去对应的LEO
     for (i <- 0 until segsArray.length)
       offsetTimeArray(i) = (segsArray(i).baseOffset, segsArray(i).lastModified)
     if (lastSegmentHasSize)
