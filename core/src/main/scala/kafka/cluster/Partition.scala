@@ -136,7 +136,7 @@ class Partition(val topic: String,// topic
       Some(replica)
   }
 
-  // 如果当前broker是某topic-partition的leader，那么就返回该副本
+  // 如果当前broker是当前Partition对应的topic-partition的leader副本，那么就返回该leader对应的Replica实例
   def leaderReplicaIfLocal(): Option[Replica] = {
     leaderReplicaIdOpt match {
       case Some(leaderReplicaId) =>
@@ -434,21 +434,22 @@ class Partition(val topic: String,// topic
     val leaderHWIncremented = inWriteLock(leaderIsrUpdateLock) {
       // 先检查当前的broker是否为topic-partition的leader replica
       leaderReplicaIfLocal() match {
+        // 是
         case Some(leaderReplica) =>
           // 从ISR列表过滤滞后的replicas
           val outOfSyncReplicas = getOutOfSyncReplicas(leaderReplica, replicaMaxLagTimeMs)
           if(outOfSyncReplicas.size > 0) {
-            // 获取新的ISR列表
+            // 计算新的ISR列表
             val newInSyncReplicas = inSyncReplicas -- outOfSyncReplicas
             assert(newInSyncReplicas.size > 0)
             info("Shrinking ISR for partition [%s,%d] from %s to %s".format(topic, partitionId,
               inSyncReplicas.map(_.brokerId).mkString(","), newInSyncReplicas.map(_.brokerId).mkString(",")))
             // update ISR in zk and in cache
-            // 替换本地ISR列表并更新到zk：/brokers/topics/{topic}/partitions/{partitionId}/state路径下数据 触发相关事件
+            // 替换本地ISR列表并更新到zk：/brokers/topics/{topic}/partitions/{partitionId}/state路径下触发相关事件
             updateIsr(newInSyncReplicas)
             // we may need to increment high watermark since ISR could be down to 1
             replicaManager.isrShrinkRate.mark()
-            // 由于删除了之后的replicas所以这里判断一下是否需要更新topic-partition的HW
+            // 由于删除了滞后的replicas所以这里判断一下是否需要更新topic-partition的leader副本的HW
             maybeIncrementLeaderHW(leaderReplica)
           } else {
             false
@@ -480,9 +481,9 @@ class Partition(val topic: String,// topic
      **/
       // 获取leader的LEO
     val leaderLogEndOffset = leaderReplica.logEndOffset
-    // 获取ISR列表中剔除leader副本之后的集合
+    // 获取ISR列表中除去leader副本之后的集合
     val candidateReplicas = inSyncReplicas - leaderReplica
-    // 遍历candidateReplicas集合，通过条件：当前时间 - lastCaughtUpTimeMs > replicaMaxLagTimeMs
+    // 遍历candidateReplicas集合，通过条件：当前时间 - r.lastCaughtUpTimeMs > replicaMaxLagTimeMs
     // 过滤出滞后的replicas
     val laggingReplicas = candidateReplicas.filter(r => (time.milliseconds - r.lastCaughtUpTimeMs) > maxLagMs)
     if(laggingReplicas.size > 0)
