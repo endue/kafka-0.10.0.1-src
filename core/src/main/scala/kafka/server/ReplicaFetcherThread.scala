@@ -179,15 +179,14 @@ class ReplicaFetcherThread(name: String,
      *
      * There is a potential for a mismatch between the logs of the two replicas here. We don't fix this mismatch as of now.
      */
-      // 获取leader副本最新的offset也就是LEO，注意参数
+      // 获取leader副本上一定范围内LogSegment中最大的baseOffset
     val leaderEndOffset: Long = earliestOrLatestOffset(topicAndPartition, ListOffsetRequest.LATEST_TIMESTAMP,
       brokerConfig.brokerId)
-    // 如果leader的LEO比当前副本的LEO还要小
+    // 如果获取的leaderEndOffset比当前副本的LEO还要小
     if (leaderEndOffset < replica.logEndOffset.messageOffset) {
       // Prior to truncating the follower's log, ensure that doing so is not disallowed by the configuration for unclean leader election.
       // This situation could only happen if the unclean election configuration for a topic changes while a replica is down. Otherwise,
       // we should never encounter this situation since a non-ISR leader cannot be elected if disallowed by the broker configuration.
-      //
       if (!LogConfig.fromProps(brokerConfig.originals, AdminUtils.fetchEntityConfig(replicaMgr.zkUtils,
         ConfigType.Topic, topicAndPartition.topic)).uncleanLeaderElectionEnable) {
         // Log a fatal error and shutdown the broker to ensure that data loss does not unexpectedly occur.
@@ -225,7 +224,7 @@ class ReplicaFetcherThread(name: String,
        * and the current leader's log start offset.
        *
        */
-        // 获取leader副本最早的offset，注意参数
+        // 获取leader副本上对应topic-partition的第一个LogSegment的baseOffset
       val leaderStartOffset: Long = earliestOrLatestOffset(topicAndPartition, ListOffsetRequest.EARLIEST_TIMESTAMP,
         brokerConfig.brokerId)
       warn("Replica %d for partition %s reset its fetch offset from %d to current leader %d's start offset %d"
@@ -233,7 +232,7 @@ class ReplicaFetcherThread(name: String,
       // 计算当前副本fetch请求的起始offset
       val offsetToFetch = Math.max(leaderStartOffset, replica.logEndOffset.messageOffset)
       // Only truncate log when current leader's log start offset is greater than follower's log end offset.
-      // leader副本的LEO大于当前副本的LEO，清空本地的log数据，从leaderStartOffset开始拉取数据
+      // leaderStartOffset大于当前副本的LEO，清空本地的log数据，从leaderStartOffset开始拉取数据
       if (leaderStartOffset > replica.logEndOffset.messageOffset)
         replicaMgr.logManager.truncateFullyAndStartAt(topicAndPartition, leaderStartOffset)
       offsetToFetch
@@ -288,7 +287,7 @@ class ReplicaFetcherThread(name: String,
 
   }
 
-  // 获取offset
+  // 获取leader副本上一定范围内所有LogSegment中最大的那个的baseOffset
   private def earliestOrLatestOffset(topicAndPartition: TopicAndPartition, earliestOrLatest: Long, consumerId: Int): Long = {
     val topicPartition = new TopicPartition(topicAndPartition.topic, topicAndPartition.partition)
     val partitions = Map(
@@ -299,9 +298,11 @@ class ReplicaFetcherThread(name: String,
     // 发送LIST_OFFSETS请求并等待响应
     val clientResponse = sendRequest(ApiKeys.LIST_OFFSETS, None, request)
     val response = new ListOffsetResponse(clientResponse.responseBody)
-    // 获取当前topic-partition的offset
+    // 获取leader上当前topic-partition的一定范围内所有LogSegment的baseOffset
+    // 是从大到下排列的
     val partitionData = response.responseData.get(topicPartition)
     Errors.forCode(partitionData.errorCode) match {
+        // 获取最大的LogSegment的baseOffset
       case Errors.NONE => partitionData.offsets.asScala.head
       case errorCode => throw errorCode.exception
     }

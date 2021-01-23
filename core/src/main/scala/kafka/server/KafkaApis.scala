@@ -130,11 +130,13 @@ class KafkaApis(val requestChannel: RequestChannel,
         // for each new leader or follower, call coordinator to handle consumer group migration.
         // this callback is invoked under the replica state change lock to ensure proper order of
         // leadership changes
+        // 处理当前broker成为leader副本的topic-partition
         // __consumer_offset 是 leader 的情况，读取相应 group 的 offset 信息
         updatedLeaders.foreach { partition =>
           if (partition.topic == TopicConstants.GROUP_METADATA_TOPIC_NAME)
             coordinator.handleGroupImmigration(partition.partitionId)
         }
+        // 处理当前broker成为follower副本的topic-partition
         // __consumer_offset 是 follower 的情况，如果之前是 leader，那么移除这个 partition 对应的信息
         updatedFollowers.foreach { partition =>
           if (partition.topic == TopicConstants.GROUP_METADATA_TOPIC_NAME)
@@ -600,25 +602,35 @@ class KafkaApis(val requestChannel: RequestChannel,
   }
 
   private[server] def fetchOffsetsBefore(log: Log, timestamp: Long, maxNumOffsets: Int): Seq[Long] = {
+    // 获取所有的LogSegment
     val segsArray = log.logSegments.toArray
+    // 初始化offsetTimeArray长度
     var offsetTimeArray: Array[(Long, Long)] = null
+    // 最后一条LogSegment很可能此时是activeSegment
+    // 所以如果activeSegment有数据就包含在内，否则不处理
     val lastSegmentHasSize = segsArray.last.size > 0
     if (lastSegmentHasSize)
       offsetTimeArray = new Array[(Long, Long)](segsArray.length + 1)
     else
       offsetTimeArray = new Array[(Long, Long)](segsArray.length)
-
+    // 遍历所有LogSegment的baseOffset记录到offsetTimeArray数组中
     for (i <- 0 until segsArray.length)
       offsetTimeArray(i) = (segsArray(i).baseOffset, segsArray(i).lastModified)
     if (lastSegmentHasSize)
       offsetTimeArray(segsArray.length) = (log.logEndOffset, SystemTime.milliseconds)
 
     var startIndex = -1
+    // 判断请求的类型
     timestamp match {
+        // 如果是获取最大的offset
       case ListOffsetRequest.LATEST_TIMESTAMP =>
+        // 返回最后一个LogSegment的数组下标
         startIndex = offsetTimeArray.length - 1
+      // 如果是获取最小的offset
       case ListOffsetRequest.EARLIEST_TIMESTAMP =>
+        // 返回第一个LogSegment的数组下标
         startIndex = 0
+      // 如果没找到继续遍历，直到offsetTimeArray中存储的时间小于参数timestamp
       case _ =>
         var isFound = false
         debug("Offset time array = " + offsetTimeArray.foreach(o => "%d, %d".format(o._1, o._2)))
@@ -630,8 +642,9 @@ class KafkaApis(val requestChannel: RequestChannel,
             startIndex -= 1
         }
     }
-
+    // 计算下标
     val retSize = maxNumOffsets.min(startIndex + 1)
+    // 返回下标retSize到0的retSize-1的所有LogSegment的baseOffset
     val ret = new Array[Long](retSize)
     for (j <- 0 until retSize) {
       ret(j) = offsetTimeArray(startIndex)._1
