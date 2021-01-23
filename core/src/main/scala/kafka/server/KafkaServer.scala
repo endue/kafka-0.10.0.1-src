@@ -123,7 +123,7 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePr
   // 日志管理组件
   var logManager: LogManager = null
 
-  var replicaManager:  = null
+  var replicaManager: ReplicaManager = null
 
   var dynamicConfigHandlers: Map[String, ConfigHandler] = null
   var dynamicConfigManager: DynamicConfigManager = null
