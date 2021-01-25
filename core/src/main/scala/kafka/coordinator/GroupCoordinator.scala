@@ -46,6 +46,15 @@ case class JoinGroupResult(members: Map[String, Array[Byte]],
  *
  * Each Kafka server instantiates a coordinator which is responsible for a set of
  * groups. Groups are assigned to coordinators based on their group names.
+  * 处理以下请求：
+  * ApiKeys.OFFSET_COMMIT;
+  * ApiKeys.OFFSET_FETCH;
+  * ApiKeys.JOIN_GROUP;
+  * ApiKeys.LEAVE_GROUP;
+  * ApiKeys.SYNC_GROUP;
+  * ApiKeys.DESCRIBE_GROUPS;
+  * ApiKeys.LIST_GROUPS;
+  * ApiKeys.HEARTBEAT;
  */
 class GroupCoordinator(val brokerId: Int,
                        val groupConfig: GroupConfig,
@@ -59,6 +68,7 @@ class GroupCoordinator(val brokerId: Int,
 
   this.logIdent = "[GroupCoordinator " + brokerId + "]: "
 
+  // GroupCoordinator状态标识符
   private val isActive = new AtomicBoolean(false)
 
   def offsetsTopicConfigs: Properties = {
@@ -755,6 +765,7 @@ class GroupCoordinator(val brokerId: Int,
 
   private def isCoordinatorLoadingInProgress(groupId: String) = groupManager.isGroupLoading(groupId)
 }
+
 
 object GroupCoordinator {
 
