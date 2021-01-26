@@ -96,11 +96,12 @@ public abstract class AbstractCoordinator implements Closeable {
 
     private boolean needsJoinPrepare = true;
     private boolean rejoinNeeded = true;
-    // GroupCoordinator
+    // 当前启动consumer的GroupCoordinator节点
     protected Node coordinator;
     // 成员ID，默认UNKNOWN_MEMBER_ID
     protected String memberId;
     protected String protocol;
+    //
     protected int generation;
 
     /**
@@ -179,15 +180,15 @@ public abstract class AbstractCoordinator implements Closeable {
 
     /**
      * Block until the coordinator for this group is known and is ready to receive requests.
-     * 阻塞操作，等待获取一个Coordinator并可用
+     * 阻塞操作，等待获取到一个可用的Coordinator
      */
     public void ensureCoordinatorReady() {
         // while循环直到Coordinator可用
         while (coordinatorUnknown()) {
             // 发送“GROUP_COORDINATOR”消息到配置的“bootstrap.servers”上的任一节点
-            // 返回一个异步请求结果
+            // 返回一个异步请求结果,(实际只是将请求记录到了unsent集合中)
             RequestFuture<Void> future = sendGroupCoordinatorRequest();
-            // 阻塞直到future执行完毕
+            // 将unset集合中的请求发送出去，然后阻塞直到future执行完毕
             client.poll(future);
             // 判断异步请求结果是否成功
 
@@ -283,15 +284,17 @@ public abstract class AbstractCoordinator implements Closeable {
      * 心跳任务
      */
     private class HeartbeatTask implements DelayedTask {
-
+        // 标记是否有正在发生的心跳任务
         private boolean requestInFlight = false;
 
+        // 重置心跳任务
         public void reset() {
             // start or restart the heartbeat task to be executed at the next chance
             long now = time.milliseconds();
             heartbeat.resetSessionTimeout(now);
+            // 删除任务队列中记录的当前任务
             client.unschedule(this);
-
+            // 如果没有正在发生的心跳任务，那么立即发生一个
             if (!requestInFlight)
                 client.schedule(this, now);
         }
@@ -492,8 +495,11 @@ public abstract class AbstractCoordinator implements Closeable {
      * Discover the current coordinator for the group. Sends a GroupMetadata request to
      * one of the brokers. The returned future should be polled to get the result of the request.
      * @return A request future which indicates the completion of the metadata request
-     * 发送获取Coordinator请求
      */
+    // 发送GroupCoordinator
+    // 每个ConsumerGroup都有其对应的GroupCoordinator，但具体是由哪个GroupCoordinator来负责这与group.id的hash值有关，
+    // 通过这个abs(GroupId.hashCode()) % NumPartitions来计算出一个值(其中，NumPartitions 是 __consumer_offsets 的 partition 数，默认是50个)，
+    // 这个值代表了__consumer_offsets的一个partition，而这个partition的leader即为这个ConsumerGroup要交互的GroupCoordinator所在的节点
     private RequestFuture<Void> sendGroupCoordinatorRequest() {
         // initiate the group metadata request
         // find a node to ask about the coordinator
@@ -507,9 +513,9 @@ public abstract class AbstractCoordinator implements Closeable {
         } else {
             // create a group  metadata request
             log.debug("Sending coordinator request for group {} to broker {}", groupId, node);
-            // 发送GROUP_COORDINATOR请求
+            // 构建GROUP_COORDINATOR请求
             GroupCoordinatorRequest metadataRequest = new GroupCoordinatorRequest(this.groupId);
-            // 发送请求
+            // 发送请求(实际只是将请求记录到了unsent集合中)
             return client.send(node, ApiKeys.GROUP_COORDINATOR, metadataRequest)
                     .compose(new RequestFutureAdapter<ClientResponse, Void>() {
                         @Override
@@ -534,6 +540,7 @@ public abstract class AbstractCoordinator implements Closeable {
             future.complete(null);
         // 处理CoordinatorResponse
         } else {
+            // 获取响应
             GroupCoordinatorResponse groupCoordinatorResponse = new GroupCoordinatorResponse(resp.responseBody());
             // use MAX_VALUE - node.id as the coordinator id to mimic separate connections
             // for the coordinator in the underlying network client layer
@@ -553,7 +560,7 @@ public abstract class AbstractCoordinator implements Closeable {
                 // start sending heartbeats only if we have a valid generation
                 // 判断是否为有效的"代"
                 if (generation > 0)
-                    // 重置心跳任务
+                    // 重置心跳任务并立即发生一个心跳
                     heartbeatTask.reset();
                 future.complete(null);
             } else if (error == Errors.GROUP_AUTHORIZATION_FAILED) {
@@ -568,13 +575,15 @@ public abstract class AbstractCoordinator implements Closeable {
      * Check if we know who the coordinator is and we have an active connection
      * @return true if the coordinator is unknown
      * 判断GroupCoordinator是否已知
+     * 返回ture表示GroupCoordinator还需要未知状态
      */
     public boolean coordinatorUnknown() {
         // GroupCoordinator还未创建
         if (coordinator == null)
             return true;
-        // GroupCoordinator状态为DISCONNECTED的
+        // GroupCoordinator不为null但是状态为DISCONNECTED的
         if (client.connectionFailed(coordinator)) {
+            // 针对GroupCoordinator已经无法访问的状态进行一些操作
             coordinatorDead();
             return true;
         }

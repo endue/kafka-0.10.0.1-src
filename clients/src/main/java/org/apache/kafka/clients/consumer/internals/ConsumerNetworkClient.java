@@ -47,7 +47,7 @@ public class ConsumerNetworkClient implements Closeable {
     // 通信组件
     private final KafkaClient client;
     private final AtomicBoolean wakeup = new AtomicBoolean(false);
-    // 调度任务
+    // 延迟任务队列
     private final DelayedTaskQueue delayedTasks = new DelayedTaskQueue();
     // 记录node和对应要发送的消息
     private final Map<Node, List<ClientRequest>> unsent = new HashMap<>();
@@ -104,7 +104,7 @@ public class ConsumerNetworkClient implements Closeable {
      * @param api The Kafka API call
      * @param request The request payload
      * @return A future which indicates the result of the send.
-     * 发送一个请求，但是请求并没有被时间发送而是等待poll()操作
+     * 发送一个请求，但是请求并没有被发送出去，而是保持到了unsent集合中而是等待poll()操作
      */
     public RequestFuture<ClientResponse> send(Node node,
                                               ApiKeys api,
@@ -168,8 +168,10 @@ public class ConsumerNetworkClient implements Closeable {
      * Block indefinitely until the given request future has finished.
      * @param future The request future to await.
      * @throws WakeupException if {@link #wakeup()} is called from another thread
+     * 无限期地阻塞，直到给定的请求future完成
      */
     public void poll(RequestFuture<?> future) {
+        // future为完成
         while (!future.isDone())
             poll(Long.MAX_VALUE);
     }
@@ -227,11 +229,13 @@ public class ConsumerNetworkClient implements Closeable {
 
     private void poll(long timeout, long now, boolean executeDelayedTasks) {
         // send all the requests we can send now
-        // 发送消息只是缓存到对应kafkachannel中
+        // 发送unsent集合中的消息，但是只是缓存到对应kafkachannel中
         trySend(now);
 
         // ensure we don't poll any longer than the deadline for
         // the next scheduled task
+        // 计算延迟任务队列中最近一个要处理的任务还需多久执行
+        // 防止参数timeout的实际超过任务的实际，导致任务没有执行
         timeout = Math.min(timeout, delayedTasks.nextTimeout(now));
         // 真正的发送消息以及处理响应
         clientPoll(timeout, now);
@@ -315,13 +319,15 @@ public class ConsumerNetworkClient implements Closeable {
         Iterator<Map.Entry<Node, List<ClientRequest>>> iterator = unsent.entrySet().iterator();
         while (iterator.hasNext()) {
             Map.Entry<Node, List<ClientRequest>> requestEntry = iterator.next();
+            // 获取消息要发往的节点
             Node node = requestEntry.getKey();
             // 如果消息发送节点已经断开连接
             if (client.connectionFailed(node)) {
                 // Remove entry before invoking request callback to avoid callbacks handling
                 // coordinator failures traversing the unsent list again.
+                // 删除这条消息
                 iterator.remove();
-                // 遍历消息执行回调对应handler.onComplete()方法
+                // 遍历消息执行回调对应的handler.onComplete()方法
                 for (ClientRequest request : requestEntry.getValue()) {
                     RequestFutureCompletionHandler handler =
                             (RequestFutureCompletionHandler) request.callback();
@@ -399,6 +405,7 @@ public class ConsumerNetworkClient implements Closeable {
 
     private void clientPoll(long timeout, long now) {
         client.poll(timeout, now);
+        // todo? 这里是什么意思
         maybeTriggerWakeup();
     }
 

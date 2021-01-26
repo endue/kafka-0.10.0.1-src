@@ -1004,9 +1004,19 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
      * @param timeout The maximum time to block in the unpollderlying
      * @return The fetched records (may be empty)
      */
+    // 真正拉取消息的方法
+    // 每一次poll操作,会包括检查新的数据、做一些必要的心跳、自动commit以及offset更新操作，整体分为8步：
+    // 1.与Coordinator建立连接
+    // 2.获取负责topic的分区
+    // 3.更新偏移量
+    // 4.做自动提交或心跳等任务
+    // 5.调用fetchedRecords()获取拉取的数据，如果有，就立马返回，没有的话继续下面的操作
+    // 6.调用sendFetches()发送fetch请求(请求并未真正发送)
+    // 7.调用poll()发送请求
+    // 8.调用fetchedRecords()获取拉取的数据
     private Map<TopicPartition, List<ConsumerRecord<K, V>>> pollOnce(long timeout) {
         // TODO: Sub-requests should take into account the poll timeout (KAFKA-1894)
-        // 确保broker集群中有可用的Coordinator并获取一个Coordinator
+        // 确保broker集群中有可用的Coordinator
         // 然后与Coordinator建立连接，接下来就要申请加入组
         coordinator.ensureCoordinatorReady();
 
@@ -1037,7 +1047,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
         // then just return it immediately
         if (!records.isEmpty())
             return records;
-        // 发送fetch请求
+        // 如果上传fetch到的数据已经全部拉取完毕，那么本次poll需要再次发送fetch请求
         fetcher.sendFetches();
         client.poll(timeout, now);
         return fetcher.fetchedRecords();

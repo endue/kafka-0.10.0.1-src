@@ -21,6 +21,7 @@ public final class Heartbeat {
 
     private long lastHeartbeatSend;
     private long lastHeartbeatReceive;
+    // 最近一次session重置时间戳
     private long lastSessionReset;
 
     public Heartbeat(long timeout,
