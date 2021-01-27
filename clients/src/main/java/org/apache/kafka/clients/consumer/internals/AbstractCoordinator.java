@@ -229,13 +229,14 @@ public abstract class AbstractCoordinator implements Closeable {
         if (!needRejoin())
             return;
 
-        //
+        //  触发 onJoinPrepare, 包括 offset commit 和 rebalance listener
         if (needsJoinPrepare) {
             onJoinPrepare(generation, memberId);
             needsJoinPrepare = false;
         }
 
         while (needRejoin()) {
+            // 确保 GroupCoordinator 已经连接
             ensureCoordinatorReady();
 
             // ensure that there are no pending requests to the coordinator. This is important
@@ -367,7 +368,7 @@ public abstract class AbstractCoordinator implements Closeable {
                 .compose(new JoinGroupResponseHandler());
     }
 
-
+    // 处理JOIN_GROUP的响应消息
     private class JoinGroupResponseHandler extends CoordinatorResponseHandler<JoinGroupResponse, ByteBuffer> {
 
         @Override
@@ -445,6 +446,7 @@ public abstract class AbstractCoordinator implements Closeable {
         }
     }
 
+    // 发送SYNC_GROUP
     private RequestFuture<ByteBuffer> sendSyncGroupRequest(SyncGroupRequest request) {
         if (coordinatorUnknown())
             return RequestFuture.coordinatorNotAvailable();
@@ -452,6 +454,7 @@ public abstract class AbstractCoordinator implements Closeable {
                 .compose(new SyncGroupResponseHandler());
     }
 
+    // 处理SYNC_GROUP响应
     private class SyncGroupResponseHandler extends CoordinatorResponseHandler<SyncGroupResponse, ByteBuffer> {
 
         @Override
