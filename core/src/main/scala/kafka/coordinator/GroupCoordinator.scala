@@ -160,14 +160,6 @@ class GroupCoordinator(val brokerId: Int,
 
   /**
     * 加入组
-    * @param group
-    * @param memberId
-    * @param clientId
-    * @param clientHost
-    * @param sessionTimeoutMs
-    * @param protocolType
-    * @param protocols
-    * @param responseCallback
     */
   private def doJoinGroup(group: GroupMetadata,
                           memberId: String,
@@ -195,14 +187,17 @@ class GroupCoordinator(val brokerId: Int,
             responseCallback(joinError(memberId, Errors.UNKNOWN_MEMBER_ID.code))
           // 当组准备Rebalance时的状态，当重平衡后组的状态该为AwaitingSync
           case PreparingRebalance =>
+            // 如果成员ID为UNKNOWN_MEMBER_ID，加入组
             if (memberId == JoinGroupRequest.UNKNOWN_MEMBER_ID) {
               addMemberAndRebalance(sessionTimeoutMs, clientId, clientHost, protocols, group, responseCallback)
             } else {
+              // 如果成员ID不为UNKNOWN_MEMBER_ID，更新组
               val member = group.get(memberId)
               updateMemberAndRebalance(group, member, protocols, responseCallback)
             }
-
+          // 当重平衡后组的状态为AwaitingSync
           case AwaitingSync =>
+            // 如果成员ID为UNKNOWN_MEMBER_ID，加入组
             if (memberId == JoinGroupRequest.UNKNOWN_MEMBER_ID) {
               addMemberAndRebalance(sessionTimeoutMs, clientId, clientHost, protocols, group, responseCallback)
             } else {
@@ -231,7 +226,8 @@ class GroupCoordinator(val brokerId: Int,
             // 第一个加入组的线程走这里，然后将组状态改为PreparingRebalance
           case Stable =>
             if (memberId == JoinGroupRequest.UNKNOWN_MEMBER_ID) {
-              // if the member id is unknown, register the member to the group
+              // if the member id is unknown, register the member to the group、
+              // 如果成员ID为UNKNOWN_MEMBER_ID，那么将成员加入组
               addMemberAndRebalance(sessionTimeoutMs, clientId, clientHost, protocols, group, responseCallback)
             } else {
               val member = group.get(memberId)
@@ -616,6 +612,7 @@ class GroupCoordinator(val brokerId: Int,
     heartbeatPurgatory.checkAndComplete(memberKey)
   }
 
+  // 将成员加入组并执行Rebalance
   private def addMemberAndRebalance(sessionTimeoutMs: Int,
                                     clientId: String,
                                     clientHost: String,
@@ -623,6 +620,7 @@ class GroupCoordinator(val brokerId: Int,
                                     group: GroupMetadata,
                                     callback: JoinCallback) = {
     // use the client-id with a random id suffix as the member-id
+    // 生成memeberId，等待返回给consumer等
     val memberId = clientId + "-" + group.generateMemberIdSuffix
     val member = new MemberMetadata(memberId, group.groupId, clientId, clientHost, sessionTimeoutMs, protocols)
     member.awaitingJoinCallback = callback
@@ -633,6 +631,7 @@ class GroupCoordinator(val brokerId: Int,
     member
   }
 
+  // 更新组成员并执行Rebalance
   private def updateMemberAndRebalance(group: GroupMetadata,
                                        member: MemberMetadata,
                                        protocols: List[(String, Array[Byte])],
@@ -642,6 +641,7 @@ class GroupCoordinator(val brokerId: Int,
     maybePrepareRebalance(group)
   }
 
+  // 尝试准备执行Rebalance
   private def maybePrepareRebalance(group: GroupMetadata) {
     group synchronized {
       if (group.canRebalance)
@@ -649,8 +649,10 @@ class GroupCoordinator(val brokerId: Int,
     }
   }
 
+  // 准备执行Rebalance
   private def prepareRebalance(group: GroupMetadata) {
     // if any members are awaiting sync, cancel their request and have them rejoin
+    // 如果当前组的状态已经为AwaitingSync，那么返回当前请求给consumer让其重新发送rejoin
     if (group.is(AwaitingSync))
       resetAndPropagateAssignmentError(group, Errors.REBALANCE_IN_PROGRESS.code)
     // 修改group状态为PreparingRebalance
@@ -658,6 +660,7 @@ class GroupCoordinator(val brokerId: Int,
     info("Preparing to restabilize group %s with old generation %s".format(group.groupId, group.generationId))
     // rebalance超时时间
     val rebalanceTimeout = group.rebalanceTimeout
+    // 封装一个延迟任务，在任务执行前，等待其他组成员的加入，到时后执行tryCompleteJoin() --> onCompleteJoin()
     val delayedRebalance = new DelayedJoin(this, group, rebalanceTimeout)
     val groupKey = GroupKey(group.groupId)
     joinPurgatory.tryCompleteElseWatch(delayedRebalance, Seq(groupKey))
@@ -673,6 +676,7 @@ class GroupCoordinator(val brokerId: Int,
     }
   }
 
+  // 执行
   def tryCompleteJoin(group: GroupMetadata, forceComplete: () => Boolean) = {
     group synchronized {
       if (group.notYetRejoinedMembers.isEmpty)
@@ -686,12 +690,12 @@ class GroupCoordinator(val brokerId: Int,
   }
 
   /**
-    * 重平衡后调用该方法
-    * @param group
+    * 成员加入组或重平衡后
     */
   def onCompleteJoin(group: GroupMetadata) {
     group synchronized {
       val failedMembers = group.notYetRejoinedMembers
+      // 移除加入失败的成员
       if (group.isEmpty || !failedMembers.isEmpty) {
         failedMembers.foreach { failedMember =>
           group.remove(failedMember.memberId)
@@ -699,6 +703,7 @@ class GroupCoordinator(val brokerId: Int,
         }
 
         // TODO KAFKA-2720: only remove group in the background thread
+        // 如果组为空，那么移除这个无效的组
         if (group.isEmpty) {
           group.transitionTo(Dead)
           groupManager.removeGroup(group)

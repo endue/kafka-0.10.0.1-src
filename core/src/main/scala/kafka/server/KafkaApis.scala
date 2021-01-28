@@ -974,7 +974,7 @@ class KafkaApis(val requestChannel: RequestChannel,
     import JavaConversions._
 
     val syncGroupRequest = request.body.asInstanceOf[SyncGroupRequest]
-
+    // 回调方法用来发送响应
     def sendResponseCallback(memberState: Array[Byte], errorCode: Short) {
       val responseBody = new SyncGroupResponse(errorCode, ByteBuffer.wrap(memberState))
       val responseHeader = new ResponseHeader(request.header.correlationId)

@@ -185,6 +185,7 @@ public class SubscriptionState {
         this.groupSubscription.addAll(topics);
     }
 
+    // 需要重新一次assign
     public void needReassignment() {
         this.groupSubscription.retainAll(subscription);
         this.needsPartitionAssignment = true;

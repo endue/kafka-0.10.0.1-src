@@ -100,6 +100,7 @@ public abstract class AbstractCoordinator implements Closeable {
     protected Node coordinator;
     // 成员ID，默认UNKNOWN_MEMBER_ID
     protected String memberId;
+    //
     protected String protocol;
     //
     protected int generation;
@@ -225,23 +226,25 @@ public abstract class AbstractCoordinator implements Closeable {
      * 确保group是可用的
      */
     public void ensureActiveGroup() {
-        // 是否需要重写加入组
+        // 是否需要重新加入组
         if (!needRejoin())
             return;
 
-        //  触发 onJoinPrepare, 包括 offset commit 和 rebalance listener
+        //  触发onJoinPrepare, 包括offset commit 和rebalance listener
         if (needsJoinPrepare) {
             onJoinPrepare(generation, memberId);
             needsJoinPrepare = false;
         }
 
+        // 再次判断是否需要重新加入组
         while (needRejoin()) {
-            // 确保 GroupCoordinator 已经连接
+            // 确保GroupCoordinator已经连接
             ensureCoordinatorReady();
 
             // ensure that there are no pending requests to the coordinator. This is important
             // in particular to avoid resending a pending JoinGroup request.
             // 如果对当前coordinator有未发送的消息则等待消息发送完毕
+            // 避免重新发起JoinGroup请求
             if (client.pendingRequestCount(this.coordinator) > 0) {
                 client.awaitPendingRequests(this.coordinator);
                 continue;
@@ -454,7 +457,7 @@ public abstract class AbstractCoordinator implements Closeable {
                 .compose(new SyncGroupResponseHandler());
     }
 
-    // 处理SYNC_GROUP响应
+    // 处理SYNC_GROUP的响应消息
     private class SyncGroupResponseHandler extends CoordinatorResponseHandler<SyncGroupResponse, ByteBuffer> {
 
         @Override
@@ -531,13 +534,11 @@ public abstract class AbstractCoordinator implements Closeable {
     }
 
     /**
-     * 处理GroupMetadataResponse
-     * @param resp
-     * @param future
+     * 处理GROUP_COORDINATOR的响应消息
      */
     private void handleGroupMetadataResponse(ClientResponse resp, RequestFuture<Void> future) {
         log.debug("Received group coordinator response {}", resp);
-        // 如果已经获取了Coordinator则忽略本次的信息
+        // 如果已经存在Coordinator则忽略本次的信息
         if (!coordinatorUnknown()) {
             // We already found the coordinator, so ignore the request
             future.complete(null);

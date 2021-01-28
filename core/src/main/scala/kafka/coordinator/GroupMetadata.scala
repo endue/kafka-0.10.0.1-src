@@ -121,7 +121,7 @@ case class GroupSummary(state: String,
  */
 @nonthreadsafe
 private[coordinator] class GroupMetadata(val groupId: String, val protocolType: String) {
-
+  // 记录当前组左右的成员
   private val members = new mutable.HashMap[String, MemberMetadata]
   private var state: GroupState = Stable
   var generationId = 0
