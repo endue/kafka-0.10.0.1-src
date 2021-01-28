@@ -183,7 +183,7 @@ public abstract class AbstractCoordinator implements Closeable {
      * 阻塞操作，等待获取到一个可用的Coordinator
      */
     public void ensureCoordinatorReady() {
-        // while循环直到Coordinator可用
+        // while循环直到GroupCoordinator可用
         while (coordinatorUnknown()) {
             // 发送“GROUP_COORDINATOR”消息到配置的“bootstrap.servers”上的任一节点
             // 返回一个异步请求结果,(实际只是将请求记录到了unsent集合中)
@@ -226,6 +226,7 @@ public abstract class AbstractCoordinator implements Closeable {
      */
     public void ensureActiveGroup() {
         // 是否需要重写加入组
+        // 当consumer首次启动或者加入组失败、或离开当前组等等情况下该方法返回true
         if (!needRejoin())
             return;
 
@@ -359,7 +360,7 @@ public abstract class AbstractCoordinator implements Closeable {
                 groupId,
                 this.sessionTimeoutMs,
                 this.memberId,
-                protocolType(),
+                protocolType(),// consumer、dummy、connect
                 metadata());
 
         log.debug("Sending JoinGroup ({}) to coordinator {}", request, this.coordinator);

@@ -305,6 +305,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
     @Override
     protected void onJoinPrepare(int generation, String memberId) {
         // commit offsets prior to rebalance if auto-commit enabled
+        // 提交offset到集群
         maybeAutoCommitOffsetsSync();
 
         // execute the user's callback before rebalance
