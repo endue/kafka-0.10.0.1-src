@@ -62,7 +62,7 @@ import java.util.Set;
 public final class ConsumerCoordinator extends AbstractCoordinator {
 
     private static final Logger log = LoggerFactory.getLogger(ConsumerCoordinator.class);
-    // 分区策略
+    // 分区分配策略
     private final List<PartitionAssignor> assignors;
     private final Metadata metadata;
     private final ConsumerCoordinatorMetrics sensors;
@@ -131,6 +131,8 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
         this.excludeInternalTopics = excludeInternalTopics;
     }
 
+    // 获取协议类型，
+    // 返回 consumer
     @Override
     public String protocolType() {
         return ConsumerProtocol.PROTOCOL_TYPE;
@@ -140,8 +142,11 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
     public List<ProtocolMetadata> metadata() {
         List<ProtocolMetadata> metadataList = new ArrayList<>();
         for (PartitionAssignor assignor : assignors) {
+            // 这里的Subscription中“userData”为空
             Subscription subscription = assignor.subscription(subscriptions.subscription());
+            // 序列化Subscription
             ByteBuffer metadata = ConsumerProtocol.serializeSubscription(subscription);
+            // 在封装为一个ProtocolMetadata，其中name为assignor.name()、metadata为Subscription
             metadataList.add(new ProtocolMetadata(assignor.name(), metadata));
         }
         return metadataList;
@@ -200,12 +205,13 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
         return null;
     }
 
-    // 处理完成加入Group后的操作
+    // 处理SYNC_GROUP后GroupCoordinator的响应
+    // 也就是获取topic的分配结果
     @Override
     protected void onJoinComplete(int generation,
                                   String memberId,
-                                  String assignmentStrategy,
-                                  ByteBuffer assignmentBuffer) {
+                                  String assignmentStrategy,// 分配策略
+                                  ByteBuffer assignmentBuffer) {// 分配结果
         // if we were the assignor, then we need to make sure that there have been no metadata updates
         // since the rebalance begin. Otherwise, we won't rebalance again until the next metadata change
         if (assignmentSnapshot != null && !assignmentSnapshot.equals(metadataSnapshot)) {
@@ -216,7 +222,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
         PartitionAssignor assignor = lookupAssignor(assignmentStrategy);
         if (assignor == null)
             throw new IllegalStateException("Coordinator selected invalid assignment protocol: " + assignmentStrategy);
-
+        // 解析分配结果
         Assignment assignment = ConsumerProtocol.deserializeAssignment(assignmentBuffer);
 
         // set the flag to refresh last committed offsets
@@ -234,6 +240,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
             autoCommitTask.reschedule();
 
         // execute the user's callback after rebalance
+        // 执行回调
         ConsumerRebalanceListener listener = subscriptions.listener();
         log.info("Setting newly assigned partitions {} for group {}", subscriptions.assignedPartitions(), groupId);
         try {
@@ -288,7 +295,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
         Map<String, Assignment> assignment = assignor.assign(metadata.fetch(), subscriptions);
 
         log.debug("Finished assignment for group {}: {}", groupId, assignment);
-
+        // 封装返回结果
         Map<String, ByteBuffer> groupAssignment = new HashMap<>();
         for (Map.Entry<String, Assignment> assignmentEntry : assignment.entrySet()) {
             ByteBuffer buffer = ConsumerProtocol.serializeAssignment(assignmentEntry.getValue());

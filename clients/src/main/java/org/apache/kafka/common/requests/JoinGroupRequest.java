@@ -35,11 +35,15 @@ public class JoinGroupRequest extends AbstractRequest {
     private static final String PROTOCOL_METADATA_KEY_NAME = "protocol_metadata";
 
     public static final String UNKNOWN_MEMBER_ID = "";
-
+    // 组ID
     private final String groupId;
+    // 超时时间
     private final int sessionTimeout;
+    // 成员ID
     private final String memberId;
+    // 协议类型
     private final String protocolType;
+    // 组协议类型
     private final List<ProtocolMetadata> groupProtocols;
 
     public static class ProtocolMetadata {

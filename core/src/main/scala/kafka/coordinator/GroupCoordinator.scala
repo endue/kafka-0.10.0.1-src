@@ -140,7 +140,7 @@ class GroupCoordinator(val brokerId: Int,
       // only try to create the group if the group is not unknown AND
       // the member id is UNKNOWN, if member is specified but group does not
       // exist we should reject the request
-      // 找到对应的组
+      // 根据组ID找到对应的组
       var group = groupManager.getGroup(groupId)
       if (group == null) {// 组不存在
         if (memberId != JoinGroupRequest.UNKNOWN_MEMBER_ID) {
@@ -711,7 +711,7 @@ class GroupCoordinator(val brokerId: Int,
         }
       }
       if (!group.is(Dead)) {
-        // 获取下一代并修改组状态为AwaitingSync
+        // 获取下一个代并修改组状态为AwaitingSync
         group.initNextGeneration()
         info("Stabilized group %s generation %s".format(group.groupId, group.generationId))
 
@@ -734,6 +734,8 @@ class GroupCoordinator(val brokerId: Int,
 
           member.awaitingJoinCallback(joinResult)
           member.awaitingJoinCallback = null
+          // 回话超时的定时任务
+          // 到时后任务执行，如果没有收到心跳请求，那么就任务回话超时
           completeAndScheduleNextHeartbeatExpiration(group, member)
         }
       }

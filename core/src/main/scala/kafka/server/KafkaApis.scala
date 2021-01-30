@@ -955,6 +955,8 @@ class KafkaApis(val requestChannel: RequestChannel,
       requestChannel.sendResponse(new RequestChannel.Response(request, new ResponseSend(request.connectionId, responseHeader, responseBody)))
     } else {
       // let the coordinator to handle join-group
+      // 获取List<ProtocolMetadata>并转为map
+      // ProtocolMetadata中name为assignor.name()、metadata为Subscription
       val protocols = joinGroupRequest.groupProtocols().map(protocol =>
         (protocol.name, Utils.toArray(protocol.metadata))).toList
       // 处理加入组

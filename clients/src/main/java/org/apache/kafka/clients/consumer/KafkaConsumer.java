@@ -658,6 +658,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
             // 订阅状态
             this.subscriptions = new SubscriptionState(offsetResetStrategy);
             // 分区分配策略，partition.assignment.strategy
+            // 默认RangeAssignor，继承AbstractPartitionAssignor
             List<PartitionAssignor> assignors = config.getConfiguredInstances(
                     ConsumerConfig.PARTITION_ASSIGNMENT_STRATEGY_CONFIG,// 分区策略
                     PartitionAssignor.class);
@@ -1022,12 +1023,13 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
     // 8.调用fetchedRecords()获取拉取的数据
     private Map<TopicPartition, List<ConsumerRecord<K, V>>> pollOnce(long timeout) {
         // TODO: Sub-requests should take into account the poll timeout (KAFKA-1894)
-        // 确保consumer组被分配了GroupCoordinator
-        // 然后与Coordinator建立连接，接下来就要申请加入组
+        // 1.确保consumer与GroupCoordinator建立了连接
+        // 2.如果没有则与GroupCoordinator建立连接，后续还要申请加入组、被分配分区等操作
         coordinator.ensureCoordinatorReady();
 
         // ensure we have partitions assigned if we expect to
         // 判断订阅状态是否自动分配分区
+        // 如果不是用户手动指定topic-partition的分区，那么这里就返回true
         if (subscriptions.partitionsAutoAssigned())
             // 确保被分配了分区
             coordinator.ensurePartitionAssignment();

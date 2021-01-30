@@ -95,15 +95,16 @@ public abstract class AbstractCoordinator implements Closeable {
     protected final long retryBackoffMs;
 
     private boolean needsJoinPrepare = true;
-    // 是否需要重新加入组标识
+    // 标识是否需要重新加入组
+    // 当join group后该值为false
     private boolean rejoinNeeded = true;
     // 当前启动consumer的GroupCoordinator节点
     protected Node coordinator;
-    // 成员ID，默认UNKNOWN_MEMBER_ID
+    // 成员ID，默认UNKNOWN_MEMBER_ID，当join group后该值变有效
     protected String memberId;
-    //
+    // 当join group后返回的协议
     protected String protocol;
-    //
+    // 所属的代
     protected int generation;
 
     /**
@@ -206,7 +207,7 @@ public abstract class AbstractCoordinator implements Closeable {
             } else if (coordinator != null && client.connectionFailed(coordinator)) {
                 // we found the coordinator, but the connection has failed, so mark
                 // it dead and backoff before retrying discovery
-                // 清空coordinator之后睡眠等待重试
+                // 清空GroupCoordinator之后睡眠等待重试
                 coordinatorDead();
                 time.sleep(retryBackoffMs);
             }
@@ -259,7 +260,7 @@ public abstract class AbstractCoordinator implements Closeable {
                 public void onSuccess(ByteBuffer value) {
                     // handle join completion in the callback so that the callback will be invoked
                     // even if the consumer is woken up before finishing the rebalance
-                    // 当joinGroup后的回调方法
+                    // 处理SYNC_GROUP后GroupCoordinator的响应消息
                     onJoinComplete(generation, memberId, protocol, value);
                     needsJoinPrepare = true;
                     heartbeatTask.reset();
@@ -271,6 +272,7 @@ public abstract class AbstractCoordinator implements Closeable {
                     // after having been woken up, the exception is ignored and we will rejoin
                 }
             });
+            // 阻塞等待响应
             client.poll(future);
 
             if (future.failed()) {
@@ -437,12 +439,14 @@ public abstract class AbstractCoordinator implements Closeable {
         return sendSyncGroupRequest(request);
     }
 
+    // 当join group后当前consumer成为leader需要为组成员分配分区
     private RequestFuture<ByteBuffer> onJoinLeader(JoinGroupResponse joinResponse) {
         try {
             // perform the leader synchronization and send back the assignment for the group
+            // 完成任务分配的工作
             Map<String, ByteBuffer> groupAssignment = performAssignment(joinResponse.leaderId(), joinResponse.groupProtocol(),
                     joinResponse.members());
-
+            // 将分配结果发生给GroupCoordinator
             SyncGroupRequest request = new SyncGroupRequest(groupId, generation, memberId, groupAssignment);
             log.debug("Sending leader SyncGroup for group {} to coordinator {}: {}", groupId, this.coordinator, request);
             return sendSyncGroupRequest(request);
@@ -540,7 +544,7 @@ public abstract class AbstractCoordinator implements Closeable {
      */
     private void handleGroupMetadataResponse(ClientResponse resp, RequestFuture<Void> future) {
         log.debug("Received group coordinator response {}", resp);
-        // 如果已经存在Coordinator则忽略本次的信息
+        // 如果已经存在GroupCoordinator则忽略本次的信息
         if (!coordinatorUnknown()) {
             // We already found the coordinator, so ignore the request
             future.complete(null);
@@ -554,13 +558,13 @@ public abstract class AbstractCoordinator implements Closeable {
             Errors error = Errors.forCode(groupCoordinatorResponse.errorCode());
             // 响应没有异常
             if (error == Errors.NONE) {
-                // 构建Coordinator
+                // 构建GroupCoordinator
                 this.coordinator = new Node(Integer.MAX_VALUE - groupCoordinatorResponse.node().id(),
                         groupCoordinatorResponse.node().host(),
                         groupCoordinatorResponse.node().port());
 
                 log.info("Discovered coordinator {} for group {}.", coordinator, groupId);
-                // 尝试与Coordinator建立连接
+                // 尝试与GroupCoordinator建立连接
                 client.tryConnect(coordinator);
 
                 // start sending heartbeats only if we have a valid generation
@@ -599,7 +603,7 @@ public abstract class AbstractCoordinator implements Closeable {
 
     /**
      * Mark the current coordinator as dead.
-     * Coordinator已失效，清空GroupCoordinator
+     * GroupCoordinator已失效，清空GroupCoordinator
      */
     protected void coordinatorDead() {
         if (this.coordinator != null) {

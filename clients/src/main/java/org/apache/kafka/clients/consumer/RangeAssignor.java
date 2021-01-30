@@ -45,6 +45,8 @@ public class RangeAssignor extends AbstractPartitionAssignor {
         return "range";
     }
 
+    // 参数为memberId和订阅的topics
+    // 转换参数Map<MemberId, List<Topic>>为Map<Topic, List<MemberId>>
     private Map<String, List<String>> consumersPerTopic(Map<String, List<String>> consumerMetadata) {
         Map<String, List<String>> res = new HashMap<>();
         for (Map.Entry<String, List<String>> subscriptionEntry : consumerMetadata.entrySet()) {
@@ -55,28 +57,34 @@ public class RangeAssignor extends AbstractPartitionAssignor {
         return res;
     }
 
+    // 分配分区
     @Override
-    public Map<String, List<TopicPartition>> assign(Map<String, Integer> partitionsPerTopic,
-                                                    Map<String, List<String>> subscriptions) {
+    public Map<String, List<TopicPartition>> assign(Map<String, Integer> partitionsPerTopic,// topic和对应的分区数
+                                                    Map<String, List<String>> subscriptions) {// memberId和订阅的topics
         Map<String, List<String>> consumersPerTopic = consumersPerTopic(subscriptions);
+        // 初始化assignment用来记录分配结果
+        // 也就是每个member和对应分配的topic-partiton
         Map<String, List<TopicPartition>> assignment = new HashMap<>();
         for (String memberId : subscriptions.keySet())
             assignment.put(memberId, new ArrayList<TopicPartition>());
-
+        // 遍历出每个topic的所有订阅者
         for (Map.Entry<String, List<String>> topicEntry : consumersPerTopic.entrySet()) {
             String topic = topicEntry.getKey();
+            // 获取当前topic的所有consumer，假设3
             List<String> consumersForTopic = topicEntry.getValue();
-
+            // 获取当前topic的分区数，假设10
             Integer numPartitionsForTopic = partitionsPerTopic.get(topic);
             if (numPartitionsForTopic == null)
                 continue;
-
+            // 排序
             Collections.sort(consumersForTopic);
-
+            // 计算每个consumer需要被分配的分区数,10 / 3 = 3
             int numPartitionsPerConsumer = numPartitionsForTopic / consumersForTopic.size();
+            // 计算余数 10 % 3 = 1
             int consumersWithExtraPartition = numPartitionsForTopic % consumersForTopic.size();
-
+            // 基于numPartitionsPerConsumer创建List<TopicPartition>
             List<TopicPartition> partitions = AbstractPartitionAssignor.partitions(topic, numPartitionsForTopic);
+            // 遍历consumer的数量，计算每个consumer负责的分区
             for (int i = 0, n = consumersForTopic.size(); i < n; i++) {
                 int start = numPartitionsPerConsumer * i + Math.min(i, consumersWithExtraPartition);
                 int length = numPartitionsPerConsumer + (i + 1 > consumersWithExtraPartition ? 0 : 1);

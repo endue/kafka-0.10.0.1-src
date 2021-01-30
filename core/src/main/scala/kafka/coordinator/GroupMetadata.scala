@@ -135,7 +135,7 @@ private[coordinator] class GroupMetadata(val groupId: String, val protocolType: 
 
   def add(memberId: String, member: MemberMetadata) {
     assert(supportsProtocols(member.protocols))
-    // consumer group中第一个发送join group请求的就会成leader
+    // consumer group中发送join group请求被第一个处理的consumer就会成为leader
     if (leaderId == null)
       leaderId = memberId
     members.put(memberId, member)

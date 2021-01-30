@@ -46,6 +46,7 @@ public abstract class AbstractPartitionAssignor implements PartitionAssignor {
         return new Subscription(new ArrayList<>(topics));
     }
 
+    // 分配分区
     @Override
     public Map<String, Assignment> assign(Cluster metadata, Map<String, Subscription> subscriptions) {
         Set<String> allSubscribedTopics = new HashSet<>();
@@ -56,21 +57,24 @@ public abstract class AbstractPartitionAssignor implements PartitionAssignor {
             topicSubscriptions.put(subscriptionEntry.getKey(), topics);
         }
 
+        // 记录每个topic的分区数
         Map<String, Integer> partitionsPerTopic = new HashMap<>();
         for (String topic : allSubscribedTopics) {
+            // 获取topic的分区数
             Integer numPartitions = metadata.partitionCountForTopic(topic);
             if (numPartitions != null && numPartitions > 0)
                 partitionsPerTopic.put(topic, numPartitions);
             else
                 log.debug("Skipping assignment for topic {} since no metadata is available", topic);
         }
-
+        // 分配分区，获取所有的consumer和对应的topic-partition
         Map<String, List<TopicPartition>> rawAssignments = assign(partitionsPerTopic, topicSubscriptions);
 
         // this class has maintains no user data, so just wrap the results
         Map<String, Assignment> assignments = new HashMap<>();
         for (Map.Entry<String, List<TopicPartition>> assignmentEntry : rawAssignments.entrySet())
             assignments.put(assignmentEntry.getKey(), new Assignment(assignmentEntry.getValue()));
+        // 返回分配的二结构
         return assignments;
     }
 

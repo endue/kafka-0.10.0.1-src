@@ -22,16 +22,24 @@ import java.util.Set;
 
 /**
  * This interface is used to define custom partition assignment for use in
+ * 该接口用于定义自定义分区分配
  * {@link org.apache.kafka.clients.consumer.KafkaConsumer}. Members of the consumer group subscribe
  * to the topics they are interested in and forward their subscriptions to a Kafka broker serving
  * as the group coordinator. The coordinator selects one member to perform the group assignment and
  * propagates the subscriptions of all members to it. Then {@link #assign(Cluster, Map)} is called
  * to perform the assignment and the results are forwarded back to each respective members
+ * 消费者组中的每个成员将他们定义的topic发送给GroupCoordinator,然后GroupCoordinator选择一个成员作为leader，
+ * 然后将组成员的所有订阅信息发生给它，让它来执行分配任务。assign()方法就是来执行分配的。最后leader在把分区结果
+ * 发送给GroupCoordinator，由GroupCoordinator转发给组内的每个成员
  *
  * In some cases, it is useful to forward additional metadata to the assignor in order to make
  * assignment decisions. For this, you can override {@link #subscription(Set)} and provide custom
  * userData in the returned Subscription. For example, to have a rack-aware assignor, an implementation
  * can use this user data to forward the rackId belonging to each member.
+ * 在某些情况下，需要添加一些额外信息来决定分配的结果，这时，我们可以覆盖subscription()方法，在其返回的Subscription
+ * 对象中增加一些额外的信息“userData”，比如，为了实现一个机架感知的Assignor，我们可以使用“userData”来转发每个组成员
+ * 的“rackId”信息
+ *
  */
 public interface PartitionAssignor {
 
@@ -43,6 +51,7 @@ public interface PartitionAssignor {
      *               and variants
      * @return Non-null subscription with optional user data
      */
+    // 创建Subscription
     Subscription subscription(Set<String> topics);
 
     /**
@@ -52,6 +61,7 @@ public interface PartitionAssignor {
      * @return A map from the members to their respective assignment. This should have one entry
      *         for all members who in the input subscription map.
      */
+    // 分配分区
     Map<String, Assignment> assign(Cluster metadata, Map<String, Subscription> subscriptions);
 
 
@@ -59,6 +69,7 @@ public interface PartitionAssignor {
      * Callback which is invoked when a group member receives its assignment from the leader.
      * @param assignment The local member's assignment as provided by the leader in {@link #assign(Cluster, Map)}
      */
+    // 获得分配的分区信息
     void onAssignment(Assignment assignment);
 
 
@@ -68,6 +79,7 @@ public interface PartitionAssignor {
      */
     String name();
 
+    // Subscription对象，包含Consumer订阅的topics和对应的额外信息
     class Subscription {
         private final List<String> topics;
         private final ByteBuffer userData;
@@ -97,6 +109,7 @@ public interface PartitionAssignor {
         }
     }
 
+    // Assignment包含consumer被分配的topic-partition和额外信息
     class Assignment {
         private final List<TopicPartition> partitions;
         private final ByteBuffer userData;
