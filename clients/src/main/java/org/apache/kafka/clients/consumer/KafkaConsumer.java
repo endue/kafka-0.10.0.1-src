@@ -653,17 +653,18 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
             // 网络通信组件
             this.client = new ConsumerNetworkClient(netClient, metadata, time, retryBackoffMs,
                     config.getInt(ConsumerConfig.REQUEST_TIMEOUT_MS_CONFIG));
-            // 消息重置策略
+            // 消息重置策略，auto.offset.reset
             OffsetResetStrategy offsetResetStrategy = OffsetResetStrategy.valueOf(config.getString(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG).toUpperCase(Locale.ROOT));
             // 订阅状态
             this.subscriptions = new SubscriptionState(offsetResetStrategy);
-            // 分区分配策略
+            // 分区分配策略，partition.assignment.strategy
             List<PartitionAssignor> assignors = config.getConfiguredInstances(
                     ConsumerConfig.PARTITION_ASSIGNMENT_STRATEGY_CONFIG,// 分区策略
                     PartitionAssignor.class);
             // load interceptors and make sure they get clientId
             Map<String, Object> userProvidedConfigs = config.originals();
             userProvidedConfigs.put(ConsumerConfig.CLIENT_ID_CONFIG, clientId);
+            // 拦截器，interceptor.classes
             List<ConsumerInterceptor<K, V>> interceptorList = (List) (new ConsumerConfig(userProvidedConfigs)).getConfiguredInstances(ConsumerConfig.INTERCEPTOR_CLASSES_CONFIG,
                     ConsumerInterceptor.class);
             this.interceptors = interceptorList.isEmpty() ? null : new ConsumerInterceptors<>(interceptorList);
@@ -766,6 +767,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
      * process of getting reassigned).
      * @return The set of partitions currently assigned to this consumer
      */
+    // 获取被分配的topic-partition集合
     public Set<TopicPartition> assignment() {
         acquire();
         try {
@@ -780,6 +782,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
      * {@link #subscribe(Collection, ConsumerRebalanceListener)}, or an empty set if no such call has been made.
      * @return The set of topics currently subscribed to
      */
+    // 获取订阅的主题
     public Set<String> subscription() {
         acquire();
         try {
@@ -817,6 +820,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
      * @param listener Non-null listener instance to get notifications on partition assignment/revocation for the
      *                 subscribed topics
      */
+    // 订阅主题，并设置RebalanceListener
     @Override
     public void subscribe(Collection<String> topics, ConsumerRebalanceListener listener) {
         acquire();
@@ -855,7 +859,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
      *
      * @param topics The list of topics to subscribe to
      */
-    // 订阅主题
+    // 订阅主题，RebalanceListener为一个空实现
     @Override
     public void subscribe(Collection<String> topics) {
         subscribe(topics, new NoOpConsumerRebalanceListener());
@@ -877,6 +881,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
      *
      * @param pattern Pattern to subscribe to
      */
+    // 订阅与指定模式匹配的所有主题
     @Override
     public void subscribe(Pattern pattern, ConsumerRebalanceListener listener) {
         acquire();
@@ -918,6 +923,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
      *
      * @param partitions The list of partitions to assign this consumer
      */
+    // 手动指定订阅的topic-partition
     @Override
     public void assign(Collection<TopicPartition> partitions) {
         acquire();
@@ -1073,6 +1079,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
      * @throws org.apache.kafka.common.KafkaException for any other unrecoverable errors (e.g. if offset metadata
      *             is too large or if the committed offset is invalid).
      */
+    // 提交最后一次poll方法返回的所有订阅的topic-partition的offset
     @Override
     public void commitSync() {
         acquire();
@@ -1105,6 +1112,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
      * @throws org.apache.kafka.common.KafkaException for any other unrecoverable errors (e.g. if offset metadata
      *             is too large or if the committed offset is invalid).
      */
+    // 同步，提交所有topic-partition最后拉取的消息的offset
     @Override
     public void commitSync(final Map<TopicPartition, OffsetAndMetadata> offsets) {
         acquire();
@@ -1120,6 +1128,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
      * Same as {@link #commitAsync(OffsetCommitCallback) commitAsync(null)}
      */
     @Override
+    // 异步，提交所有topic-partition最后拉取的消息的offset，默认没有回调
     public void commitAsync() {
         commitAsync(null);
     }
@@ -1136,6 +1145,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
      *
      * @param callback Callback to invoke when the commit completes
      */
+    // 异步，提交所有topic-partition最后拉取的消息的offset,设置回调
     @Override
     public void commitAsync(OffsetCommitCallback callback) {
         acquire();
@@ -1161,6 +1171,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
      *                is safe to mutate the map after returning.
      * @param callback Callback to invoke when the commit completes
      */
+    // 异步，提交指定topic-partition拉取的消息的offset，以及设置回调
     @Override
     public void commitAsync(final Map<TopicPartition, OffsetAndMetadata> offsets, OffsetCommitCallback callback) {
         acquire();
@@ -1177,6 +1188,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
      * is invoked for the same partition more than once, the latest offset will be used on the next poll(). Note that
      * you may lose data if this API is arbitrarily used in the middle of consumption, to reset the fetch offsets
      */
+    // 设置指定topic-partition的消费的offset
     @Override
     public void seek(TopicPartition partition, long offset) {
         if (offset < 0) {
@@ -1196,6 +1208,8 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
      * first offset in all partitions only when {@link #poll(long)} or {@link #position(TopicPartition)} are called.
      * If no partition is provided, seek to the first offset for all of the currently assigned partitions.
      */
+    // 设置指定topic-partition的offset为其对应的第一个offset
+    // 参数partitions大小为0时，默认取当前消费者所有的topic-partition
     public void seekToBeginning(Collection<TopicPartition> partitions) {
         acquire();
         try {
@@ -1214,6 +1228,8 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
      * final offset in all partitions only when {@link #poll(long)} or {@link #position(TopicPartition)} are called.
      * If no partition is provided, seek to the final offset for all of the currently assigned partitions.
      */
+    // 设置指定topic-partition的offset为其对应的最后一个offset
+    // 参数partitions大小为0时，默认取当前消费者所有的topic-partition
     public void seekToEnd(Collection<TopicPartition> partitions) {
         acquire();
         try {
@@ -1240,6 +1256,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
      *             configured groupId
      * @throws org.apache.kafka.common.KafkaException for any other unrecoverable errors
      */
+    // 获取指定topic-partition的已拉取消息的offset
     public long position(TopicPartition partition) {
         acquire();
         try {
@@ -1314,6 +1331,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
      *             expiration of the configured request timeout
      * @throws org.apache.kafka.common.KafkaException for any other unrecoverable errors
      */
+    // 获取指定topic的分区
     @Override
     public List<PartitionInfo> partitionsFor(String topic) {
         acquire();
@@ -1358,6 +1376,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
      * rebalance when automatic assignment is used.
      * @param partitions The partitions which should be paused
      */
+    // 暂停指定topic-partition
     @Override
     public void pause(Collection<TopicPartition> partitions) {
         acquire();
@@ -1377,6 +1396,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
      * If the partitions were not previously paused, this method is a no-op.
      * @param partitions The partitions which should be resumed
      */
+    // 恢复被暂停的topic-partition
     @Override
     public void resume(Collection<TopicPartition> partitions) {
         acquire();
@@ -1395,6 +1415,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
      *
      * @return The set of paused partitions
      */
+    // 获取被暂停的topic-partition
     @Override
     public Set<TopicPartition> paused() {
         acquire();

@@ -68,13 +68,13 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
     private final ConsumerCoordinatorMetrics sensors;
     // 订阅状态
     private final SubscriptionState subscriptions;
-    //
+    // 自动提交offset后的回调
     private final OffsetCommitCallback defaultOffsetCommitCallback;
     // 自动提交offset，默认true
     private final boolean autoCommitEnabled;
     // 自动提交task，默认5000一次
     private final AutoCommitTask autoCommitTask;
-    // 连接器
+    // 拦截器
     private final ConsumerInterceptors<?, ?> interceptors;
     private final boolean excludeInternalTopics;
 
@@ -403,16 +403,20 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
         }
     }
 
-
+    // 异步提交指定topic-partition的offset
     public void commitOffsetsAsync(final Map<TopicPartition, OffsetAndMetadata> offsets, OffsetCommitCallback callback) {
+        // 标识需要提交offset
         this.subscriptions.needRefreshCommits();
+        // 创建请求
         RequestFuture<Void> future = sendOffsetCommitRequest(offsets);
+        // 设置回调
         final OffsetCommitCallback cb = callback == null ? defaultOffsetCommitCallback : callback;
         future.addListener(new RequestFutureListener<Void>() {
             @Override
             public void onSuccess(Void value) {
                 if (interceptors != null)
                     interceptors.onCommit(offsets);
+                // 提交offset成功，执行回调
                 cb.onComplete(offsets, null);
             }
 
@@ -445,13 +449,16 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
             return;
 
         while (true) {
+            // 确保Coordinator
             ensureCoordinatorReady();
-
+            // 封装OFFSET_COMMIT请求
             RequestFuture<Void> future = sendOffsetCommitRequest(offsets);
+            // 发送OFFSET_COMMIT请求
             client.poll(future);
 
             if (future.succeeded()) {
                 if (interceptors != null)
+                    // 调用拦截器的onCommit方法
                     interceptors.onCommit(offsets);
                 return;
             }
@@ -531,6 +538,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
      * @param offsets The list of offsets per partition that should be committed.
      * @return A request future whose value indicates whether the commit was successful or not
      */
+    // 创建提交topic-partition的offset的OFFSET_COMMIT请求
     private RequestFuture<Void> sendOffsetCommitRequest(final Map<TopicPartition, OffsetAndMetadata> offsets) {
         if (coordinatorUnknown())
             return RequestFuture.coordinatorNotAvailable();
@@ -566,6 +574,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
         }
     }
 
+    // 处理OFFSET_COMMIT请求的响应消息
     private class OffsetCommitResponseHandler extends CoordinatorResponseHandler<OffsetCommitResponse, Void> {
 
         private final Map<TopicPartition, OffsetAndMetadata> offsets;
@@ -594,6 +603,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
                     log.debug("Group {} committed offset {} for partition {}", groupId, offset, tp);
                     if (subscriptions.isAssigned(tp))
                         // update the local cache only if the partition is still assigned
+                        // 更新对应topic-partition已经提交的偏移量
                         subscriptions.committed(tp, offsetAndMetadata);
                 } else if (error == Errors.GROUP_AUTHORIZATION_FAILED) {
                     log.error("Not authorized to commit offsets for group {}", groupId);

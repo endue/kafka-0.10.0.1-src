@@ -95,6 +95,7 @@ public abstract class AbstractCoordinator implements Closeable {
     protected final long retryBackoffMs;
 
     private boolean needsJoinPrepare = true;
+    // 是否需要重新加入组标识
     private boolean rejoinNeeded = true;
     // 当前启动consumer的GroupCoordinator节点
     protected Node coordinator;

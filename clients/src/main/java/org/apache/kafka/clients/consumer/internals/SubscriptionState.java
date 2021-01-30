@@ -71,30 +71,32 @@ public class SubscriptionState {
     private SubscriptionType subscriptionType;
 
     /* the pattern user has requested */
+    // 订阅模式，表示定义匹配的所有主题
     private Pattern subscribedPattern;
 
     /* the list of topics the user has requested */
-    // 记录用户订阅的主题
+    // 记录用户订阅的topic
     private final Set<String> subscription;
 
     /* the list of topics the group has subscribed to (set only for the leader on join group completion) */
-    // 记录消费者所在组订阅的主题
+    // 记录消费者所在组订阅的topic
     private final Set<String> groupSubscription;
 
     /* the list of partitions the user has requested */
-    // 记录用户分配的分区
+    // 记录用户指定分配的topic-partition
     private final Set<TopicPartition> userAssignment;
 
     /* the list of partitions currently assigned */
-    // 记录当前分配的分区以及对应的状态
+    // 记录当前分配的topic-partition以及对应的状态
     private final Map<TopicPartition, TopicPartitionState> assignment;
 
     /* do we need to request a partition assignment from the coordinator? */
-    // 记录当前consumer是否需要获取分区
+    // 记录当前consumer是否需要被分配分区
+    // 当用户手动指定topic-partition时，该值为false
     private boolean needsPartitionAssignment;
 
     /* do we need to request the latest committed offsets from the coordinator? */
-    //
+    // 记录是否需要提交offset
     private boolean needsFetchCommittedOffsets;
 
     /* Default offset reset strategy */
@@ -102,7 +104,7 @@ public class SubscriptionState {
     private final OffsetResetStrategy defaultResetStrategy;
 
     /* Listener to be invoked when assignment changes */
-    // 分区重分配后的回调监听
+    // 分区Rebalance后的回调监听
     private ConsumerRebalanceListener listener;
 
     private static final String SUBSCRIPTION_EXCEPTION_MESSAGE =
@@ -151,7 +153,7 @@ public class SubscriptionState {
     }
 
     /**
-     * 修改订阅的主题
+     * 修改订阅的topic
      * @param topicsToSubscribe
      */
     public void changeSubscription(Collection<String> topicsToSubscribe) {
@@ -164,7 +166,7 @@ public class SubscriptionState {
             this.needsPartitionAssignment = true;
 
             // Remove any assigned partitions which are no longer subscribed to
-            // 删除不再订阅的主题所已分配的分区
+            // 删除不再订阅topic的那些已经被分配的分区
             for (Iterator<TopicPartition> it = assignment.keySet().iterator(); it.hasNext(); ) {
                 TopicPartition tp = it.next();
                 if (!subscription.contains(tp.topic()))
@@ -196,7 +198,9 @@ public class SubscriptionState {
      * note this is different from {@link #assignFromSubscribed(Collection)}
      * whose input partitions are provided from the subscribed topics.
      */
+    // 手动订阅topic-partition
     public void assignFromUser(Collection<TopicPartition> partitions) {
+        // 设置订阅类型
         setSubscriptionType(SubscriptionType.USER_ASSIGNED);
 
         this.userAssignment.clear();
@@ -207,7 +211,7 @@ public class SubscriptionState {
                 addAssignedPartition(partition);
 
         this.assignment.keySet().retainAll(this.userAssignment);
-
+        // 设置不需要被指定分区
         this.needsPartitionAssignment = false;
         this.needsFetchCommittedOffsets = true;
     }
@@ -312,6 +316,7 @@ public class SubscriptionState {
         this.needsFetchCommittedOffsets = false;
     }
 
+    // 设置指定topic-partition的消费offset
     public void seek(TopicPartition tp, long offset) {
         assignedState(tp).seek(offset);
     }
@@ -345,6 +350,7 @@ public class SubscriptionState {
         return assignedState(tp).position;
     }
 
+    // 获取所有topic-partition最后一次拉取消息的offset
     public Map<TopicPartition, OffsetAndMetadata> allConsumed() {
         Map<TopicPartition, OffsetAndMetadata> allConsumed = new HashMap<>();
         for (Map.Entry<TopicPartition, TopicPartitionState> entry : assignment.entrySet()) {
@@ -355,6 +361,7 @@ public class SubscriptionState {
         return allConsumed;
     }
 
+    // 根据offsetResetStrategy设置对应topic-partition的offset
     public void needOffsetReset(TopicPartition partition, OffsetResetStrategy offsetResetStrategy) {
         assignedState(partition).awaitReset(offsetResetStrategy);
     }
@@ -428,11 +435,11 @@ public class SubscriptionState {
 
     // 分区状态
     private static class TopicPartitionState {
-        // 拉取偏移量
+        // 对应topic-partition已经拉取的偏移量
         private Long position; // last consumed position
-        // 消费偏移量也就是提交偏移量
+        // 对应topic-partition已经提交的偏移量
         private OffsetAndMetadata committed;  // last committed position
-        // 分区是否被暂停拉取
+        // 分区是否被暂停
         private boolean paused;  // whether this partition has been paused by the user
         // 重置策略
         private OffsetResetStrategy resetStrategy;  // the strategy to use if the offset needs resetting
@@ -443,7 +450,7 @@ public class SubscriptionState {
             this.committed = null;
             this.resetStrategy = null;
         }
-
+        // 基于OffsetResetStrategy的重置offset
         private void awaitReset(OffsetResetStrategy strategy) {
             this.resetStrategy = strategy;
             this.position = null;

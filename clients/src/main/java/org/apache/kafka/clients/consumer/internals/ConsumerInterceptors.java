@@ -72,6 +72,8 @@ public class ConsumerInterceptors<K, V> implements Closeable {
      *
      * @param offsets A map of offsets by partition with associated metadata
      */
+    // 当提交完topic-partition的offset并且得到成功响应的消息时调用
+    // 参考：org.apache.kafka.clients.consumer.internals.ConsumerCoordinator.commitOffsetsSync
     public void onCommit(Map<TopicPartition, OffsetAndMetadata> offsets) {
         for (ConsumerInterceptor<K, V> interceptor : this.interceptors) {
             try {
