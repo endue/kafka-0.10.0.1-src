@@ -568,7 +568,7 @@ public abstract class AbstractCoordinator implements Closeable {
                         groupCoordinatorResponse.node().port());
 
                 log.info("Discovered coordinator {} for group {}.", coordinator, groupId);
-                // 尝试与GroupCoordinator建立连接
+                // 尝试与GroupCoordinator建立socket连接
                 client.tryConnect(coordinator);
 
                 // start sending heartbeats only if we have a valid generation

@@ -652,7 +652,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
                     config.getInt(ConsumerConfig.REQUEST_TIMEOUT_MS_CONFIG), time);
             // 网络通信组件
             this.client = new ConsumerNetworkClient(netClient, metadata, time, retryBackoffMs,
-                    config.getInt(ConsumerConfig.REQUEST_TIMEOUT_MS_CONFIG));
+                    config.getInt(ConsumerConfig.REQUEST_TIMEOUT_MS_CONFIG));// request.timeout.ms
             // 消息重置策略，auto.offset.reset
             OffsetResetStrategy offsetResetStrategy = OffsetResetStrategy.valueOf(config.getString(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG).toUpperCase(Locale.ROOT));
             // 订阅状态
@@ -1013,14 +1013,13 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
      */
     // 真正拉取消息的方法
     // 每一次poll操作,会包括检查新的数据、做一些必要的心跳、自动commit以及offset更新操作，整体分为8步：
-    // 1.与Coordinator建立连接
-    // 2.获取负责topic的分区
-    // 3.更新偏移量
-    // 4.做自动提交或心跳等任务
-    // 5.调用fetchedRecords()获取拉取的数据，如果有，就立马返回，没有的话继续下面的操作
-    // 6.调用sendFetches()发送fetch请求(请求并未真正发送)
-    // 7.调用poll()发送请求
-    // 8.调用fetchedRecords()获取拉取的数据
+    // 1.如果没有GroupCoordinator(kafkaServer节点)则获取一个并与之建立连接
+    // 2.判断是否需要加入Group，如果需要就加入发送JOIN_GROUP->SYNC_GROUP请求，分别是加入Group和获取订阅的topic的被分配的分区
+    // 3.执行一些延迟任务比如心跳、自动提交offset
+    // 4.拉取数据，有：立马返回，没有：继续下面的操作
+    // 5.发送fetch请求(请求并未真正发送)
+    // 6.发送请求
+    // 7.拉取数据
     private Map<TopicPartition, List<ConsumerRecord<K, V>>> pollOnce(long timeout) {
         // TODO: Sub-requests should take into account the poll timeout (KAFKA-1894)
         // 1.确保consumer与GroupCoordinator建立了连接

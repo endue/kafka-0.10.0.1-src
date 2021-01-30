@@ -331,6 +331,7 @@ public class ConsumerNetworkClient implements Closeable {
                 for (ClientRequest request : requestEntry.getValue()) {
                     RequestFutureCompletionHandler handler =
                             (RequestFutureCompletionHandler) request.callback();
+                    // 执行回调方法
                     handler.onComplete(new ClientResponse(request, now, true, null));
                 }
             }
@@ -344,19 +345,25 @@ public class ConsumerNetworkClient implements Closeable {
     private void failExpiredRequests(long now) {
         // clear all expired unsent requests and fail their corresponding futures
         Iterator<Map.Entry<Node, List<ClientRequest>>> iterator = unsent.entrySet().iterator();
+        // 遍历Node节点和对应的消息
         while (iterator.hasNext()) {
             Map.Entry<Node, List<ClientRequest>> requestEntry = iterator.next();
+            // 获取发送Node节点的消息集合
             Iterator<ClientRequest> requestIterator = requestEntry.getValue().iterator();
+            // 遍历消息
             while (requestIterator.hasNext()) {
                 ClientRequest request = requestIterator.next();
+                // 如果消息的创建时间 + unsentExpiryMs < now，那么任务该消息已过去，从集合中删除
                 if (request.createdTimeMs() < now - unsentExpiryMs) {
                     RequestFutureCompletionHandler handler =
                             (RequestFutureCompletionHandler) request.callback();
+                    // 执行失败回调
                     handler.raise(new TimeoutException("Failed to send request after " + unsentExpiryMs + " ms."));
                     requestIterator.remove();
                 } else
                     break;
             }
+            // 如果没有消息记录，那么从unset中删除该Node节点
             if (requestEntry.getValue().isEmpty())
                 iterator.remove();
         }
@@ -381,16 +388,19 @@ public class ConsumerNetworkClient implements Closeable {
     }
 
     /**
-     * 尝试发送unsent中的消息记录
+     * 尝试发送unsent中的消息记录，但是只是缓存到对应kafkachannel中
      * @param now
      * @return
      */
     private boolean trySend(long now) {
         // send any requests that can be sent now
         boolean requestsSent = false;
+        // 遍历unset，获取entry对象
         for (Map.Entry<Node, List<ClientRequest>> requestEntry: unsent.entrySet()) {
             Node node = requestEntry.getKey();
+            // 获取发往这个Node节点的消息
             Iterator<ClientRequest> iterator = requestEntry.getValue().iterator();
+            // 遍历消息发送
             while (iterator.hasNext()) {
                 ClientRequest request = iterator.next();
                 if (client.ready(node, now)) {
