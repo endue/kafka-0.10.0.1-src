@@ -414,7 +414,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
     public void commitOffsetsAsync(final Map<TopicPartition, OffsetAndMetadata> offsets, OffsetCommitCallback callback) {
         // 标识需要提交offset
         this.subscriptions.needRefreshCommits();
-        // 创建请求
+        // 创建OFFSET_COMMIT请求
         RequestFuture<Void> future = sendOffsetCommitRequest(offsets);
         // 设置回调
         final OffsetCommitCallback cb = callback == null ? defaultOffsetCommitCallback : callback;
@@ -481,35 +481,37 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
      * 自动提交offset延迟任务
      */
     private class AutoCommitTask implements DelayedTask {
+        // 每次提交offset的间隔
         private final long interval;
 
         public AutoCommitTask(long interval) {
             this.interval = interval;
         }
-
+        // 重新制定任务的执行时间
         private void reschedule() {
             client.schedule(this, time.milliseconds() + interval);
         }
-
+        // 重新制定任务的执行时间，任务的执行时间为参数at
         private void reschedule(long at) {
             client.schedule(this, at);
         }
-
+        // 执行定时任务
         public void run(final long now) {
             if (coordinatorUnknown()) {
                 log.debug("Cannot auto-commit offsets for group {} since the coordinator is unknown", groupId);
                 reschedule(now + retryBackoffMs);
                 return;
             }
-
+            // 判断是否需要重新加入组
             if (needRejoin()) {
                 // skip the commit when we're rejoining since we'll commit offsets synchronously
                 // before the revocation callback is invoked
                 reschedule(now + interval);
                 return;
             }
-
+            // 提交offset
             commitOffsetsAsync(subscriptions.allConsumed(), new OffsetCommitCallback() {
+                // 执行成功后，重新设置下次任务的执行时间
                 @Override
                 public void onComplete(Map<TopicPartition, OffsetAndMetadata> offsets, Exception exception) {
                     if (exception == null) {

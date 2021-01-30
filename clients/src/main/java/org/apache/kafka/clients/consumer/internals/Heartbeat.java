@@ -16,10 +16,13 @@ package org.apache.kafka.clients.consumer.internals;
  * A helper class for managing the heartbeat to the coordinator
  */
 public final class Heartbeat {
+    // 超时时间
     private final long timeout;
+    // 心跳间隔
     private final long interval;
-
+    // 最近一次发送心跳的时间戳
     private long lastHeartbeatSend;
+    // 最近一次收到心跳响应的时间戳
     private long lastHeartbeatReceive;
     // 最近一次session重置时间戳
     private long lastSessionReset;

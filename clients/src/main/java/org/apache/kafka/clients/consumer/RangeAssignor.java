@@ -86,6 +86,9 @@ public class RangeAssignor extends AbstractPartitionAssignor {
             List<TopicPartition> partitions = AbstractPartitionAssignor.partitions(topic, numPartitionsForTopic);
             // 遍历consumer的数量，计算每个consumer负责的分区
             for (int i = 0, n = consumersForTopic.size(); i < n; i++) {
+                // consumer1 : start = 0，length = 4 [0,4)
+                // consumer2 : start = 4, length = 3 [4,7)
+                // consumer3 : start = 7,length = 3 [7,10)
                 int start = numPartitionsPerConsumer * i + Math.min(i, consumersWithExtraPartition);
                 int length = numPartitionsPerConsumer + (i + 1 > consumersWithExtraPartition ? 0 : 1);
                 assignment.get(consumersForTopic.get(i)).addAll(partitions.subList(start, start + length));

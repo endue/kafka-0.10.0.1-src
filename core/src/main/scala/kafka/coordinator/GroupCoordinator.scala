@@ -403,6 +403,7 @@ class GroupCoordinator(val brokerId: Int,
             responseCallback(Errors.ILLEGAL_GENERATION.code)
           } else {
             val member = group.get(memberId)
+            // 重置下次心跳检查的时间
             completeAndScheduleNextHeartbeatExpiration(group, member)
             responseCallback(Errors.NONE.code)
           }
@@ -411,6 +412,7 @@ class GroupCoordinator(val brokerId: Int,
     }
   }
 
+  // 处理consummer提交的offset
   def handleCommitOffsets(groupId: String,
                           memberId: String,
                           generationId: Int,
@@ -448,6 +450,7 @@ class GroupCoordinator(val brokerId: Int,
           } else {
             val member = group.get(memberId)
             completeAndScheduleNextHeartbeatExpiration(group, member)
+            // 准备存储offset
             delayedOffsetStore = Some(groupManager.prepareStoreOffsets(groupId, memberId, generationId,
               offsetMetadata, responseCallback))
           }
@@ -456,6 +459,7 @@ class GroupCoordinator(val brokerId: Int,
     }
 
     // store the offsets without holding the group lock
+    // 存储offset
     delayedOffsetStore.foreach(groupManager.store)
   }
 

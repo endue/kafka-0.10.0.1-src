@@ -57,7 +57,7 @@ private[coordinator] class MemberMetadata(val memberId: String,
                                           val clientHost: String,
                                           val sessionTimeoutMs: Int,
                                           var supportedProtocols: List[(String, Array[Byte])]) {
-
+  // 被分配的分区
   var assignment: Array[Byte] = Array.empty[Byte]
   // Join Group的回调方法
   var awaitingJoinCallback: JoinGroupResult => Unit = null

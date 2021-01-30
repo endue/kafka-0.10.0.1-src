@@ -74,7 +74,7 @@ public abstract class AbstractPartitionAssignor implements PartitionAssignor {
         Map<String, Assignment> assignments = new HashMap<>();
         for (Map.Entry<String, List<TopicPartition>> assignmentEntry : rawAssignments.entrySet())
             assignments.put(assignmentEntry.getKey(), new Assignment(assignmentEntry.getValue()));
-        // 返回分配的二结构
+        // 返回分配的topic-partition
         return assignments;
     }
 

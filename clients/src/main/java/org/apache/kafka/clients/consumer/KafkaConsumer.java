@@ -1031,7 +1031,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
         // 判断订阅状态是否自动分配分区
         // 如果不是用户手动指定topic-partition的分区，那么这里就返回true
         if (subscriptions.partitionsAutoAssigned())
-            // 确保被分配了分区
+            // 加入Group并分配分区
             coordinator.ensurePartitionAssignment();
 
         // fetch positions if we have partitions we're subscribed to that we

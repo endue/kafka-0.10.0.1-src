@@ -259,6 +259,7 @@ class KafkaApis(val requestChannel: RequestChannel,
 
       if (authorizedRequestInfo.isEmpty)
         sendResponseCallback(Map.empty)
+      // 如果是版本0，存储偏移量到zk
       else if (header.apiVersion == 0) {
         // for version 0 always store offsets to ZK
         val responseInfo = authorizedRequestInfo.map {
@@ -270,6 +271,7 @@ class KafkaApis(val requestChannel: RequestChannel,
               else if (partitionData.metadata != null && partitionData.metadata.length > config.offsetMetadataMaxSize)
                 (topicPartition, Errors.OFFSET_METADATA_TOO_LARGE.code)
               else {
+                // 更新zk上的offset  /consumers/{group}/ids/offsets/{topic}/{partition}
                 zkUtils.updatePersistentPath(s"${topicDirs.consumerOffsetDir}/${topicPartition.partition}", partitionData.offset.toString)
                 (topicPartition, Errors.NONE.code)
               }
@@ -278,11 +280,14 @@ class KafkaApis(val requestChannel: RequestChannel,
             }
         }
         sendResponseCallback(responseInfo)
+      // 如果是版本1，存储偏移量到offset manager
       } else {
         // for version 1 and beyond store offsets in offset manager
 
         // compute the retention time based on the request version:
+        // 根据请求版本计算保留时间
         // if it is v1 or not specified by user, we can use the default retention
+        // 如果是v1或者用户没有指定，我们可以使用默认保留
         val offsetRetention =
           if (header.apiVersion <= 1 ||
             offsetCommitRequest.retentionTime == OffsetCommitRequest.DEFAULT_RETENTION_TIME)

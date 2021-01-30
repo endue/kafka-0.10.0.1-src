@@ -891,17 +891,18 @@ private object ZKStringSerializer extends ZkSerializer {
       new String(bytes, "UTF-8")
   }
 }
-
 class ZKGroupDirs(val group: String) {
   def consumerDir = ConsumersPath
   def consumerGroupDir = consumerDir + "/" + group
   def consumerRegistryDir = consumerGroupDir + "/ids"
-  def consumerGroupOffsetsDir = consumerGroupDir + "/offsets"
-  def consumerGroupOwnersDir = consumerGroupDir + "/owners"
+  def consumerGroupOffsetsDir = consumerGroupDir + "/offsets"// /consumers/{group}/ids/offsets
+  def consumerGroupOwnersDir = consumerGroupDir + "/owners"// /consumers/{group}/ids/owners
 }
 
 class ZKGroupTopicDirs(group: String, topic: String) extends ZKGroupDirs(group) {
+  // /consumers/{group}/ids/offsets/{topic}
   def consumerOffsetDir = consumerGroupOffsetsDir + "/" + topic
+  // /consumers/{group}/ids/owners/{topic}
   def consumerOwnerDir = consumerGroupOwnersDir + "/" + topic
 }
 

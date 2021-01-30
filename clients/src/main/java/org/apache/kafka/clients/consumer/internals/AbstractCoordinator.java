@@ -321,21 +321,25 @@ public abstract class AbstractCoordinator implements Closeable {
                 coordinatorDead();
                 return;
             }
-
+            // 当前是否需要发送心跳
             if (!heartbeat.shouldHeartbeat(now)) {
                 // we don't need to heartbeat now, so reschedule for when we do
                 client.schedule(this, now + heartbeat.timeToNextHeartbeat(now));
             } else {
+                // 更新lastHeartbeatSend为当前时间戳
                 heartbeat.sentHeartbeat(now);
                 requestInFlight = true;
-
+                // 发送HEARTBEAT请求
                 RequestFuture<Void> future = sendHeartbeatRequest();
                 future.addListener(new RequestFutureListener<Void>() {
+                    // 处理HEARTBEAT请求的响应
                     @Override
                     public void onSuccess(Void value) {
                         requestInFlight = false;
                         long now = time.milliseconds();
+                        // 当收到响应后重置lastHeartbeatReceive
                         heartbeat.receiveHeartbeat(now);
+                        // 设置下一次心跳的时间
                         long nextHeartbeatTime = now + heartbeat.timeToNextHeartbeat(now);
                         client.schedule(HeartbeatTask.this, nextHeartbeatTime);
                     }
@@ -678,12 +682,13 @@ public abstract class AbstractCoordinator implements Closeable {
     /**
      * Send a heartbeat request now (visible only for testing).
      */
+    // 发送HEARTBEAT心跳
     public RequestFuture<Void> sendHeartbeatRequest() {
         HeartbeatRequest req = new HeartbeatRequest(this.groupId, this.generation, this.memberId);
         return client.send(coordinator, ApiKeys.HEARTBEAT, req)
                 .compose(new HeartbeatCompletionHandler());
     }
-
+    // 处理HEARTBEAT的响应消息
     private class HeartbeatCompletionHandler extends CoordinatorResponseHandler<HeartbeatResponse, Void> {
         @Override
         public HeartbeatResponse parse(ClientResponse response) {
