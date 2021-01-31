@@ -69,7 +69,7 @@ public interface PartitionAssignor {
      * Callback which is invoked when a group member receives its assignment from the leader.
      * @param assignment The local member's assignment as provided by the leader in {@link #assign(Cluster, Map)}
      */
-    // 获得分配的分区信息
+    // 当被分配分区后，该方法会被调用
     void onAssignment(Assignment assignment);
 
 

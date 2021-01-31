@@ -215,6 +215,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
         // if we were the assignor, then we need to make sure that there have been no metadata updates
         // since the rebalance begin. Otherwise, we won't rebalance again until the next metadata change
         if (assignmentSnapshot != null && !assignmentSnapshot.equals(metadataSnapshot)) {
+            // 更新needsPartitionAssignment为true，表示需要分区重分配
             subscriptions.needReassignment();
             return;
         }
@@ -226,16 +227,19 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
         Assignment assignment = ConsumerProtocol.deserializeAssignment(assignmentBuffer);
 
         // set the flag to refresh last committed offsets
+        // 标记needsFetchCommittedOffsets为true
         subscriptions.needRefreshCommits();
 
         // update partition assignment
-        // 更新获取的分区
+        // 更新获取的分区，更新needsPartitionAssignment为false，表示不需要分区重分配
         subscriptions.assignFromSubscribed(assignment.partitions());
 
         // give the assignor a chance to update internal state based on the received assignment
+        // 将分配的结果信息交给PartitionAssignor的onAssignment()来做一些操作
         assignor.onAssignment(assignment);
 
         // reschedule the auto commit starting from now
+        // 如果启动了自动提交commit offset，那么重置自动提交线程
         if (autoCommitEnabled)
             autoCommitTask.reschedule();
 
@@ -262,46 +266,54 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
      * @return
      */
     @Override
-    protected Map<String, ByteBuffer> performAssignment(String leaderId,
-                                                        String assignmentStrategy,
-                                                        Map<String, ByteBuffer> allSubscriptions) {
+    protected Map<String, ByteBuffer> performAssignment(String leaderId,// leader节点的id
+                                                        String assignmentStrategy,// 分配策略
+                                                        Map<String, ByteBuffer> allSubscriptions) {// value是序列后的Subscription
         // 获取分配策略
         PartitionAssignor assignor = lookupAssignor(assignmentStrategy);
         if (assignor == null)
             throw new IllegalStateException("Coordinator selected invalid assignment protocol: " + assignmentStrategy);
-        // 获取定义的所有topic
+        // 记录组成员订阅的所有topic
         Set<String> allSubscribedTopics = new HashSet<>();
-        // 获取成员和对应定义的topic
+        // 记录成员Id和对应的Subscription
         Map<String, Subscription> subscriptions = new HashMap<>();
+        // 遍历所以组成员的元数据，反序列化为Subscription
         for (Map.Entry<String, ByteBuffer> subscriptionEntry : allSubscriptions.entrySet()) {
+            // 获取成员的Subscription
             Subscription subscription = ConsumerProtocol.deserializeSubscription(subscriptionEntry.getValue());
+            // 记录成员的ID和Subscription对象
             subscriptions.put(subscriptionEntry.getKey(), subscription);
+            // 获取组成员订阅的topics
             allSubscribedTopics.addAll(subscription.topics());
         }
 
         // the leader will begin watching for changes to any of the topics the group is interested in,
         // which ensures that all metadata changes will eventually be seen
+        // 更新groupSubscription字段
         this.subscriptions.groupSubscribe(allSubscribedTopics);
+        // 更新元数据
         metadata.setTopics(this.subscriptions.groupSubscription());
 
         // update metadata (if needed) and keep track of the metadata used for assignment so that
         // we can check after rebalance completion whether anything has changed
+        // 更新元数据
         client.ensureFreshMetadata();
         assignmentSnapshot = metadataSnapshot;
 
         log.debug("Performing assignment for group {} using strategy {} with subscriptions {}",
                 groupId, assignor.name(), subscriptions);
-        // 对定义的topic进行分区分配
+        // 基于assignor对所有的topic进行分区分配
+        // 返回结果key是memberId，value是Assignment，Assignment里面记录了分配结果
         Map<String, Assignment> assignment = assignor.assign(metadata.fetch(), subscriptions);
 
         log.debug("Finished assignment for group {}: {}", groupId, assignment);
-        // 封装返回结果
+        // 封装返回结果，key是memberId，value是序列化后的Assignment，是一个ByteBuffer
         Map<String, ByteBuffer> groupAssignment = new HashMap<>();
         for (Map.Entry<String, Assignment> assignmentEntry : assignment.entrySet()) {
             ByteBuffer buffer = ConsumerProtocol.serializeAssignment(assignmentEntry.getValue());
             groupAssignment.put(assignmentEntry.getKey(), buffer);
         }
-
+        // 将分配返回
         return groupAssignment;
     }
 
@@ -391,7 +403,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
             // track of the fact that we need to rebalance again to reflect the change to the topic subscription. Without
             // ensuring that the metadata is fresh, any metadata update that changes the topic subscriptions and arrives with a
             // rebalance in progress will essentially be ignored. See KAFKA-3949 for the complete description of the problem.
-            // 确保元数据是最新的
+            // 如果是AUTO_PATTERN订阅模式，则需要确保元数据是最新的
             if (subscriptions.hasPatternSubscription())
                 client.ensureFreshMetadata();
             // 确保group是可用的

@@ -671,9 +671,9 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
             this.interceptors = interceptorList.isEmpty() ? null : new ConsumerInterceptors<>(interceptorList);
             // 消费者协调器
             this.coordinator = new ConsumerCoordinator(this.client,
-                    config.getString(ConsumerConfig.GROUP_ID_CONFIG),
-                    config.getInt(ConsumerConfig.SESSION_TIMEOUT_MS_CONFIG),
-                    config.getInt(ConsumerConfig.HEARTBEAT_INTERVAL_MS_CONFIG),
+                    config.getString(ConsumerConfig.GROUP_ID_CONFIG),// group.id
+                    config.getInt(ConsumerConfig.SESSION_TIMEOUT_MS_CONFIG),// session.timeout.ms
+                    config.getInt(ConsumerConfig.HEARTBEAT_INTERVAL_MS_CONFIG),// heartbeat.interval.ms
                     assignors,
                     this.metadata,
                     this.subscriptions,

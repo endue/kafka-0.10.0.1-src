@@ -58,9 +58,11 @@ public class RangeAssignor extends AbstractPartitionAssignor {
     }
 
     // 分配分区
+    // 返回结果key是memberId，value是分配的topic-partition集合
     @Override
     public Map<String, List<TopicPartition>> assign(Map<String, Integer> partitionsPerTopic,// topic和对应的分区数
                                                     Map<String, List<String>> subscriptions) {// memberId和订阅的topics
+        // 转换Map<MemberId, List<Topic>>为Map<Topic, List<MemberId>>
         Map<String, List<String>> consumersPerTopic = consumersPerTopic(subscriptions);
         // 初始化assignment用来记录分配结果
         // 也就是每个member和对应分配的topic-partiton

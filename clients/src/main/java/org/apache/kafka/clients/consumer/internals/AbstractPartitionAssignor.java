@@ -46,19 +46,30 @@ public abstract class AbstractPartitionAssignor implements PartitionAssignor {
         return new Subscription(new ArrayList<>(topics));
     }
 
-    // 分配分区
+    /**
+     * 分配分区，返回结果key是memberId，value是Assignment，Assignment里面记录了分配结果
+     * @param metadata Current topic/broker metadata known by consumer
+     * @param subscriptions Subscriptions from all members provided through {@link #subscription(Set)} 成员Id和对应的Subscription
+     * @return
+     */
     @Override
     public Map<String, Assignment> assign(Cluster metadata, Map<String, Subscription> subscriptions) {
+        // 记录当前组成员订阅的所有topic
         Set<String> allSubscribedTopics = new HashSet<>();
+        // 记录当前组成员和其订阅的所有topic
         Map<String, List<String>> topicSubscriptions = new HashMap<>();
+        // 遍历参数解析结果保存到上述两个集合中
         for (Map.Entry<String, Subscription> subscriptionEntry : subscriptions.entrySet()) {
+            // 获取某成员订阅的所有topic
             List<String> topics = subscriptionEntry.getValue().topics();
+            // 记录到集合中
             allSubscribedTopics.addAll(topics);
             topicSubscriptions.put(subscriptionEntry.getKey(), topics);
         }
 
-        // 记录每个topic的分区数
+        // 记录当前订阅的所有topic的其分区数
         Map<String, Integer> partitionsPerTopic = new HashMap<>();
+        // 遍历组成员订阅的所有topic
         for (String topic : allSubscribedTopics) {
             // 获取topic的分区数
             Integer numPartitions = metadata.partitionCountForTopic(topic);
@@ -67,11 +78,14 @@ public abstract class AbstractPartitionAssignor implements PartitionAssignor {
             else
                 log.debug("Skipping assignment for topic {} since no metadata is available", topic);
         }
-        // 分配分区，获取所有的consumer和对应的topic-partition
+        // 分配分区
+        // 返回结果key是memberId，value是分配的topic-partition集合
         Map<String, List<TopicPartition>> rawAssignments = assign(partitionsPerTopic, topicSubscriptions);
 
         // this class has maintains no user data, so just wrap the results
+        // 封装返回结果，将上述分配结果中的List<TopicPartition>封装为Assignment
         Map<String, Assignment> assignments = new HashMap<>();
+        //
         for (Map.Entry<String, List<TopicPartition>> assignmentEntry : rawAssignments.entrySet())
             assignments.put(assignmentEntry.getKey(), new Assignment(assignmentEntry.getValue()));
         // 返回分配的topic-partition

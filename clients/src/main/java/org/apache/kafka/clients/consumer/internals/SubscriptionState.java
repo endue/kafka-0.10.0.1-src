@@ -79,7 +79,7 @@ public class SubscriptionState {
     private final Set<String> subscription;
 
     /* the list of topics the group has subscribed to (set only for the leader on join group completion) */
-    // 记录消费者所在组订阅的topic
+    // 记录组成员订阅的所有topic
     private final Set<String> groupSubscription;
 
     /* the list of partitions the user has requested */
@@ -224,7 +224,9 @@ public class SubscriptionState {
         for (TopicPartition tp : assignments)
             if (!this.subscription.contains(tp.topic()))
                 throw new IllegalArgumentException("Assigned partition " + tp + " for non-subscribed topic.");
+        // 清空旧的分配结果
         this.assignment.clear();
+        // 记录新的分配结果
         for (TopicPartition tp: assignments)
             addAssignedPartition(tp);
         this.needsPartitionAssignment = false;

@@ -88,6 +88,7 @@ public abstract class AbstractCoordinator implements Closeable {
     // 会话超时时间，超过这个时间没有心跳没有数据交换就关闭连接
     private final int sessionTimeoutMs;
     private final GroupCoordinatorMetrics sensors;
+    // 组ID
     protected final String groupId;
     protected final ConsumerNetworkClient client;
     protected final Time time;
@@ -97,6 +98,7 @@ public abstract class AbstractCoordinator implements Closeable {
     private boolean needsJoinPrepare = true;
     // 标识是否需要重新加入组
     // 当join group后该值为false
+    // 分配分区失败后该值为false
     private boolean rejoinNeeded = true;
     // 当前启动consumer的GroupCoordinator节点
     protected Node coordinator;
@@ -228,8 +230,8 @@ public abstract class AbstractCoordinator implements Closeable {
      * 确保group是可用的
      */
     public void ensureActiveGroup() {
-        // 是否需要重写加入组
-        // 当consumer首次启动或者加入组失败、或离开当前组等等情况下该方法返回true
+        // 判断“rejoinNeeded”确定是否需要重新加入组
+        // 当consumer首次启动或加入组失败或离开当前组等情况下该方法返回true
         if (!needRejoin())
             return;
 
@@ -239,14 +241,14 @@ public abstract class AbstractCoordinator implements Closeable {
             needsJoinPrepare = false;
         }
 
-        // 再次判断是否需要重新加入组
+        // 再次判断rejoinNeeded”确定是否需要重新加入组
         while (needRejoin()) {
             // 确保GroupCoordinator已经连接
             ensureCoordinatorReady();
 
             // ensure that there are no pending requests to the coordinator. This is important
             // in particular to avoid resending a pending JoinGroup request.
-            // 如果对当前coordinator有未发送的消息则等待消息发送完毕
+            // 如果对当前GroupCoordinator有未发送的消息则等待消息发送完毕
             // 避免重新发起JoinGroup请求
             if (client.pendingRequestCount(this.coordinator) > 0) {
                 client.awaitPendingRequests(this.coordinator);
@@ -260,7 +262,7 @@ public abstract class AbstractCoordinator implements Closeable {
                 public void onSuccess(ByteBuffer value) {
                     // handle join completion in the callback so that the callback will be invoked
                     // even if the consumer is woken up before finishing the rebalance
-                    // 处理SYNC_GROUP后GroupCoordinator的响应消息
+                    // 处理SYNC_GROUP的响应消息,value就是分配的结果
                     onJoinComplete(generation, memberId, protocol, value);
                     needsJoinPrepare = true;
                     heartbeatTask.reset();
@@ -274,7 +276,7 @@ public abstract class AbstractCoordinator implements Closeable {
             });
             // 阻塞等待响应
             client.poll(future);
-
+            // 处理发送失败的异常情况
             if (future.failed()) {
                 RuntimeException exception = future.exception();
                 if (exception instanceof UnknownMemberIdException ||
@@ -360,20 +362,23 @@ public abstract class AbstractCoordinator implements Closeable {
      * elected leader by the coordinator.
      * @return A request future which wraps the assignment returned from the group leader
      */
+    // 发送JOIN_GROUP请求，并处理响应消息
     private RequestFuture<ByteBuffer> sendJoinGroupRequest() {
         if (coordinatorUnknown())
             return RequestFuture.coordinatorNotAvailable();
 
         // send a join group request to the coordinator
         log.info("(Re-)joining group {}", groupId);
+        // 封装JoinGroupRequest
         JoinGroupRequest request = new JoinGroupRequest(
                 groupId,
                 this.sessionTimeoutMs,
                 this.memberId,
                 protocolType(),// consumer、dummy、connect
-                metadata());
+                metadata());// 相对kafkaConsumer来说，这里是ProtocolMetadata集合，ProtocolMetadata内的name为PartitionAssignor的名称，metadata为序列化后的Subscription
 
         log.debug("Sending JoinGroup ({}) to coordinator {}", request, this.coordinator);
+        // 发送JOIN_GROUP请求并处理响应消息
         return client.send(coordinator, ApiKeys.JOIN_GROUP, request)
                 // JoinGroupResponseHandler处理回调
                 .compose(new JoinGroupResponseHandler());
@@ -382,11 +387,13 @@ public abstract class AbstractCoordinator implements Closeable {
     // 处理JOIN_GROUP的响应消息
     private class JoinGroupResponseHandler extends CoordinatorResponseHandler<JoinGroupResponse, ByteBuffer> {
 
+        // 解析响应封装为一个JoinGroupResponse
         @Override
         public JoinGroupResponse parse(ClientResponse response) {
             return new JoinGroupResponse(response.responseBody());
         }
 
+        // 处理响应
         @Override
         public void handle(JoinGroupResponse joinResponse, RequestFuture<ByteBuffer> future) {
             Errors error = Errors.forCode(joinResponse.errorCode());
@@ -397,10 +404,10 @@ public abstract class AbstractCoordinator implements Closeable {
                 AbstractCoordinator.this.rejoinNeeded = false;
                 AbstractCoordinator.this.protocol = joinResponse.groupProtocol();
                 sensors.joinLatency.record(response.requestLatencyMs());
-                // 自己是leader，分配分区，然后发送SyncGroup消息
+                // 当前的kafkaConsumer是leader，分配分区，然后调用参数future中的方法
                 if (joinResponse.isLeader()) {
                     onJoinLeader(joinResponse).chain(future);
-                // 自己不是leader，发送SyncGroup消息
+                // 当前的kafkaConsumer是follower，然后调用参数future中的方法
                 } else {
                     onJoinFollower().chain(future);
                 }
@@ -435,11 +442,14 @@ public abstract class AbstractCoordinator implements Closeable {
         }
     }
 
+    // 当前的kafkaConsumer是follower
     private RequestFuture<ByteBuffer> onJoinFollower() {
         // send follower's sync group with an empty assignment
+        // 封装一个SyncGroupRequest
         SyncGroupRequest request = new SyncGroupRequest(groupId, generation,
                 memberId, Collections.<String, ByteBuffer>emptyMap());
         log.debug("Sending follower SyncGroup for group {} to coordinator {}: {}", groupId, this.coordinator, request);
+        // 发送SyncGroupRequest请求
         return sendSyncGroupRequest(request);
     }
 
@@ -470,20 +480,25 @@ public abstract class AbstractCoordinator implements Closeable {
     // 处理SYNC_GROUP的响应消息
     private class SyncGroupResponseHandler extends CoordinatorResponseHandler<SyncGroupResponse, ByteBuffer> {
 
+        // 解析响应
         @Override
         public SyncGroupResponse parse(ClientResponse response) {
             return new SyncGroupResponse(response.responseBody());
         }
 
+        // 处理响应
         @Override
         public void handle(SyncGroupResponse syncResponse,
                            RequestFuture<ByteBuffer> future) {
             Errors error = Errors.forCode(syncResponse.errorCode());
+            // 响应结果正常
             if (error == Errors.NONE) {
                 log.info("Successfully joined group {} with generation {}", groupId, generation);
                 sensors.syncLatency.record(response.requestLatencyMs());
+                // 处理分配结果，这参数被序列后的Assignment对象
                 future.complete(syncResponse.memberAssignment());
             } else {
+                // 响应结果异常
                 AbstractCoordinator.this.rejoinNeeded = true;
                 if (error == Errors.GROUP_AUTHORIZATION_FAILED) {
                     future.raise(new GroupAuthorizationException(groupId));
