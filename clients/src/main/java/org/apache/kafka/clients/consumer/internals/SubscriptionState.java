@@ -392,12 +392,17 @@ public class SubscriptionState {
     }
 
     /**
-     * 获取不知道拉取消息偏移量的分区
+     * 过滤出topic-partition对应的TopicPartitionState对象的position == null
+     * 的topic-partition，这些分区是不知道应该从哪里拉取消息，所以需要从GroupCoordinator
+     * 中拉取
      * @return
      */
     public Set<TopicPartition> missingFetchPositions() {
         Set<TopicPartition> missing = new HashSet<>();
+        // 遍历被分配的topic-partition和其对应的TopicPartitionState实例
         for (Map.Entry<TopicPartition, TopicPartitionState> entry : assignment.entrySet())
+            // 如果TopicPartitionState实例的position == null
+            // 那么记录当前topic-partition
             if (!entry.getValue().hasValidPosition())
                 missing.add(entry.getKey());
         return missing;
@@ -437,7 +442,7 @@ public class SubscriptionState {
 
     // 分区状态
     private static class TopicPartitionState {
-        // 对应topic-partition已经拉取的偏移量
+        // 对应topic-partition下一次需要拉取消息的偏移量
         private Long position; // last consumed position
         // 对应topic-partition已经提交的偏移量
         private OffsetAndMetadata committed;  // last committed position

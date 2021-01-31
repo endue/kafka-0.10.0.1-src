@@ -463,6 +463,12 @@ class GroupCoordinator(val brokerId: Int,
     delayedOffsetStore.foreach(groupManager.store)
   }
 
+  /**
+    * 拉取topic-partition的offset
+    * @param groupId 组ID
+    * @param partitions topic-partition
+    * @return
+    */
   def handleFetchOffsets(groupId: String,
                          partitions: Seq[TopicPartition]): Map[TopicPartition, OffsetFetchResponse.PartitionData] = {
     if (!isActive.get) {
@@ -477,6 +483,7 @@ class GroupCoordinator(val brokerId: Int,
     } else {
       // return offsets blindly regardless the current group state since the group may be using
       // Kafka commit storage without automatic group management
+      // 前面的都是校验，这里才是获取offset
       groupManager.getOffsets(groupId, partitions)
     }
   }

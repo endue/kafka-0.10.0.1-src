@@ -523,6 +523,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
     // 订阅相关信息
     private final SubscriptionState subscriptions;
     private final Metadata metadata;
+    // 发送请求失败后的重试间隔
     private final long retryBackoffMs;
     // 请求等待超时时间，默认40 * 1000,
     private final long requestTimeoutMs;
@@ -704,11 +705,11 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
             }
             // 拉取消息线程
             this.fetcher = new Fetcher<>(this.client,
-                    config.getInt(ConsumerConfig.FETCH_MIN_BYTES_CONFIG),
-                    config.getInt(ConsumerConfig.FETCH_MAX_WAIT_MS_CONFIG),
-                    config.getInt(ConsumerConfig.MAX_PARTITION_FETCH_BYTES_CONFIG),
-                    config.getInt(ConsumerConfig.MAX_POLL_RECORDS_CONFIG),
-                    config.getBoolean(ConsumerConfig.CHECK_CRCS_CONFIG),
+                    config.getInt(ConsumerConfig.FETCH_MIN_BYTES_CONFIG),// fetch.min.bytes
+                    config.getInt(ConsumerConfig.FETCH_MAX_WAIT_MS_CONFIG),// fetch.max.wait.ms
+                    config.getInt(ConsumerConfig.MAX_PARTITION_FETCH_BYTES_CONFIG),// max.partition.fetch.bytes
+                    config.getInt(ConsumerConfig.MAX_POLL_RECORDS_CONFIG),// max.poll.records
+                    config.getBoolean(ConsumerConfig.CHECK_CRCS_CONFIG),// check.crcs
                     this.keyDeserializer,
                     this.valueDeserializer,
                     this.metadata,
@@ -1035,9 +1036,13 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
 
         // fetch positions if we have partitions we're subscribed to that we
         // don't know the offset for
-        // 是否有分区不知道拉取消息的偏移量
+        // 是否有分区不知道拉取消息的偏移量,如果重新或首次加入分配了topic-partition，
+        // 那么所有的topic-partition对应的TopicPartitionState都不知道从哪里拉取消息
+        // 所以此时需要设置fetch position
+        // 可以参考org.apache.kafka.clients.consumer.internals.ConsumerCoordinator.onJoinComplete方法里当收到分配结果会清空assignment
+        // 并为分配的topic-partition创建新的TopicPartitionState
         if (!subscriptions.hasAllFetchPositions())
-            // 更新偏移量
+            // 更新拉取消息的position
             updateFetchPositions(this.subscriptions.missingFetchPositions());
 
         long now = time.milliseconds();
@@ -1054,9 +1059,11 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
         // then just return it immediately
         if (!records.isEmpty())
             return records;
-        // 如果上传fetch到的数据已经全部拉取完毕，那么本次poll需要再次发送fetch请求
+        // 如果上次fetch到的数据已经全部从缓存中拉取完毕，那么本次pollOnce操作需要再次发送fetch请求
         fetcher.sendFetches();
+        // 等待消息发送
         client.poll(timeout, now);
+        // 获取消息记录
         return fetcher.fetchedRecords();
     }
 
@@ -1209,7 +1216,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
      * first offset in all partitions only when {@link #poll(long)} or {@link #position(TopicPartition)} are called.
      * If no partition is provided, seek to the first offset for all of the currently assigned partitions.
      */
-    // 设置指定topic-partition的offset为其对应的第一个offset
+    // 设置指定topic-partition对应的TopicPartitionState实例的offset为LogSegment中第一个的baseoffset
     // 参数partitions大小为0时，默认取当前消费者所有的topic-partition
     public void seekToBeginning(Collection<TopicPartition> partitions) {
         acquire();
@@ -1217,6 +1224,9 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
             Collection<TopicPartition> parts = partitions.size() == 0 ? this.subscriptions.assignedPartitions() : partitions;
             for (TopicPartition tp : parts) {
                 log.debug("Seeking to beginning of partition {}", tp);
+                // 更新topic-partition对应的TopicPartitionState如下属性内容
+                // 1.this.resetStrategy = strategy;
+                // 2.this.position = null;
                 subscriptions.needOffsetReset(tp, OffsetResetStrategy.EARLIEST);
             }
         } finally {
@@ -1476,13 +1486,16 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
      * @throws NoOffsetForPartitionException If no offset is stored for a given partition and no offset reset policy is
      *             defined
      */
+    // 更新consumer被分配的topic-partition的commit offset
+    // 已确保知道这些topic-partition需要从个位置开始拉取消息
     private void updateFetchPositions(Set<TopicPartition> partitions) {
         // refresh commits for all assigned partitions
-        // 提交当前coordinator已消费消息的偏移量
+        // 是否需要刷新消费消息的偏移量，也就是从GroupCoordinator中拉取负责的topic-partition已经提交的offset
+        // 到对应的TopicPartitionState的committed属性中
         coordinator.refreshCommittedOffsetsIfNeeded();
 
         // then do any offset lookups in case some positions are not known
-        // 重置拉取消息的偏移量
+        // 重置对应topic-partition的TopicPartitionState里的position
         fetcher.updateFetchPositions(partitions);
     }
 

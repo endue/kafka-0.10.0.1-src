@@ -353,17 +353,24 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
 
     /**
      * Refresh the committed offsets for provided partitions.
-     * 是否需要提交消费消息的偏移量
+     * 是否需要刷新消费消息的偏移量，也就是从GroupCoordinator中拉取topic-partition已经提交的offset
+     * 到对应的TopicPartitionState的committed属性中
      */
     public void refreshCommittedOffsetsIfNeeded() {
+        // 当consumer被分配分区后，needsFetchCommittedOffsets == true
         if (subscriptions.refreshCommitsNeeded()) {
+            // 拉取topic-partition对应的OffsetAndMetadata数据
             Map<TopicPartition, OffsetAndMetadata> offsets = fetchCommittedOffsets(subscriptions.assignedPartitions());
+            // 遍历获取到的结果
             for (Map.Entry<TopicPartition, OffsetAndMetadata> entry : offsets.entrySet()) {
                 TopicPartition tp = entry.getKey();
                 // verify assignment is still active
+                // 确保拉取的topic-partition依旧属于当前consumer来管理
                 if (subscriptions.isAssigned(tp))
+                    // 更新topic-partition对应的TopicPartitionState的committed = entry.getValue()
                     this.subscriptions.committed(tp, entry.getValue());
             }
+            // 更新needsFetchCommittedOffsets = false
             this.subscriptions.commitsRefreshed();
         }
     }
@@ -373,20 +380,24 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
      * @param partitions The partitions to fetch offsets for
      * @return A map from partition to the committed offset
      */
+    // 获取topic-partition的commit offset
     public Map<TopicPartition, OffsetAndMetadata> fetchCommittedOffsets(Set<TopicPartition> partitions) {
         while (true) {
+            // 确保已经与GroupCoordinator建立连接
             ensureCoordinatorReady();
 
             // contact coordinator to fetch committed offsets
+            // 创建OFFSET_FETCH请求
             RequestFuture<Map<TopicPartition, OffsetAndMetadata>> future = sendOffsetFetchRequest(partitions);
+            // 发送OFFSET_FETCH请求
             client.poll(future);
-
+            // 执行成功，获取结果
             if (future.succeeded())
                 return future.value();
-
+            // 执行失败，如果不允许重试，抛出异常
             if (!future.isRetriable())
                 throw future.exception();
-
+            // 执行失败，如果可以重试，等待retryBackoffMs时间后重试
             time.sleep(retryBackoffMs);
         }
     }
@@ -686,6 +697,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
      * @param partitions The set of partitions to get offsets for.
      * @return A request future containing the committed offsets.
      */
+    // 创建OFFSET_FETCH请求
     private RequestFuture<Map<TopicPartition, OffsetAndMetadata>> sendOffsetFetchRequest(Set<TopicPartition> partitions) {
         if (coordinatorUnknown())
             return RequestFuture.coordinatorNotAvailable();
@@ -698,7 +710,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
         return client.send(coordinator, ApiKeys.OFFSET_FETCH, request)
                 .compose(new OffsetFetchResponseHandler());
     }
-
+    // 处理OFFSET_FETCH请求的响应
     private class OffsetFetchResponseHandler extends CoordinatorResponseHandler<OffsetFetchResponse, Map<TopicPartition, OffsetAndMetadata>> {
 
         @Override
@@ -712,6 +724,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
             for (Map.Entry<TopicPartition, OffsetFetchResponse.PartitionData> entry : response.responseData().entrySet()) {
                 TopicPartition tp = entry.getKey();
                 OffsetFetchResponse.PartitionData data = entry.getValue();
+                // 有异常
                 if (data.hasError()) {
                     Errors error = Errors.forCode(data.errorCode);
                     log.debug("Group {} failed to fetch offset for partition {}: {}", groupId, tp, error.message());
@@ -732,6 +745,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
                         future.raise(new KafkaException("Unexpected error in fetch offset response: " + error.message()));
                     }
                     return;
+                // 无异常信息并有提交offset
                 } else if (data.offset >= 0) {
                     // record the position with the offset (-1 indicates no committed offset to fetch)
                     offsets.put(tp, new OffsetAndMetadata(data.offset, data.metadata));
@@ -739,7 +753,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
                     log.debug("Group {} has no committed offset for partition {}", groupId, tp);
                 }
             }
-
+            // 执行回调
             future.complete(offsets);
         }
     }

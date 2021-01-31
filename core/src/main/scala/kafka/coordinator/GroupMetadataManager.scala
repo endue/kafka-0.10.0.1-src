@@ -323,6 +323,7 @@ class GroupMetadataManager(val brokerId: Int,
    * The most important guarantee that this API provides is that it should never return a stale offset. i.e., it either
    * returns the current offset or it begins to sync the cache from the log (and returns an error code).
    */
+  // 拉取topic-partition已经提交的offset
   def getOffsets(group: String, topicPartitions: Seq[TopicPartition]): Map[TopicPartition, OffsetFetchResponse.PartitionData] = {
     trace("Getting offsets %s for group %s.".format(topicPartitions, group))
 

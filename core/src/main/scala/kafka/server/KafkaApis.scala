@@ -556,7 +556,8 @@ class KafkaApis(val requestChannel: RequestChannel,
                                         topicPartition,
                                         partitionData.timestamp,
                                         partitionData.maxNumOffsets)
-          // 如果不是Consumer，那么返回所有偏移量的数据
+          // 如果不是kafkaConsumer，那么返回所有偏移量的数据
+          // kafkaConsumer在发送请求时replicaId写死为-1，参考org.apache.kafka.clients.consumer.internals.Fetcher.sendListOffsetRequest
           if (offsetRequest.replicaId != ListOffsetRequest.CONSUMER_REPLICA_ID) {
             allOffsets
           } else {
@@ -792,8 +793,10 @@ class KafkaApis(val requestChannel: RequestChannel,
   /*
    * Handle an offset fetch request
    */
+  // 处理OFFSET_FETCH请求
   def handleOffsetFetchRequest(request: RequestChannel.Request) {
     val header = request.header
+    // 获取请求
     val offsetFetchRequest = request.body.asInstanceOf[OffsetFetchRequest]
 
     val responseHeader = new ResponseHeader(header.correlationId)
@@ -810,7 +813,7 @@ class KafkaApis(val requestChannel: RequestChannel,
       val unauthorizedTopicResponse = new OffsetFetchResponse.PartitionData(OffsetFetchResponse.INVALID_OFFSET, "", Errors.TOPIC_AUTHORIZATION_FAILED.code)
       val unauthorizedStatus = unauthorizedTopicPartitions.map(topicPartition => (topicPartition, unauthorizedTopicResponse)).toMap
       val unknownTopicPartitionResponse = new OffsetFetchResponse.PartitionData(OffsetFetchResponse.INVALID_OFFSET, "", Errors.UNKNOWN_TOPIC_OR_PARTITION.code)
-
+      // 如果apiVersion == 0那么记录存储在zk中，所以需要从zk拉取
       if (header.apiVersion == 0) {
         // version 0 reads offsets from ZK
         val responseInfo = authorizedTopicPartitions.map { topicPartition =>
@@ -834,13 +837,16 @@ class KafkaApis(val requestChannel: RequestChannel,
           }
         }.toMap
         new OffsetFetchResponse((responseInfo ++ unauthorizedStatus).asJava)
+      // apiVersion != 0，消息是存储到了__consumer_offsets某个分区中
       } else {
         // version 1 reads offsets from Kafka;
+        // 拉取请求中的topic-partition的偏移量
         val offsets = coordinator.handleFetchOffsets(offsetFetchRequest.groupId, authorizedTopicPartitions).toMap
 
         // Note that we do not need to filter the partitions in the
         // metadata cache as the topic partitions will be filtered
         // in coordinator's offset manager through the offset cache
+        // 返回响应
         new OffsetFetchResponse((offsets ++ unauthorizedStatus).asJava)
       }
     }
