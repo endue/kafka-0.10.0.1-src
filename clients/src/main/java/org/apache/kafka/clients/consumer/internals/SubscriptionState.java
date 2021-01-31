@@ -352,7 +352,7 @@ public class SubscriptionState {
         return assignedState(tp).position;
     }
 
-    // 获取所有topic-partition最后一次拉取消息的offset
+    // 获取所有topic-partition下一次拉取消息的offset
     public Map<TopicPartition, OffsetAndMetadata> allConsumed() {
         Map<TopicPartition, OffsetAndMetadata> allConsumed = new HashMap<>();
         for (Map.Entry<TopicPartition, TopicPartitionState> entry : assignment.entrySet()) {

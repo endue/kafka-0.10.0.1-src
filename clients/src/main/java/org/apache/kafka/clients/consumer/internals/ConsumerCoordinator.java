@@ -434,8 +434,10 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
     }
 
     // 异步提交指定topic-partition的offset
+    // 参数offsets中记录了topic-partition下一次拉取消息的offset
     public void commitOffsetsAsync(final Map<TopicPartition, OffsetAndMetadata> offsets, OffsetCommitCallback callback) {
-        // 标识需要提交offset
+        // 标识needsFetchCommittedOffsets为true
+        // 也就是需要拉取Committed Offsets
         this.subscriptions.needRefreshCommits();
         // 创建OFFSET_COMMIT请求
         RequestFuture<Void> future = sendOffsetCommitRequest(offsets);
@@ -579,6 +581,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
             return RequestFuture.voidSuccess();
 
         // create the offset commit request
+        // 创建每个topic-partition对应的PartitionData
         Map<TopicPartition, OffsetCommitRequest.PartitionData> offsetData = new HashMap<>(offsets.size());
         for (Map.Entry<TopicPartition, OffsetAndMetadata> entry : offsets.entrySet()) {
             OffsetAndMetadata offsetAndMetadata = entry.getValue();
@@ -593,7 +596,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
                 offsetData);
 
         log.trace("Sending offset-commit request with {} to coordinator {} for group {}", offsets, coordinator, groupId);
-
+        // 发送
         return client.send(coordinator, ApiKeys.OFFSET_COMMIT, req)
                 .compose(new OffsetCommitResponseHandler(offsets));
     }
