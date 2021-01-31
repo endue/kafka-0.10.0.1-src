@@ -290,7 +290,7 @@ public class MetadataResponse extends AbstractRequestResponse {
     public static MetadataResponse parse(ByteBuffer buffer, int version) {
         return new MetadataResponse(ProtoUtils.responseSchema(ApiKeys.METADATA.id, version).read(buffer));
     }
-
+    // topic的元数据
     public static class TopicMetadata {
         private final Errors error;
         private final String topic;
@@ -324,7 +324,7 @@ public class MetadataResponse extends AbstractRequestResponse {
         }
 
     }
-
+    // 分区元数据
     public static class PartitionMetadata {
         private final Errors error;
         private final int partition;

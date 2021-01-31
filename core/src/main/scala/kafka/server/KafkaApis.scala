@@ -683,6 +683,7 @@ class KafkaApis(val requestChannel: RequestChannel,
     }
   }
 
+  // 创建内部的__consumer_offsets topic
   private def createGroupMetadataTopic(): MetadataResponse.TopicMetadata = {
     val aliveBrokers = metadataCache.getAliveBrokers
     val offsetsTopicReplicationFactor =
@@ -690,12 +691,18 @@ class KafkaApis(val requestChannel: RequestChannel,
         Math.min(config.offsetsTopicReplicationFactor.toInt, aliveBrokers.length)
       else
         config.offsetsTopicReplicationFactor.toInt
+    // 创建topic
+    // GROUP_METADATA_TOPIC_NAME为__consumer_offsets topic
+    // offsetsTopicPartitions为offsets.topic.num.partitions默认50
     createTopic(TopicConstants.GROUP_METADATA_TOPIC_NAME, config.offsetsTopicPartitions,
       offsetsTopicReplicationFactor, coordinator.offsetsTopicConfigs)
   }
-
+  // 获取内部“__consumer_offsets”topic的元数据
   private def getOrCreateGroupMetadataTopic(securityProtocol: SecurityProtocol): MetadataResponse.TopicMetadata = {
+    // 获取topic的元数据
     val topicMetadata = metadataCache.getTopicMetadata(Set(TopicConstants.GROUP_METADATA_TOPIC_NAME), securityProtocol)
+    // 获取元数据，如果没有说明当前“__consumer_offsets”topic还未创建
+    // 那么创建并获取对应的元数据
     topicMetadata.headOption.getOrElse(createGroupMetadataTopic())
   }
 
@@ -872,17 +879,20 @@ class KafkaApis(val requestChannel: RequestChannel,
       val partition = coordinator.partitionFor(groupCoordinatorRequest.groupId)
 
       // get metadata (and create the topic if necessary)
+      // 获取"__consumer_offsets" topic的所有分区元数据
       val offsetsTopicMetadata = getOrCreateGroupMetadataTopic(request.securityProtocol)
-
+      // 有异常不继承处理，抛出错误给consumer
       val responseBody = if (offsetsTopicMetadata.error != Errors.NONE) {
         new GroupCoordinatorResponse(Errors.GROUP_COORDINATOR_NOT_AVAILABLE.code, Node.noNode)
       } else {
-        // 获取这个partition的leader所在Broker即为该consumer Group对应的GroupCoordinator
+        // 遍历"__consumer_offsets" topic所有分区元数据
+        // 过滤出分区正好为计算的分区的那个partition
+        // 然后获取对应Partition的leader所在Broker即为该consumer的GroupCoordinator
         val coordinatorEndpoint = offsetsTopicMetadata.partitionMetadata().asScala
           .find(_.partition == partition)
           .map(_.leader())
 
-        // 返回响应消息endpoint
+        // 返回响应消息Node endpoint
         coordinatorEndpoint match {
           case Some(endpoint) if !endpoint.isEmpty =>
             new GroupCoordinatorResponse(Errors.NONE.code, endpoint)

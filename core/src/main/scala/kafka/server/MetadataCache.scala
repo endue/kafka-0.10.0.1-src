@@ -72,25 +72,34 @@ private[server] class MetadataCache(brokerId: Int) extends Logging {
     }
 
   // errorUnavailableEndpoints exists to support v0 MetadataResponses
+  // 获取topic的所有Partition的元数据
   private def getPartitionMetadata(topic: String, protocol: SecurityProtocol, errorUnavailableEndpoints: Boolean): Option[Iterable[MetadataResponse.PartitionMetadata]] = {
+    // 从缓存取出topic的所有分区并遍历每一个分区
     cache.get(topic).map { partitions =>
       partitions.map { case (partitionId, partitionState) =>
+        // 当前topic-partition
         val topicPartition = TopicAndPartition(topic, partitionId)
-
+        // ISR列表
         val leaderAndIsr = partitionState.leaderIsrAndControllerEpoch.leaderAndIsr
+        // 获取leader
         val maybeLeader = getAliveEndpoint(leaderAndIsr.leader, protocol)
-
+        // 获取AR列表
         val replicas = partitionState.allReplicas
+        // 获取所有AR列表中服务的Node
         val replicaInfo = getEndpoints(replicas, protocol, errorUnavailableEndpoints)
 
         maybeLeader match {
+          // 没有leader
           case None =>
             debug(s"Error while fetching metadata for $topicPartition: leader not available")
+            // 封装分区元数据
             new MetadataResponse.PartitionMetadata(Errors.LEADER_NOT_AVAILABLE, partitionId, Node.noNode(),
               replicaInfo.asJava, java.util.Collections.emptyList())
-
+          // 存在leader
           case Some(leader) =>
+            // 获取ISR列表
             val isr = leaderAndIsr.isr
+            // 获取ISR列表中节点对应的Node实例
             val isrInfo = getEndpoints(isr, protocol, errorUnavailableEndpoints)
 
             if (replicaInfo.size < replicas.size) {
@@ -105,6 +114,7 @@ private[server] class MetadataCache(brokerId: Int) extends Logging {
               new MetadataResponse.PartitionMetadata(Errors.REPLICA_NOT_AVAILABLE, partitionId, leader,
                 replicaInfo.asJava, isrInfo.asJava)
             } else {
+              // 正常返回结果信息
               new MetadataResponse.PartitionMetadata(Errors.NONE, partitionId, leader, replicaInfo.asJava,
                 isrInfo.asJava)
             }
@@ -114,9 +124,11 @@ private[server] class MetadataCache(brokerId: Int) extends Logging {
   }
 
   // errorUnavailableEndpoints exists to support v0 MetadataResponses
+  // 获取topicds的元数据
   def getTopicMetadata(topics: Set[String], protocol: SecurityProtocol, errorUnavailableEndpoints: Boolean = false): Seq[MetadataResponse.TopicMetadata] = {
     inReadLock(partitionMetadataLock) {
       topics.toSeq.flatMap { topic =>
+        // 获取topic的所有分区的元数据，最后封装为topic的元数据
         getPartitionMetadata(topic, protocol, errorUnavailableEndpoints).map { partitionMetadata =>
           new MetadataResponse.TopicMetadata(Errors.NONE, topic, Topic.isInternal(topic), partitionMetadata.toBuffer.asJava)
         }

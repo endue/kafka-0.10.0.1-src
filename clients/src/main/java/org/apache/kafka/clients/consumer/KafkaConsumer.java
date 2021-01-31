@@ -1465,6 +1465,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
         log.trace("Closing the Kafka consumer.");
         AtomicReference<Throwable> firstException = new AtomicReference<>();
         this.closed = true;
+        // 发送LEAVE_GROUP请求
         ClientUtils.closeQuietly(coordinator, "coordinator", firstException);
         ClientUtils.closeQuietly(interceptors, "consumer interceptors", firstException);
         ClientUtils.closeQuietly(metrics, "consumer metrics", firstException);

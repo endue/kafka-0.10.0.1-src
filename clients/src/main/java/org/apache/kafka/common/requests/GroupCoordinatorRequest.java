@@ -25,7 +25,7 @@ public class GroupCoordinatorRequest extends AbstractRequest {
     
     private static final Schema CURRENT_SCHEMA = ProtoUtils.currentRequestSchema(ApiKeys.GROUP_COORDINATOR.id);
     private static final String GROUP_ID_KEY_NAME = "group_id";
-
+    // 组ID
     private final String groupId;
 
     public GroupCoordinatorRequest(String groupId) {
