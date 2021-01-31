@@ -39,30 +39,51 @@ import java.util.TreeSet;
  */
 public class RoundRobinAssignor extends AbstractPartitionAssignor {
 
+    /**
+     * 分配分区
+     * 逻辑就是先将每个topic中的分区转换为TopicPartition对象，存放到一个List<TopicPartition>集合中
+     * 然后遍历List<TopicPartition>集合，每次遍历就是取出一个topic-partition，然后遍历consumer，获取订阅该topic的consumer，
+     * 将当前topic-partition交给这个consumer
+     * @param partitionsPerTopic The number of partitions for each subscribed topic. Topics not in metadata will be excluded
+     *                           from this map.
+     * @param subscriptions Map from the memberId to their respective topic subscription
+     * @return
+     */
     @Override
-    public Map<String, List<TopicPartition>> assign(Map<String, Integer> partitionsPerTopic,
-                                                    Map<String, List<String>> subscriptions) {
+    public Map<String, List<TopicPartition>> assign(Map<String, Integer> partitionsPerTopic,// topic和对应的分区数
+                                                    Map<String, List<String>> subscriptions) {// memberId和订阅的topics
+        // 记录分配结果
         Map<String, List<TopicPartition>> assignment = new HashMap<>();
         for (String memberId : subscriptions.keySet())
             assignment.put(memberId, new ArrayList<TopicPartition>());
-
+        // 根据memberId排序
         CircularIterator<String> assigner = new CircularIterator<>(Utils.sorted(subscriptions.keySet()));
+        // 所有topic的每个分区对应的TopicPartition对象
         for (TopicPartition partition : allPartitionsSorted(partitionsPerTopic, subscriptions)) {
             final String topic = partition.topic();
+            // 如果当前遍历的consumer没有定义该topic
+            // 那么获取下一个consumer，直到获取到订阅当前topic的consumer
             while (!subscriptions.get(assigner.peek()).contains(topic))
                 assigner.next();
+            // 记录分配的结果
             assignment.get(assigner.next()).add(partition);
         }
         return assignment;
     }
 
-
+    /**
+     *
+     * @param partitionsPerTopic topic和对应的分区数
+     * @param subscriptions memberId和订阅的topics
+     * @return
+     */
     public List<TopicPartition> allPartitionsSorted(Map<String, Integer> partitionsPerTopic,
                                                     Map<String, List<String>> subscriptions) {
+        // 记录所有的topics
         SortedSet<String> topics = new TreeSet<>();
         for (List<String> subscription : subscriptions.values())
             topics.addAll(subscription);
-
+        // 记录所有topic的每个分区对应的TopicPartition对象
         List<TopicPartition> allPartitions = new ArrayList<>();
         for (String topic : topics) {
             Integer numPartitionsForTopic = partitionsPerTopic.get(topic);

@@ -38,6 +38,9 @@ public abstract class AbstractPartitionAssignor implements PartitionAssignor {
      * @param subscriptions Map from the memberId to their respective topic subscription
      * @return Map from each member to the list of partitions assigned to them.
      */
+    // 分配分区
+    // partitionsPerTopic 每个topic的分区数
+    // subscriptions memberId和其订阅的所有topic
     public abstract Map<String, List<TopicPartition>> assign(Map<String, Integer> partitionsPerTopic,
                                                              Map<String, List<String>> subscriptions);
 
@@ -97,6 +100,8 @@ public abstract class AbstractPartitionAssignor implements PartitionAssignor {
         // this assignor maintains no internal state, so nothing to do
     }
 
+    // 工具方法
+    // 将value记录到map中对应key的list中
     protected static <K, V> void put(Map<K, List<V>> map, K key, V value) {
         List<V> list = map.get(key);
         if (list == null) {
@@ -105,7 +110,7 @@ public abstract class AbstractPartitionAssignor implements PartitionAssignor {
         }
         list.add(value);
     }
-
+    // 根据topic的分区数，创建对应的List<TopicPartition>集合
     protected static List<TopicPartition> partitions(String topic, int numPartitions) {
         List<TopicPartition> partitions = new ArrayList<>(numPartitions);
         for (int i = 0; i < numPartitions; i++)
