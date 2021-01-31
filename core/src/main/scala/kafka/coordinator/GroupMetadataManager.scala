@@ -60,7 +60,7 @@ class GroupMetadataManager(val brokerId: Int,
   private val offsetsCache = new Pool[GroupTopicPartition, OffsetAndMetadata]
 
   /* group metadata cache */
-  // 组集合缓存，key是group.id
+  // Group缓存集合，key是group.id,value是Group的元数据
   private val groupsCache = new Pool[String, GroupMetadata]
 
   /* partitions of consumer groups that are being loaded, its lock should be always called BEFORE offsetExpireLock and the group lock if needed */
@@ -121,8 +121,8 @@ class GroupMetadataManager(val brokerId: Int,
 
   /**
    * Add a group or get the group associated with the given groupId if it already exists
-    * 创建组
    */
+  // 添加Group的元数据
   def addGroup(group: GroupMetadata): GroupMetadata = {
     val currentGroup = groupsCache.putIfNotExists(group.groupId, group)
     if (currentGroup != null) {
@@ -136,18 +136,22 @@ class GroupMetadataManager(val brokerId: Int,
    * Remove all metadata associated with the group
    * @param group
    */
+  // 移除与Group关联的所有元数据
   def removeGroup(group: GroupMetadata) {
     // guard this removal in case of concurrent access (e.g. if a delayed join completes with no members
     // while the group is being removed due to coordinator emigration)
+    // 首先从Group缓存集合中移除当前Group的元数据
     if (groupsCache.remove(group.groupId, group)) {
       // Append the tombstone messages to the partition. It is okay if the replicas don't receive these (say,
       // if we crash or leaders move) since the new leaders will still expire the consumers with heartbeat and
       // retry removing this group.
+      // 计算这个Group所在__consumer_offsets的分区
       val groupPartition = partitionFor(group.groupId)
+      // 生成一条消息
       val (magicValue, timestamp) = getMessageFormatVersionAndTimestamp(groupPartition)
       val tombstone = new Message(bytes = null, key = GroupMetadataManager.groupMetadataKey(group.groupId),
         timestamp = timestamp, magicValue = magicValue)
-
+      // 将生成的消息添加到对应分区中
       val partitionOpt = replicaManager.getPartition(TopicConstants.GROUP_METADATA_TOPIC_NAME, groupPartition)
       partitionOpt.foreach { partition =>
         val appendPartition = TopicAndPartition(TopicConstants.GROUP_METADATA_TOPIC_NAME, groupPartition)

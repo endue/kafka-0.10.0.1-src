@@ -37,13 +37,13 @@ public class JoinGroupRequest extends AbstractRequest {
     public static final String UNKNOWN_MEMBER_ID = "";
     // 组ID
     private final String groupId;
-    // 超时时间
+    // session超时时间
     private final int sessionTimeout;
     // 成员ID
     private final String memberId;
     // 协议类型
     private final String protocolType;
-    // 组协议类型
+    // 组协议类型,ProtocolMetadata中name为assignor.name()、metadata为Subscription
     private final List<ProtocolMetadata> groupProtocols;
 
     public static class ProtocolMetadata {

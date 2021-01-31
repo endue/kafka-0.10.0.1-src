@@ -121,9 +121,10 @@ case class GroupSummary(state: String,
  */
 @nonthreadsafe
 private[coordinator] class GroupMetadata(val groupId: String, val protocolType: String) {
-  // 记录当前组左右的成员
+  // 记录当前Group成员,keys是memberId，value是成员元数据
   private val members = new mutable.HashMap[String, MemberMetadata]
   private var state: GroupState = Stable
+  // 当前Group所处的“代”
   var generationId = 0
   var leaderId: String = null
   var protocol: String = null
@@ -135,7 +136,7 @@ private[coordinator] class GroupMetadata(val groupId: String, val protocolType: 
 
   def add(memberId: String, member: MemberMetadata) {
     assert(supportsProtocols(member.protocols))
-    // consumer group中发送join group请求被第一个处理的consumer就会成为leader
+    // consumer group中发送JoinGroup请求后第一个被处理的consumer就会成为leader
     if (leaderId == null)
       leaderId = memberId
     members.put(memberId, member)
@@ -170,7 +171,7 @@ private[coordinator] class GroupMetadata(val groupId: String, val protocolType: 
   def generateMemberIdSuffix = UUID.randomUUID().toString
 
   def canRebalance = state == Stable || state == AwaitingSync
-
+  // 更新Group的状态为groupState
   def transitionTo(groupState: GroupState) {
     assertValidTransition(groupState)
     state = groupState
@@ -203,7 +204,7 @@ private[coordinator] class GroupMetadata(val groupId: String, val protocolType: 
   def supportsProtocols(memberProtocols: Set[String]) = {
     isEmpty || (memberProtocols & candidateProtocols).nonEmpty
   }
-
+  // 获取当前Group的下一“代”同时更新Group的状态AwaitingSync
   def initNextGeneration() = {
     assert(notYetRejoinedMembers == List.empty[MemberMetadata])
     generationId += 1
