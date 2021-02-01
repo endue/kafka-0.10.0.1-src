@@ -119,21 +119,25 @@ case class GroupSummary(state: String,
  *  2. generation id
  *  3. leader id
  */
+// Group的元数据
 @nonthreadsafe
 private[coordinator] class GroupMetadata(val groupId: String, val protocolType: String) {
-  // 记录当前Group成员,keys是memberId，value是成员元数据
+  // 记录当前Group的所有成员,keys是memberId，value是成员元数据
   private val members = new mutable.HashMap[String, MemberMetadata]
+  // 记录Group的初始化状态或执行完分区重分配后的状态
   private var state: GroupState = Stable
-  // 当前Group所处的“代”
+  // 记录当前Group所处的“代”
   var generationId = 0
+  // 记录当前Group的leaderId
   var leaderId: String = null
+  // 记录当前Group的协议
   var protocol: String = null
 
   def is(groupState: GroupState) = state == groupState
   def not(groupState: GroupState) = state != groupState
   def has(memberId: String) = members.contains(memberId)
   def get(memberId: String) = members(memberId)
-
+  // 加入成员
   def add(memberId: String, member: MemberMetadata) {
     assert(supportsProtocols(member.protocols))
     // consumer group中发送JoinGroup请求后第一个被处理的consumer就会成为leader
@@ -141,7 +145,7 @@ private[coordinator] class GroupMetadata(val groupId: String, val protocolType: 
       leaderId = memberId
     members.put(memberId, member)
   }
-
+  // 移除成员
   def remove(memberId: String) {
     members.remove(memberId)
     if (memberId == leaderId) {

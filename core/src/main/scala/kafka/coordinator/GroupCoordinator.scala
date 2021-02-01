@@ -189,7 +189,7 @@ class GroupCoordinator(val brokerId: Int,
             // coordinator OR the group is in a transient unstable phase. Let the member retry
             // joining without the specified member id,
             responseCallback(joinError(memberId, Errors.UNKNOWN_MEMBER_ID.code))
-          // 当Group准备Rebalance时的状态
+          // 当前Group准备Rebalance时的状态
           case PreparingRebalance =>
             // 如果成员ID为UNKNOWN_MEMBER_ID，加入组
             if (memberId == JoinGroupRequest.UNKNOWN_MEMBER_ID) {
@@ -199,7 +199,8 @@ class GroupCoordinator(val brokerId: Int,
               val member = group.get(memberId)
               updateMemberAndRebalance(group, member, protocols, responseCallback)
             }
-          // 当Group重平衡后的状态
+          // 当前Group准备接受Sync_Group请求时的状态
+            // 也就是当前组已经开始了Rebalance，正在等待leader节点的分配结果
           case AwaitingSync =>
             // 如果成员ID为UNKNOWN_MEMBER_ID，加入组
             if (memberId == JoinGroupRequest.UNKNOWN_MEMBER_ID) {
@@ -237,7 +238,7 @@ class GroupCoordinator(val brokerId: Int,
             } else {
               // 成员ID
               val member = group.get(memberId)
-              // 如果是leader节点或者成员修改了元数据
+              // 如果是leader节点或者成员元数据发送了变更
               if (memberId == group.leaderId || !member.matches(protocols)) {
                 // force a rebalance if a member has changed metadata or if the leader sends JoinGroup.
                 // The latter allows the leader to trigger rebalances for changes affecting assignment
@@ -636,7 +637,7 @@ class GroupCoordinator(val brokerId: Int,
   /**
    * Complete existing DelayedHeartbeats for the given member and schedule the next one
    */
-  // 为给定的Group成员创建一个延迟任务DelayedHeartbeat
+  // 为给定的Group每一个成员重置DelayedHeartbeat定时任务
   // 用来检测成员的心跳
   private def completeAndScheduleNextHeartbeatExpiration(group: GroupMetadata, member: MemberMetadata) {
     // complete current heartbeat expectation
@@ -783,8 +784,9 @@ class GroupCoordinator(val brokerId: Int,
           // 执行回调
           member.awaitingJoinCallback(joinResult)
           member.awaitingJoinCallback = null
-          // 启动Group成员的心跳定时任务
-          // 到时后如果没有收到心跳请求，那么就会任务组成员发送了故障，需要等待后续的操作
+          // 更新Group成员的心跳定时任务，因为在处理完GROUP_COORDINATOR请求后，kafkaConsuemr启动心跳后台线程任务定时发送心跳
+          // 所以当收到JOIN_GROUP请求时也当做了一次心跳，收益这是需要重置心跳检测任务
+          // 到时后如果没有收到心跳请求，那么就会认为Group成员发送了故障，需要等待后续的操作
           completeAndScheduleNextHeartbeatExpiration(group, member)
         }
       }

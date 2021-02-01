@@ -39,9 +39,9 @@ public class JoinGroupRequest extends AbstractRequest {
     private final String groupId;
     // session超时时间
     private final int sessionTimeout;
-    // 成员ID
+    // kafkaConsumer被分配的成员ID，当没有Group时为"UNKNOWN_MEMBER_ID"
     private final String memberId;
-    // 协议类型
+    // 协议类型 kafkaConsumer时是"consumer"
     private final String protocolType;
     // 组协议类型,ProtocolMetadata中name为assignor.name()、metadata为Subscription
     private final List<ProtocolMetadata> groupProtocols;
