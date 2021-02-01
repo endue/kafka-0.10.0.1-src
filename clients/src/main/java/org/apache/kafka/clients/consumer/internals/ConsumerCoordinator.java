@@ -205,7 +205,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
         return null;
     }
 
-    // 处理SYNC_GROUP后GroupCoordinator的响应
+    // 处理SYNC_GROUP请求后响应，也就是GroupCoordinator的响应
     // 也就是获取topic的分配结果
     @Override
     protected void onJoinComplete(int generation,

@@ -162,6 +162,7 @@ class KafkaApis(val requestChannel: RequestChannel,
     }
   }
 
+
   def handleStopReplicaRequest(request: RequestChannel.Request) {
     // ensureTopicExists is only for client facing requests
     // We can't have the ensureTopicExists check here since the controller sends it as an advisory to all brokers so they
@@ -993,6 +994,7 @@ class KafkaApis(val requestChannel: RequestChannel,
     }
   }
 
+  // 处理SYNC_GROUP请求
   def handleSyncGroupRequest(request: RequestChannel.Request) {
     import JavaConversions._
 
