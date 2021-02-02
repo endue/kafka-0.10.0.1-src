@@ -714,6 +714,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
                 .compose(new OffsetFetchResponseHandler());
     }
     // 处理OFFSET_FETCH请求的响应
+    // 服务端响应的封装在代码：kafka.coordinator.GroupMetadataManager.getOffsets
     private class OffsetFetchResponseHandler extends CoordinatorResponseHandler<OffsetFetchResponse, Map<TopicPartition, OffsetAndMetadata>> {
 
         @Override

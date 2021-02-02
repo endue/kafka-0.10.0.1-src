@@ -511,6 +511,7 @@ class GroupCoordinator(val brokerId: Int,
     } else {
       // return offsets blindly regardless the current group state since the group may be using
       // Kafka commit storage without automatic group management
+      // groupManager也就是GroupMetadataManager
       // 前面的都是校验，这里才是获取offset
       groupManager.getOffsets(groupId, partitions)
     }
@@ -581,10 +582,12 @@ class GroupCoordinator(val brokerId: Int,
     }
   }
 
+  // 参数offsetTopicPartitionId为partition.partitionId
   def handleGroupImmigration(offsetTopicPartitionId: Int) {
     groupManager.loadGroupsForPartition(offsetTopicPartitionId, onGroupLoaded)
   }
 
+  // 参数offsetTopicPartitionId为partition.partitionId
   def handleGroupEmigration(offsetTopicPartitionId: Int) {
     groupManager.removeGroupsForPartition(offsetTopicPartitionId, onGroupUnloaded)
   }

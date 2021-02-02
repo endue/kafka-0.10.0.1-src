@@ -117,6 +117,7 @@ class KafkaApis(val requestChannel: RequestChannel,
       request.apiLocalCompleteTimeMs = SystemTime.milliseconds
   }
 
+  // 处理LEADER_AND_ISR请求
   def handleLeaderAndIsrRequest(request: RequestChannel.Request) {
     // ensureTopicExists is only for client facing requests
     // We can't have the ensureTopicExists check here since the controller sends it as an advisory to all brokers so they
@@ -126,18 +127,20 @@ class KafkaApis(val requestChannel: RequestChannel,
 
     try {
       // 回调方法
+      // 之前是follower现在变成了leader、之前是leader现在变成了follower
       def onLeadershipChange(updatedLeaders: Iterable[Partition], updatedFollowers: Iterable[Partition]) {
         // for each new leader or follower, call coordinator to handle consumer group migration.
         // this callback is invoked under the replica state change lock to ensure proper order of
         // leadership changes
-        // 处理当前broker成为leader副本的topic-partition
-        // __consumer_offset 是 leader 的情况，读取相应 group 的 offset 信息
+        // 当前broker成为内部队列__consumer_offset的某些Partition的leader
+        // 遍历这些个Partition，恢复commit offset等内容，这些需要leader来维护
         updatedLeaders.foreach { partition =>
+          // 校验是否为内部队列
           if (partition.topic == TopicConstants.GROUP_METADATA_TOPIC_NAME)
             coordinator.handleGroupImmigration(partition.partitionId)
         }
-        // 处理当前broker成为follower副本的topic-partition
-        // __consumer_offset 是 follower 的情况，如果之前是 leader，那么移除这个 partition 对应的信息
+        // 当前broker成为内部队列__consumer_offset的某些Partition的follower
+        // 遍历这些个Partition，删除缓存的一些数据，已经是follower了，这些应该是leader来维护
         updatedFollowers.foreach { partition =>
           if (partition.topic == TopicConstants.GROUP_METADATA_TOPIC_NAME)
             coordinator.handleGroupEmigration(partition.partitionId)
