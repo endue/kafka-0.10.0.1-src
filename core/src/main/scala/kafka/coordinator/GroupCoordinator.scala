@@ -293,7 +293,7 @@ class GroupCoordinator(val brokerId: Int,
   private def doSyncGroup(group: GroupMetadata,// Group的元数据
                           generationId: Int,// 当前Group的"代"
                           memberId: String,// 成员ID，有可能是leader，有可能是follower
-                          groupAssignment: Map[String, Array[Byte]],// 分配方案，leader发过来的：key是memberId，value是序列化后的Assignment，是一个ByteBuffer。follow发过来空map
+                          groupAssignment: Map[String, Array[Byte]],// 分配方案，leader发过来的：key是memberId，value是序列化后的Assignment。follow发过来空map
                           responseCallback: SyncCallback) {// 响应的回调
     var delayedGroupStore: Option[DelayedStore] = None
 
@@ -314,7 +314,7 @@ class GroupCoordinator(val brokerId: Int,
           case AwaitingSync =>
             // 设置成员的Sycn Group请求回调
             group.get(memberId).awaitingSyncCallback = responseCallback
-            // 为Group成员创建一个延迟任务DelayedHeartbeat
+            // 为给定的Group每一个成员重置DelayedHeartbeat定时任务
             completeAndScheduleNextHeartbeatExpiration(group, group.get(memberId))
 
             // if this is the leader, then we can attempt to persist state and transition to stable
@@ -328,14 +328,15 @@ class GroupCoordinator(val brokerId: Int,
               // 1.missing.map(_ -> Array.empty[Byte]).toMap 为没有分配方案的Group成员，设置一个空的集合
               // 2.assignment = 分配方案groupAssignment + missing members的空的分配方案
               val assignment = groupAssignment ++ missing.map(_ -> Array.empty[Byte]).toMap
-
+              // A.prepareStoreGroup()准备消息
               delayedGroupStore = Some(groupManager.prepareStoreGroup(group, assignment, (errorCode: Short) => {
+                // C.存储完消息的回调
                 group synchronized {
                   // another member may have joined the group while we were awaiting this callback,
                   // so we must ensure we are still in the AwaitingSync state and the same generation
                   // when it gets invoked. if we have transitioned to another state, then do nothing
                   if (group.is(AwaitingSync) && generationId == group.generationId) {
-                    // 分配方案有问题，那么重置所有成员的分配方案，之后重新Rebalance
+                    // 分配方案存储失败，重置所有成员的分配方案，之后重新Rebalance
                     if (errorCode != Errors.NONE.code) {
                       resetAndPropagateAssignmentError(group, errorCode)
                       maybePrepareRebalance(group)
@@ -350,7 +351,7 @@ class GroupCoordinator(val brokerId: Int,
               }))
             }
           // Group的状态已经为Stable，要么刚刚创建，要么已经早就分区分配完毕了
-            // 那么返回这个成员对应的元数据中的分配结果
+          // 那么返回这个成员对应的元数据中的分配结果
           case Stable =>
             // if the group is stable, we just return the current assignment
             val memberMetadata = group.get(memberId)
@@ -362,6 +363,7 @@ class GroupCoordinator(val brokerId: Int,
 
     // store the group metadata without holding the group lock to avoid the potential
     // for deadlock when the callback is invoked
+    // B.存储消息
     delayedGroupStore.foreach(groupManager.store)
   }
 
@@ -603,7 +605,7 @@ class GroupCoordinator(val brokerId: Int,
     // 下发分配结果
     propagateAssignment(group, errorCode)
   }
-  // 下发分配结果
+  // 下发分配结果，执行SyncCallbakc，然后重置为null
   private def propagateAssignment(group: GroupMetadata, errorCode: Short) {
     for (member <- group.allMemberMetadata) {
       if (member.awaitingSyncCallback != null) {
@@ -614,7 +616,7 @@ class GroupCoordinator(val brokerId: Int,
         // This is because if any member's session expired while we were still awaiting either
         // the leader sync group or the storage callback, its expiration will be ignored and no
         // future heartbeat expectations will not be scheduled.
-        // 为给定的Group成员创建一个延迟任务DelayedHeartbeat
+        // 为给定的Group每一个成员重置DelayedHeartbeat定时任务
         completeAndScheduleNextHeartbeatExpiration(group, member)
       }
     }

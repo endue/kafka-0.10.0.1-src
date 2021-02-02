@@ -172,16 +172,18 @@ class GroupMetadataManager(val brokerId: Int,
     }
   }
 
-  def prepareStoreGroup(group: GroupMetadata,
-                        groupAssignment: Map[String, Array[Byte]],
-                        responseCallback: Short => Unit): DelayedStore = {
+  def prepareStoreGroup(group: GroupMetadata,// Group元数据
+                        groupAssignment: Map[String, Array[Byte]],// 分配方案
+                        responseCallback: Short => Unit): DelayedStore = {// 回调方法
     val (magicValue, timestamp) = getMessageFormatVersionAndTimestamp(partitionFor(group.groupId))
+    // 生成一条消息，准备写入当前Group所在的partition的leader节点，也就是当前Broker
+    // 因为GroupCoordinator是partition的leader节点
     val message = new Message(
-      key = GroupMetadataManager.groupMetadataKey(group.groupId),
-      bytes = GroupMetadataManager.groupMetadataValue(group, groupAssignment),
+      key = GroupMetadataManager.groupMetadataKey(group.groupId),// 消息key是groupId
+      bytes = GroupMetadataManager.groupMetadataValue(group, groupAssignment),// 消息value是group和groupAssignment组成
       timestamp = timestamp,
       magicValue = magicValue)
-
+    // 获取消息对应的topic-partition
     val groupMetadataPartition = new TopicPartition(TopicConstants.GROUP_METADATA_TOPIC_NAME, partitionFor(group.groupId))
 
     val groupMetadataMessageSet = Map(groupMetadataPartition ->
@@ -190,6 +192,7 @@ class GroupMetadataManager(val brokerId: Int,
     val generationId = group.generationId
 
     // set the callback function to insert the created group into cache after log append completed
+    // 回调
     def putCacheCallback(responseStatus: Map[TopicPartition, PartitionResponse]) {
       // the append response should only contain the topics partition
       if (responseStatus.size != 1 || ! responseStatus.contains(groupMetadataPartition))
@@ -230,18 +233,19 @@ class GroupMetadataManager(val brokerId: Int,
 
       responseCallback(responseCode)
     }
-
+    // 返回一个DelayedStore包含了
     DelayedStore(groupMetadataMessageSet, putCacheCallback)
   }
 
   def store(delayedAppend: DelayedStore) {
     // call replica manager to append the group message
+    // 存储消息到副本的日志管理组件
     replicaManager.appendMessages(
       config.offsetCommitTimeoutMs.toLong,
       config.offsetCommitRequiredAcks,
       true, // allow appending to internal offset topic
       delayedAppend.messageSet,
-      delayedAppend.callback)
+      delayedAppend.callback)// 拼接完消息后的回调
   }
 
   /**

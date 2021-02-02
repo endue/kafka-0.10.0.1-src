@@ -678,6 +678,7 @@ class ReplicaManager(val config: KafkaConfig,
   }
 
   def getMessageFormatVersion(topicAndPartition: TopicAndPartition): Option[Byte] =
+  // 获取topic-partition的副本，由于没有传入副本ID，所以取的是当前的Broker对应的副本
     getReplica(topicAndPartition.topic, topicAndPartition.partition).flatMap { replica =>
       replica.log.map(_.config.messageFormatVersion.messageFormatVersion)
     }
