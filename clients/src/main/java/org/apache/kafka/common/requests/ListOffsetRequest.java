@@ -50,15 +50,18 @@ public class ListOffsetRequest extends AbstractRequest {
     private static final String PARTITION_KEY_NAME = "partition";
     private static final String TIMESTAMP_KEY_NAME = "timestamp";
     private static final String MAX_NUM_OFFSETS_KEY_NAME = "max_num_offsets";
-    // 发送请求的brokerId
+    // 发送请求的replicaId，kafkaConusmer为-1
     private final int replicaId;
     // 每个topic-partition对应的PartitionData
     private final Map<TopicPartition, PartitionData> offsetData;
 
     public static final class PartitionData {
-        // 时间戳
+        // 时间戳，可以为:
+        // ListOffsetRequest.EARLIEST_TIMESTAMP -2L
+        // ListOffsetRequest.LATEST_TIMESTAMP -1L
+        // 或者真正的时间戳
         public final long timestamp;
-        // 最大的offset
+        // 最大的offset，kafkaConusmer设置为1
         public final int maxNumOffsets;
 
         public PartitionData(long timestamp, int maxNumOffsets) {

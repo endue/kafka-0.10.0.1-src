@@ -57,6 +57,7 @@ class GroupMetadataManager(val brokerId: Int,
                            time: Time) extends Logging with KafkaMetricsGroup {
 
   /* offsets cache */
+  // kafkaConsumer commited的缓存集合 key是GroupTopicPartition记录了Group-topic-partition,value是提交记录元数据OffsetAndMetadata
   private val offsetsCache = new Pool[GroupTopicPartition, OffsetAndMetadata]
 
   /* group metadata cache */
@@ -331,17 +332,20 @@ class GroupMetadataManager(val brokerId: Int,
    * The most important guarantee that this API provides is that it should never return a stale offset. i.e., it either
    * returns the current offset or it begins to sync the cache from the log (and returns an error code).
    */
-  // 拉取topic-partition已经提交的offset
+  // 拉取参数中所有topic-partition已经提交的offset
   def getOffsets(group: String, topicPartitions: Seq[TopicPartition]): Map[TopicPartition, OffsetFetchResponse.PartitionData] = {
     trace("Getting offsets %s for group %s.".format(topicPartitions, group))
-
     if (isGroupLocal(group)) {
+      // 请求的topic-partition为空，那就返回Group的所有
       if (topicPartitions.isEmpty) {
         // Return offsets for all partitions owned by this consumer group. (this only applies to consumers that commit offsets to Kafka.)
+        // 从缓存中拉取对应Group的所有topic-partition的提交元数据
+        // 封装为一个OffsetFetchResponse
         offsetsCache.filter(_._1.group == group).map { case(groupTopicPartition, offsetAndMetadata) =>
           (groupTopicPartition.topicPartition, new OffsetFetchResponse.PartitionData(offsetAndMetadata.offset, offsetAndMetadata.metadata, Errors.NONE.code))
         }.toMap
       } else {
+        // 请求的topic-partition为不空，获取对应Group的topic-partition的提交元数据
         topicPartitions.map { topicPartition =>
           val groupTopicPartition = GroupTopicPartition(group, topicPartition)
           (groupTopicPartition.topicPartition, getOffset(groupTopicPartition))
@@ -530,6 +534,7 @@ class GroupMetadataManager(val brokerId: Int,
    * @param key The requested group-topic-partition
    * @return If the key is present, return the offset and metadata; otherwise return None
    */
+  // 获取指定group-topic-partition的偏移量
   private def getOffset(key: GroupTopicPartition): OffsetFetchResponse.PartitionData = {
     val offsetAndMetadata = offsetsCache.get(key)
     if (offsetAndMetadata == null)

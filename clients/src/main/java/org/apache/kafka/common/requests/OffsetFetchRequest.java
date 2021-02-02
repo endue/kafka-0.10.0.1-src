@@ -41,7 +41,7 @@ public class OffsetFetchRequest extends AbstractRequest {
 
     // partition level field names
     private static final String PARTITION_KEY_NAME = "partition";
-    // 组ID
+    // kafkaConsuemr所属组ID
     private final String groupId;
     // 需要拉取offset的topic-partition
     private final List<TopicPartition> partitions;

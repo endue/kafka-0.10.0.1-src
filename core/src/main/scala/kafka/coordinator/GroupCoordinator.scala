@@ -491,6 +491,7 @@ class GroupCoordinator(val brokerId: Int,
   }
 
   /**
+    * 处理OFFSET_FETCH请求
     * 拉取topic-partition的offset
     * @param groupId 组ID
     * @param partitions topic-partition

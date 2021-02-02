@@ -848,7 +848,7 @@ class KafkaApis(val requestChannel: RequestChannel,
       // apiVersion != 0，消息是存储到了__consumer_offsets某个分区中
       } else {
         // version 1 reads offsets from Kafka;
-        // 拉取请求中的topic-partition的偏移量
+        // 获取请求中所有的topic-partition的偏移量
         val offsets = coordinator.handleFetchOffsets(offsetFetchRequest.groupId, authorizedTopicPartitions).toMap
 
         // Note that we do not need to filter the partitions in the

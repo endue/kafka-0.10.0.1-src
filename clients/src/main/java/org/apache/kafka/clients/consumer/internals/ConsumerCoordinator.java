@@ -751,6 +751,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
                 // 无异常信息并有提交offset
                 } else if (data.offset >= 0) {
                     // record the position with the offset (-1 indicates no committed offset to fetch)
+                    // 这里只需要记录带有偏移量的topic-partition即可，如果是-1那就说明没有提交偏移量
                     offsets.put(tp, new OffsetAndMetadata(data.offset, data.metadata));
                 } else {
                     log.debug("Group {} has no committed offset for partition {}", groupId, tp);

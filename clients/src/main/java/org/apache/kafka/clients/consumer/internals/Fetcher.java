@@ -178,7 +178,10 @@ public class Fetcher<K, V> {
      * @param partitions the partitions to update positions for
      * @throws NoOffsetForPartitionException If no offset is stored for a given partition and no reset policy is available
      */
-    // 更新topic-partition
+    // 更新topic-partition对应的TopicPartitionState里的offset的值
+    // 1.topic-partition的TopicPartitionState里的resetStrategy不为null，那么就采用策略的方式恢复position
+    // 2.topic-partition的TopicPartitionState里的resetStrategy为null && GroupCoordinator上没有记录offset，那么就用默认resetStrategy恢复position
+    // 3.GroupCoordinator上记录了topic-partition的offset，那么就采用GroupCoordinator上的offset恢复position
     public void updateFetchPositions(Set<TopicPartition> partitions) {
         // reset the fetch position to the committed position
         for (TopicPartition tp : partitions) {
@@ -191,7 +194,7 @@ public class Fetcher<K, V> {
             if (subscriptions.isOffsetResetNeeded(tp)) {
                 resetOffset(tp);
             // 2.topic-partition对应的TopicPartitionState里的OffsetResetStrategy为null && TopicPartitionState里的committed == null
-            // 也就时当天topic-partition还未有任何的提交(无论是自己还是之前其他consumer)
+            // 也就是当前topic-partition还未有任何的提交(无论是自己还是之前其他consumer)
             } else if (subscriptions.committed(tp) == null) {
                 // there's no committed position, so we need to reset with the default strategy
                 // 使用默认策略进行重置,主要包括下面两点
@@ -200,7 +203,7 @@ public class Fetcher<K, V> {
                 subscriptions.needOffsetReset(tp);
                 // c.基于默认的OffsetResetStrategy来重置TopicPartitionState的offset
                 resetOffset(tp);
-            // 3.其他情况
+            // 3.其他情况，设置为GroupCoordinator的offset即可
             } else {
                 // 获取topic-partition的TopicPartitionState里的committed里的offset
                 long committed = subscriptions.committed(tp).offset();
@@ -334,6 +337,7 @@ public class Fetcher<K, V> {
             throw new NoOffsetForPartitionException(partition);
 
         log.debug("Resetting offset for partition {} to {} offset.", partition, strategy.name().toLowerCase(Locale.ROOT));
+        // 发送LIST_OFFSETS请求根据timestamp来获取topic-partition的offset
         long offset = listOffset(partition, timestamp);
 
         // we might lose the assignment while fetching the offset, so check it is still active
@@ -485,7 +489,7 @@ public class Fetcher<K, V> {
         } else {
             Node node = info.leader();
             // 注意！！！注意！！！注意！！！
-            // 这里的replicaId为死值-1，这个在kafkaApis中需要根据这个值来判断
+            // 这里的replicaId为死值-1，这个在kafkaApis中需要根据这个值来判断是Replica发送的还是kafkaConsumer发送的
             ListOffsetRequest request = new ListOffsetRequest(-1, partitions);
             return client.send(node, ApiKeys.LIST_OFFSETS, request)
                     .compose(new RequestFutureAdapter<ClientResponse, Long>() {
