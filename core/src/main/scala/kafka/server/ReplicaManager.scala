@@ -357,7 +357,7 @@ class ReplicaManager(val config: KafkaConfig,
       throw new ReplicaNotAvailableException("Replica %d is not available for partition [%s,%d]".format(config.brokerId, topic, partition))
   }
 
-  // 如果当前broker真好是对应topic-partition的leader副本那么返回
+  // 如果当前broker正好是对应topic-partition的leader副本那么返回
   def getLeaderReplicaIfLocal(topic: String, partitionId: Int): Replica =  {
     val partitionOpt = getPartition(topic, partitionId)
     partitionOpt match {

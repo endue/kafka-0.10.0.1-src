@@ -548,10 +548,14 @@ class KafkaApis(val requestChannel: RequestChannel,
       val (topicPartition, partitionData) = elem
       try {
         // ensure leader exists
-        // 获取leader
+        // 获取本地对应此topic-partiton的副本
         val localReplica = if (offsetRequest.replicaId != ListOffsetRequest.DEBUGGING_REPLICA_ID)
+          // 获取topic-partition的Partition实例，然后获取该实例中记录的leaderId，判断是否为当前Broker，如果是就返回对应的Replica
+          // 如果不是那么抛出异常
           replicaManager.getLeaderReplicaIfLocal(topicPartition.topic, topicPartition.partition)
         else
+          // 获取topic-partition的Partition实例，然后获取该实例中记录的当前brokerId对应的Relica
+          // 如果没有那么就抛出异常
           replicaManager.getReplicaOrException(topicPartition.topic, topicPartition.partition)
         // 获取偏移量
         val offsets = {
@@ -559,7 +563,7 @@ class KafkaApis(val requestChannel: RequestChannel,
           val allOffsets = fetchOffsets(replicaManager.logManager,
                                         topicPartition,
                                         partitionData.timestamp,
-                                        partitionData.maxNumOffsets)
+                                        partitionData.maxNumOffsets)// kafkaConusmer设置为1
           // 如果不是kafkaConsumer，那么返回所有偏移量的数据
           // kafkaConsumer在发送请求时replicaId写死为-1，参考org.apache.kafka.clients.consumer.internals.Fetcher.sendListOffsetRequest
           if (offsetRequest.replicaId != ListOffsetRequest.CONSUMER_REPLICA_ID) {
@@ -599,11 +603,22 @@ class KafkaApis(val requestChannel: RequestChannel,
     requestChannel.sendResponse(new RequestChannel.Response(request, new ResponseSend(request.connectionId, responseHeader, response)))
   }
 
+  /**
+    * 拉取topic-partition的offsets
+    * @param logManager
+    * @param topicPartition
+    * @param timestamp
+    * @param maxNumOffsets
+    * @return
+    */
   def fetchOffsets(logManager: LogManager, topicPartition: TopicPartition, timestamp: Long, maxNumOffsets: Int): Seq[Long] = {
+    // 查找对应topic-partition的Log对象
     logManager.getLog(TopicAndPartition(topicPartition.topic, topicPartition.partition)) match {
       case Some(log) =>
+        // 如果存在，那么继续后续处理
         fetchOffsetsBefore(log, timestamp, maxNumOffsets)
       case None =>
+        // 如果不存在，判断timestamp的类型，如果是如下两种，那么返回0，否则返回Nil
         if (timestamp == ListOffsetRequest.LATEST_TIMESTAMP || timestamp == ListOffsetRequest.EARLIEST_TIMESTAMP)
           Seq(0L)
         else
@@ -614,17 +629,17 @@ class KafkaApis(val requestChannel: RequestChannel,
   private[server] def fetchOffsetsBefore(log: Log, timestamp: Long, maxNumOffsets: Int): Seq[Long] = {
     // 获取所有的LogSegment
     val segsArray = log.logSegments.toArray
-    // 初始化offsetTimeArray长度
+    // 初始化offsetTimeArray长度,用来记录LogSegment的baseOffset和lastModified
     var offsetTimeArray: Array[(Long, Long)] = null
     // 最后一条LogSegment很可能此时是activeSegment
-    // 所以如果activeSegment有数据就包含在内，否则不处理
+    // 所以如果activeSegment有数据就包含在数组内，否则不处理
     val lastSegmentHasSize = segsArray.last.size > 0
     if (lastSegmentHasSize)
       offsetTimeArray = new Array[(Long, Long)](segsArray.length + 1)
     else
       offsetTimeArray = new Array[(Long, Long)](segsArray.length)
-    // 遍历所有LogSegment的baseOffset记录到offsetTimeArray数组中
-    // 如果有activeSegment，那么就回去对应的LEO
+    // 遍历所有LogSegment的baseOffset和lastModified记录到offsetTimeArray数组中
+    // 如果activeSegment有数据，那么取对应的LEO并且最后修改的时间为当前时间戳
     for (i <- 0 until segsArray.length)
       offsetTimeArray(i) = (segsArray(i).baseOffset, segsArray(i).lastModified)
     if (lastSegmentHasSize)
@@ -633,15 +648,14 @@ class KafkaApis(val requestChannel: RequestChannel,
     var startIndex = -1
     // 判断请求的类型
     timestamp match {
-        // 如果是获取最大的offset
       case ListOffsetRequest.LATEST_TIMESTAMP =>
         // 返回最后一个LogSegment的数组下标
         startIndex = offsetTimeArray.length - 1
-      // 如果是获取最小的offset
       case ListOffsetRequest.EARLIEST_TIMESTAMP =>
         // 返回第一个LogSegment的数组下标
         startIndex = 0
       // 如果没找到继续遍历，直到offsetTimeArray中存储的时间小于参数timestamp
+      // 注意查找的方式为倒叙
       case _ =>
         var isFound = false
         debug("Offset time array = " + offsetTimeArray.foreach(o => "%d, %d".format(o._1, o._2)))
@@ -653,15 +667,17 @@ class KafkaApis(val requestChannel: RequestChannel,
             startIndex -= 1
         }
     }
-    // 计算下标
+    // 由于下标从0开始，所以在找到startIndex后
+    // 与maxNumOffsets比较大小的话，需要startIndex + 1
     val retSize = maxNumOffsets.min(startIndex + 1)
-    // 返回下标retSize到0的retSize-1的所有LogSegment的baseOffset
     val ret = new Array[Long](retSize)
+    // 返回offsetTimeArray数组中下标从retSize-1到0的所有LogSegment的offset
     for (j <- 0 until retSize) {
       ret(j) = offsetTimeArray(startIndex)._1
       startIndex -= 1
     }
     // ensure that the returned seq is in descending order of offsets
+    // 降序排列
     ret.toSeq.sortBy(-_)
   }
 
