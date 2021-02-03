@@ -354,8 +354,11 @@ public class SubscriptionState {
 
     // 获取所有topic-partition下一次拉取消息的offset
     public Map<TopicPartition, OffsetAndMetadata> allConsumed() {
+        // 要返回的结果
         Map<TopicPartition, OffsetAndMetadata> allConsumed = new HashMap<>();
+        // 遍历当前consumer负责的所有topic-partition
         for (Map.Entry<TopicPartition, TopicPartitionState> entry : assignment.entrySet()) {
+            // 获取对应TopicPartitionState里的position准备进行提交
             TopicPartitionState state = entry.getValue();
             if (state.hasValidPosition())
                 allConsumed.put(entry.getKey(), new OffsetAndMetadata(state.position));

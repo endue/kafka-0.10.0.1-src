@@ -439,7 +439,7 @@ class GroupCoordinator(val brokerId: Int,
     }
   }
 
-  // 处理consummer提交的offset
+  // 处理OFFSET_COMMIT请求
   def handleCommitOffsets(groupId: String,
                           memberId: String,
                           generationId: Int,

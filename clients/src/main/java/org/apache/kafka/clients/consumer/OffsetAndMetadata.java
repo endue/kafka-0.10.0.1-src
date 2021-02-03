@@ -19,8 +19,11 @@ import java.io.Serializable;
  * when an offset is committed. This can be useful (for example) to store information about which
  * node made the commit, what time the commit was made, etc.
  */
+// 偏移量提交时，提供给GroupCoordinator的对象实例
 public class OffsetAndMetadata implements Serializable {
+    // 下一次拉取topic-partition的offset
     private final long offset;
+    // 附近的元数据
     private final String metadata;
 
     /**

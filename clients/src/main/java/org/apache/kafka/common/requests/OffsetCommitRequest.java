@@ -59,18 +59,22 @@ public class OffsetCommitRequest extends AbstractRequest {
     // will be removed after these versions are deprecated
     @Deprecated
     public static final long DEFAULT_TIMESTAMP = -1L;            // for V0, V1
-
+    // 当前kafkaConsumer的GroupId
     private final String groupId;
+    // 当前kafkaConsumer被分配的成员ID
     private final String memberId;
+    // 当前kafkaConsumer所属的“代”
     private final int generationId;
     private final long retentionTime;
+    // topic-partition对应的PartitionData，里面记录了下一次要拉取的offset，元数据
     private final Map<TopicPartition, PartitionData> offsetData;
 
     public static final class PartitionData {
         @Deprecated
         public final long timestamp;                // for V1
-
+        // 下一次要拉取消息的offset
         public final long offset;
+        // 附加元数据
         public final String metadata;
 
         @Deprecated

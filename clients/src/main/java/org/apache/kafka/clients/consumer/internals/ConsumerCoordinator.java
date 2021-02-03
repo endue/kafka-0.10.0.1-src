@@ -447,6 +447,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
             @Override
             public void onSuccess(Void value) {
                 if (interceptors != null)
+                    // 如果有拦截器先执行拦截器的onCommit()方法
                     interceptors.onCommit(offsets);
                 // 提交offset成功，执行回调
                 cb.onComplete(offsets, null);
@@ -585,10 +586,11 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
         Map<TopicPartition, OffsetCommitRequest.PartitionData> offsetData = new HashMap<>(offsets.size());
         for (Map.Entry<TopicPartition, OffsetAndMetadata> entry : offsets.entrySet()) {
             OffsetAndMetadata offsetAndMetadata = entry.getValue();
+            // 为每一个topic-partition创建一个OffsetCommitRequest.PartitionData
             offsetData.put(entry.getKey(), new OffsetCommitRequest.PartitionData(
                     offsetAndMetadata.offset(), offsetAndMetadata.metadata()));
         }
-
+        // 最终的请求
         OffsetCommitRequest req = new OffsetCommitRequest(this.groupId,
                 this.generation,
                 this.memberId,
@@ -596,7 +598,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
                 offsetData);
 
         log.trace("Sending offset-commit request with {} to coordinator {} for group {}", offsets, coordinator, groupId);
-        // 发送
+        // 发送OFFSET_COMMIT请求
         return client.send(coordinator, ApiKeys.OFFSET_COMMIT, req)
                 .compose(new OffsetCommitResponseHandler(offsets));
     }
@@ -638,7 +640,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
                     log.debug("Group {} committed offset {} for partition {}", groupId, offset, tp);
                     if (subscriptions.isAssigned(tp))
                         // update the local cache only if the partition is still assigned
-                        // 更新对应topic-partition已经提交的偏移量
+                        // 更新对应topic-partition的TopicPartitionState里的OffsetAndMetadata committed
                         subscriptions.committed(tp, offsetAndMetadata);
                 } else if (error == Errors.GROUP_AUTHORIZATION_FAILED) {
                     log.error("Not authorized to commit offsets for group {}", groupId);
