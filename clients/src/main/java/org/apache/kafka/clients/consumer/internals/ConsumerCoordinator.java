@@ -507,7 +507,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
      * 自动提交offset延迟任务
      */
     private class AutoCommitTask implements DelayedTask {
-        // 每次提交offset的间隔
+        // 每次提交offset的间隔,默认5000ms
         private final long interval;
 
         public AutoCommitTask(long interval) {
@@ -532,6 +532,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
             if (needRejoin()) {
                 // skip the commit when we're rejoining since we'll commit offsets synchronously
                 // before the revocation callback is invoked
+                // 如果是重入组的话，撤销自动提交，因为在重入之前已经执行了commit操作
                 reschedule(now + interval);
                 return;
             }

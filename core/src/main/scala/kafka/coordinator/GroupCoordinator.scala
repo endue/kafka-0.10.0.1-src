@@ -486,7 +486,7 @@ class GroupCoordinator(val brokerId: Int,
     }
 
     // store the offsets without holding the group lock
-    // 存储offset
+    // 存储每一条offset消息到LogSegment中
     delayedOffsetStore.foreach(groupManager.store)
   }
 

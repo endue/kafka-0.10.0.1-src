@@ -66,7 +66,7 @@ public class OffsetCommitRequest extends AbstractRequest {
     // 当前kafkaConsumer所属的“代”
     private final int generationId;
     private final long retentionTime;
-    // topic-partition对应的PartitionData，里面记录了下一次要拉取的offset，元数据
+    // topic-partition对应的PartitionData，里面记录了下一次要拉取的offset，附加元数据
     private final Map<TopicPartition, PartitionData> offsetData;
 
     public static final class PartitionData {

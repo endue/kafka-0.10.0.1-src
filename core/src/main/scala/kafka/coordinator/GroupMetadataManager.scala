@@ -261,17 +261,20 @@ class GroupMetadataManager(val brokerId: Int,
   /**
    * Store offsets by appending it to the replicated log and then inserting to cache
    */
+  // 存储kafkaConsumer提交过来的offset
   def prepareStoreOffsets(groupId: String,
                           consumerId: String,
                           generationId: Int,
                           offsetMetadata: immutable.Map[TopicPartition, OffsetAndMetadata],
                           responseCallback: immutable.Map[TopicPartition, Short] => Unit): DelayedStore = {
     // first filter out partitions with offset metadata size exceeding limit
+    // 过滤掉元数据有问题的topic-partition
     val filteredOffsetMetadata = offsetMetadata.filter { case (topicPartition, offsetAndMetadata) =>
       validateOffsetMetadataLength(offsetAndMetadata.metadata)
     }
 
     // construct the message set to append
+    // 基于topic-partiton的提交信息创建message集合
     val messages = filteredOffsetMetadata.map { case (topicAndPartition, offsetAndMetadata) =>
       val (magicValue, timestamp) = getMessageFormatVersionAndTimestamp(partitionFor(groupId))
       new Message(
@@ -300,6 +303,7 @@ class GroupMetadataManager(val brokerId: Int,
 
       val responseCode =
         if (status.errorCode == Errors.NONE.code) {
+          // 存储topic-partition的提交元数据offsetAndMetadata到offsetsCache中
           filteredOffsetMetadata.foreach { case (topicAndPartition, offsetAndMetadata) =>
             putOffset(GroupTopicPartition(groupId, topicAndPartition), offsetAndMetadata)
           }
