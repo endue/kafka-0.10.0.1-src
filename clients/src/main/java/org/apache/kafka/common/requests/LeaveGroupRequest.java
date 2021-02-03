@@ -24,8 +24,9 @@ public class LeaveGroupRequest extends AbstractRequest {
     private static final Schema CURRENT_SCHEMA = ProtoUtils.currentRequestSchema(ApiKeys.LEAVE_GROUP.id);
     private static final String GROUP_ID_KEY_NAME = "group_id";
     private static final String MEMBER_ID_KEY_NAME = "member_id";
-
+    // 当前kafkaConusemr的组ID
     private final String groupId;
+    // 当前kafkaConusemr分配的成员ID
     private final String memberId;
 
     public LeaveGroupRequest(String groupId, String memberId) {

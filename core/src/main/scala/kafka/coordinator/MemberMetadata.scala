@@ -63,7 +63,9 @@ private[coordinator] class MemberMetadata(val memberId: String,
   var awaitingJoinCallback: JoinGroupResult => Unit = null
   // Sync Group请求的回调方法
   var awaitingSyncCallback: (Array[Byte], Short) => Unit = null
+  // 上一次的心跳时间戳
   var latestHeartbeat: Long = -1
+  // 成员是否离开当前Group
   var isLeaving: Boolean = false
 
   def protocols = supportedProtocols.map(_._1).toSet

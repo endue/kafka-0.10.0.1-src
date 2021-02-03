@@ -1089,7 +1089,7 @@ class KafkaApis(val requestChannel: RequestChannel,
     )
     quotaManagers
   }
-
+  // 处理LEAVE_GROUP请求
   def handleLeaveGroupRequest(request: RequestChannel.Request) {
     val leaveGroupRequest = request.body.asInstanceOf[LeaveGroupRequest]
     val respHeader = new ResponseHeader(request.header.correlationId)

@@ -367,6 +367,7 @@ class GroupCoordinator(val brokerId: Int,
     delayedGroupStore.foreach(groupManager.store)
   }
 
+  // 处理LEAVE_GROUP请求
   def handleLeaveGroup(groupId: String, consumerId: String, responseCallback: Short => Unit) {
     if (!isActive.get) {
       responseCallback(Errors.GROUP_COORDINATOR_NOT_AVAILABLE.code)
@@ -389,7 +390,9 @@ class GroupCoordinator(val brokerId: Int,
           } else if (!group.has(consumerId)) {
             responseCallback(Errors.UNKNOWN_MEMBER_ID.code)
           } else {
+            // 获取成员元数据MemberMetadata
             val member = group.get(consumerId)
+            // 删除heartbeat
             removeHeartbeatForLeavingMember(group, member)
             onMemberFailure(group, member)
             responseCallback(Errors.NONE.code)
@@ -658,7 +661,7 @@ class GroupCoordinator(val brokerId: Int,
     val delayedHeartbeat = new DelayedHeartbeat(this, group, member, newHeartbeatDeadline, member.sessionTimeoutMs)
     heartbeatPurgatory.tryCompleteElseWatch(delayedHeartbeat, Seq(memberKey))
   }
-
+  // 删除成员的心跳定时任务检查，此时该成员为主动申请离开Group
   private def removeHeartbeatForLeavingMember(group: GroupMetadata, member: MemberMetadata) {
     member.isLeaving = true
     val memberKey = MemberKey(member.groupId, member.memberId)
@@ -732,6 +735,10 @@ class GroupCoordinator(val brokerId: Int,
     group.currentState match {
       case Dead =>
       case Stable | AwaitingSync => maybePrepareRebalance(group)
+        // PreparingRebalance状态有一种情况就是成员发送了LeaveGroup请求，当前Group处于Stable状态，然后执行重平衡
+        // 但是注意此时并没有把其他成员的心跳任务删除掉并且Group的状态改为了PreparingRebalance
+        // 此时如果某成员检查到在指定时间内没有发送心跳，那么就会走到这个分支
+        // 另外一种情况就是A发送了LeaveGroup请求,正好在Group重平衡的过程中，B也发生了LeaveGroup请求
       case PreparingRebalance => joinPurgatory.checkAndComplete(GroupKey(group.groupId))
     }
   }
@@ -800,7 +807,7 @@ class GroupCoordinator(val brokerId: Int,
       }
     }
   }
-
+  // 收到Heartbeat时在重置当前心跳定时任务之前，触发当前心跳定时任务的执行，此时已经更新了latestHeartbeat为当前时间，但是还没有更新heartbeatDeadline
   def tryCompleteHeartbeat(group: GroupMetadata, member: MemberMetadata, heartbeatDeadline: Long, forceComplete: () => Boolean) = {
     group synchronized {
       if (shouldKeepMemberAlive(member, heartbeatDeadline) || member.isLeaving)
@@ -808,7 +815,8 @@ class GroupCoordinator(val brokerId: Int,
       else false
     }
   }
-
+  // 处理Heartbeat定时任务到期后的自动执行
+  // 如果没有收到成员的心跳检查，那么就任务成员过期了
   def onExpireHeartbeat(group: GroupMetadata, member: MemberMetadata, heartbeatDeadline: Long) {
     group synchronized {
       if (!shouldKeepMemberAlive(member, heartbeatDeadline))
@@ -819,14 +827,16 @@ class GroupCoordinator(val brokerId: Int,
   def onCompleteHeartbeat() {
     // TODO: add metrics for complete heartbeats
   }
-
+  // 计算分区
   def partitionFor(group: String): Int = groupManager.partitionFor(group)
-
+  //  判断是否应该任务成员为存活状态
   private def shouldKeepMemberAlive(member: MemberMetadata, heartbeatDeadline: Long) =
-    member.awaitingJoinCallback != null ||
-      member.awaitingSyncCallback != null ||
-      member.latestHeartbeat + member.sessionTimeoutMs > heartbeatDeadline
-
+    member.awaitingJoinCallback != null ||  // awaitingJoinCallback不为null，即kafkaConsumer正在等待JoinGroupResponse
+      member.awaitingSyncCallback != null || // awaitingSyncCallback不为null，即kafkaConsumer正在等待SyncGroupResponse
+      member.latestHeartbeat + member.sessionTimeoutMs > heartbeatDeadline // heartbeatDeadline是心跳检测任务执行的时间，如果最后一次收到心跳的时间 + 成员会话过期时间 > heartbeatDeadline那么就任务成员存活
+      // latestHeartbeat为7:40
+      // sessionTimeoutMs为10m，那么过期时间7:50
+      // 如果heartbeatDeadline的实现小于7:50，那么就任务成员是存活的状态
   private def isCoordinatorForGroup(groupId: String) = groupManager.isGroupLocal(groupId)
 
   private def isCoordinatorLoadingInProgress(groupId: String) = groupManager.isGroupLoading(groupId)
