@@ -20,11 +20,13 @@ public final class Heartbeat {
     private final long timeout;
     // 心跳间隔
     private final long interval;
-    // 最近一次发送心跳的时间戳
+    // 最近一次发送心跳的时间戳，发送请求前更新
     private long lastHeartbeatSend;
-    // 最近一次收到心跳响应的时间戳
+    // 最近一次收到心跳响应的时间戳，收到响应后更新
     private long lastHeartbeatReceive;
     // 最近一次session重置时间戳
+    // 当处理完SYNC_GROUP请求的响应时会重置
+    // 当处理完GROUP_COORDINATOR请求的响应时会重置
     private long lastSessionReset;
 
     public Heartbeat(long timeout,

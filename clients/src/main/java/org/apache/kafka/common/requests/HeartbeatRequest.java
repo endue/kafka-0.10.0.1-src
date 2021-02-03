@@ -26,9 +26,11 @@ public class HeartbeatRequest extends AbstractRequest {
     private static final String GROUP_ID_KEY_NAME = "group_id";
     private static final String GROUP_GENERATION_ID_KEY_NAME = "group_generation_id";
     private static final String MEMBER_ID_KEY_NAME = "member_id";
-
+    // 当前kafkaConsuemr所属的groupId
     private final String groupId;
+    // 当前kafkaConsuemr所属的"代"
     private final int groupGenerationId;
+    // 当前kafkaConsuemr被分配的成员ID
     private final String memberId;
 
     public HeartbeatRequest(String groupId, int groupGenerationId, String memberId) {

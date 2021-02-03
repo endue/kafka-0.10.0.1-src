@@ -399,6 +399,7 @@ class GroupCoordinator(val brokerId: Int,
     }
   }
 
+  // 处理HEARTBEAT请求
   def handleHeartbeat(groupId: String,
                       memberId: String,
                       generationId: Int,
@@ -432,6 +433,7 @@ class GroupCoordinator(val brokerId: Int,
             val member = group.get(memberId)
             // 重置下次心跳检查的时间
             completeAndScheduleNextHeartbeatExpiration(group, member)
+            // 发送响应消息
             responseCallback(Errors.NONE.code)
           }
         }

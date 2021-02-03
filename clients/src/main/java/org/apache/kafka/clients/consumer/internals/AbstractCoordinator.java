@@ -301,6 +301,7 @@ public abstract class AbstractCoordinator implements Closeable {
         public void reset() {
             // start or restart the heartbeat task to be executed at the next chance
             long now = time.milliseconds();
+            // 重置lastSessionReset
             heartbeat.resetSessionTimeout(now);
             // 删除任务队列中记录的当前任务
             client.unschedule(this);
@@ -316,7 +317,8 @@ public abstract class AbstractCoordinator implements Closeable {
                 // awaiting a rebalance
                 return;
             }
-
+            // now - Math.max(lastSessionReset, lastHeartbeatReceive) > timeout
+            // 认为GroupCoordinator死掉了
             if (heartbeat.sessionTimeoutExpired(now)) {
                 // we haven't received a successful heartbeat in one session interval
                 // so mark the coordinator dead
