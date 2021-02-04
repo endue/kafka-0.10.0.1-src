@@ -122,14 +122,14 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePr
   var requestHandlerPool: KafkaRequestHandlerPool = null
   // 日志管理组件
   var logManager: LogManager = null
-
+  // 副本管理组件
   var replicaManager: ReplicaManager = null
 
   var dynamicConfigHandlers: Map[String, ConfigHandler] = null
   var dynamicConfigManager: DynamicConfigManager = null
-
+  // 消费者管理组件
   var groupCoordinator: GroupCoordinator = null
-
+  // kafkaController负责集群间通信组件
   var kafkaController: KafkaController = null
 
   // 执行定时任务线程池
