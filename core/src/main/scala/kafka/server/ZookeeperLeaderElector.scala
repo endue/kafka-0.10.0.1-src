@@ -51,7 +51,7 @@ class ZookeeperLeaderElector(controllerContext: ControllerContext,
 
   def startup {
     inLock(controllerContext.controllerLock) {
-      // 在“/controller”节点上注册一个监听器
+      // 在“/controller”节点上注册一个监听器，当leader节点变更后触发监听器的执行
       controllerContext.zkUtils.zkClient.subscribeDataChanges(electionPath, leaderChangeListener)
       // 然后开始选举
       elect
@@ -169,7 +169,7 @@ class ZookeeperLeaderElector(controllerContext: ControllerContext,
       inLock(controllerContext.controllerLock) {
         // 记录自身之前是否是controller
         val amILeaderBeforeDataChange = amILeader
-        // 更新新的controller
+        // 更新新的controller的id
         leaderId = KafkaController.parseControllerId(data.toString)
         info("New leader is %d".format(leaderId))
         // The old leader needs to resign leadership if it is no longer the leader

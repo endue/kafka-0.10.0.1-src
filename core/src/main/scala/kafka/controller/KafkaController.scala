@@ -829,7 +829,7 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
   def startup() = {
     inLock(controllerContext.controllerLock) {
       info("Controller starting up")
-      // 注册Session过期监听器
+      // 注册Session过期监听器，主要是监听当自身session过期后释放一些资源然后重新进行leader选举
       registerSessionExpirationListener()
       isRunning = true
       // 尝试选举leader
