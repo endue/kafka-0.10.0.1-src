@@ -158,7 +158,9 @@ class ZkUtils(val zkClient: ZkClient,
     getChildren(BrokerIdsPath).map(_.toInt).sorted
 
   def getAllBrokersInCluster(): Seq[Broker] = {
+    // 读取"/brokers/ids"节点下的所有数据
     val brokerIds = getChildrenParentMayNotExist(BrokerIdsPath).sorted
+    // 创建对应的Broker实例
     brokerIds.map(_.toInt).map(getBrokerInfo(_)).filter(_.isDefined).map(_.get)
   }
 

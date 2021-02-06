@@ -134,7 +134,7 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePr
 
   // 执行定时任务线程池
   val kafkaScheduler = new KafkaScheduler(config.backgroundThreads)// 默认10
-
+  // kafka服务健康检查
   var kafkaHealthcheck: KafkaHealthcheck = null
   // 缓存的元数据
   val metadataCache: MetadataCache = new MetadataCache(config.brokerId)
@@ -263,7 +263,7 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePr
           else
             (protocol, endpoint)
         }
-        // 启动健康检查
+        // 启动健康检查，这里传入了config.rack为机架信息，在创建topic的时候会使用到
         kafkaHealthcheck = new KafkaHealthcheck(config.brokerId, listeners, zkUtils, config.rack,
           config.interBrokerProtocolVersion)// inter.broker.protocol.version
         kafkaHealthcheck.startup()
