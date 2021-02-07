@@ -462,24 +462,27 @@ object AdminUtils extends Logging {
     val brokerMetadatas = getBrokerMetadatas(zkUtils, rackAwareMode)
     // 创建分区副本列表，返回类型为Map[Int, Seq[Int]]，key是分区编号，value是brokerId集合
     val replicaAssignment = AdminUtils.assignReplicasToBrokers(brokerMetadatas, partitions, replicationFactor)
-    // 创建或者更新topic的分区副本列表
+    // 创建或者更新topic的分区的副本列表
     AdminUtils.createOrUpdateTopicPartitionAssignmentPathInZK(zkUtils, topic, replicaAssignment, topicConfig)
   }
 
+  // 创建或者更新topic的分区的副本列表
   def createOrUpdateTopicPartitionAssignmentPathInZK(zkUtils: ZkUtils,
                                                      topic: String,
-                                                     partitionReplicaAssignment: Map[Int, Seq[Int]],
-                                                     config: Properties = new Properties,
-                                                     update: Boolean = false) {
+                                                     partitionReplicaAssignment: Map[Int, Seq[Int]],// 分区的副本分配列表，key是分区编号，value是brokerId集合
+                                                     config: Properties = new Properties,// topic的一些配置参数
+                                                     update: Boolean = false) {// 是否为更新topic
     // validate arguments
     Topic.validate(topic)
     require(partitionReplicaAssignment.values.map(_.size).toSet.size == 1, "All partitions should have the same number of replicas.")
-
+    // 获取topic在zk上的路径/brokers/topics/{topic}
     val topicPath = getTopicPath(topic)
-
+    // 新增topic操作
     if (!update) {
+      // 新增topic判断是否已经存在
       if (zkUtils.zkClient.exists(topicPath))
         throw new TopicExistsException("Topic \"%s\" already exists.".format(topic))
+      // 新增topic判断是否存在冲突
       else if (Topic.hasCollisionChars(topic)) {
         val allTopics = zkUtils.getAllTopics()
         val collidingTopics = allTopics.filter(t => Topic.hasCollision(topic, t))
@@ -492,28 +495,38 @@ object AdminUtils extends Logging {
     partitionReplicaAssignment.values.foreach(reps => require(reps.size == reps.toSet.size, "Duplicate replica assignment found: "  + partitionReplicaAssignment))
 
     // Configs only matter if a topic is being created. Changing configs via AlterTopic is not supported
+    // 创建topic
     if (!update) {
       // write out the config if there is any, this isn't transactional with the partition assignments
+      // 这里可以看出只有创建topic，配置才会起作用
       LogConfig.validate(config)
-      // 写到zk上的：/config/{entityType}/{entity}
+      // 将配置写到zk上的"/config/topics/{topic}"节点下
+      // 对应节点内容如下：{"version":1,"config":{"segment.bytes":"104857600","compression.type":"producer","cleanup.policy":"compact"}}
       writeEntityConfig(zkUtils, ConfigType.Topic, topic, config)
     }
 
     // create the partition assignment
-    // 写到zk上的：/brokers/topics/{topic}
+    // 将分配结果写或更新到zk上的"/brokers/topics/{topic}"节点下
     writeTopicPartitionAssignment(zkUtils, topic, partitionReplicaAssignment, update)
   }
 
+  // 写分区的分配结果
   private def writeTopicPartitionAssignment(zkUtils: ZkUtils, topic: String, replicaAssignment: Map[Int, Seq[Int]], update: Boolean) {
     try {
+      // 获取topic在zk上的路径/brokers/topics/{topic}
       val zkPath = getTopicPath(topic)
+      // 转换分区的分配结果为JSON
+      // 结果大体如下：{"version":1,"partitions":{"2":[0,1],"1":[0,2],"0":[1,2]}
       val jsonPartitionData = zkUtils.replicaAssignmentZkData(replicaAssignment.map(e => (e._1.toString -> e._2)))
-
+      // 新增
       if (!update) {
         info("Topic creation " + jsonPartitionData.toString)
+        // 将数据写入zk上的/brokers/topics/{topic}节点
         zkUtils.createPersistentPath(zkPath, jsonPartitionData)
+      // 更新
       } else {
         info("Topic update " + jsonPartitionData.toString)
+        // 将数据更新到zk上的/brokers/topics/{topic}节点
         zkUtils.updatePersistentPath(zkPath, jsonPartitionData)
       }
       debug("Updated path %s with %s for replica assignment".format(zkPath, jsonPartitionData))

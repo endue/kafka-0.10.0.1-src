@@ -98,6 +98,7 @@ object ZkUtils {
   /*
    * Get calls that only depend on static paths
    */
+  // 获取topic在zk上的路径/brokers/topics/{topic}
   def getTopicPath(topic: String): String = {
     ZkUtils.BrokerTopicsPath + "/" + topic
   }
@@ -326,6 +327,8 @@ class ZkUtils(val zkClient: ZkClient,
   /**
    * Get JSON partition to replica map from zookeeper.
    */
+  // 将分区分配结果转换为JSON
+  // 转换结果内容大体如下：{"version":1,"partitions":{"2":[0,1],"1":[0,2],"0":[1,2]}
   def replicaAssignmentZkData(map: Map[String, Seq[Int]]): String = {
     Json.encode(Map("version" -> 1, "partitions" -> map))
   }
@@ -824,6 +827,7 @@ class ZkUtils(val zkClient: ZkClient,
     }
   }
 
+  // 获取zk/brokers/topics路径下所有的topic
   def getAllTopics(): Seq[String] = {
     val topics = getChildrenParentMayNotExist(BrokerTopicsPath)
     if(topics == null)
