@@ -102,23 +102,23 @@ object ZkUtils {
   def getTopicPath(topic: String): String = {
     ZkUtils.BrokerTopicsPath + "/" + topic
   }
-
+  // 获取topic的分区在zk上的路径/brokers/topics/{topic}/partitions
   def getTopicPartitionsPath(topic: String): String = {
     getTopicPath(topic) + "/partitions"
   }
-
+  // 获取topic的分区在zk上的路径/brokers/topics/{topic}/partitions/{partitionId}
   def getTopicPartitionPath(topic: String, partitionId: Int): String =
     getTopicPartitionsPath(topic) + "/" + partitionId
-
+  // 获取topic的分区在zk上的路径/brokers/topics/{topic}/partitions/{partitionId}/state
   def getTopicPartitionLeaderAndIsrPath(topic: String, partitionId: Int): String =
     getTopicPartitionPath(topic, partitionId) + "/" + "state"
-
+  // /config/{entityType}
   def getEntityConfigRootPath(entityType: String): String =
     ZkUtils.EntityConfigPath + "/" + entityType
-
+  // /config/{entityType}/{entity}
   def getEntityConfigPath(entityType: String, entity: String): String =
     getEntityConfigRootPath(entityType) + "/" + entity
-
+  // 获取审查topic的路径/admin/delete_topics/{topic}
   def getDeleteTopicPath(topic: String): String =
     DeleteTopicsPath + "/" + topic
 }

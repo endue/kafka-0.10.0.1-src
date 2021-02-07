@@ -371,19 +371,20 @@ class PartitionStateMachine(controller: KafkaController) extends Logging {
           controller.epoch)
         debug("Initializing leader and isr for partition %s to %s".format(topicAndPartition, leaderIsrAndControllerEpoch))
         try {
-          // 创建持久节点
+          // 创建持久节点,两个参数:路径，数据
           zkUtils.createPersistentPath(
             // 路径：/brokers/topics/{topic}/partitions/{partitionId}/state
             getTopicPartitionLeaderAndIsrPath(topicAndPartition.topic, topicAndPartition.partition),
-            // 节点信息：
+            // 数据：
             // Json.encode(Map("version" -> 1, "leader" -> leaderAndIsr.leader, "leader_epoch" -> leaderAndIsr.leaderEpoch,"controller_epoch" -> controllerEpoch, "isr" -> leaderAndIsr.isr))
+            // {"controller_epoch":14,"leader":1,"version":1,"leader_epoch":23,"isr":[1,2]}
             zkUtils.leaderAndIsrZkData(leaderIsrAndControllerEpoch.leaderAndIsr, controller.epoch))
           // NOTE: the above write can fail only if the current controller lost its zk session and the new controller
           // took over and initialized this partition. This can happen if the current controller went into a long
           // GC pause
           // 更新controllerContext中partitionLeadershipInfo记录的主题分区和对应的LeaderIsrAndControllerEpoch信息
           controllerContext.partitionLeadershipInfo.put(topicAndPartition, leaderIsrAndControllerEpoch)
-          // 构建leaderAndIsrRequest等待发送到其他broker
+          // 构建leaderAndIsrRequest发送到ar列表中有效的broker节点
           brokerRequestBatch.addLeaderAndIsrRequestForBrokers(liveAssignedReplicas, topicAndPartition.topic,
             topicAndPartition.partition, leaderIsrAndControllerEpoch, replicaAssignment)
         } catch {
