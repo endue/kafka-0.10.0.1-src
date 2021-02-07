@@ -56,7 +56,7 @@ class PartitionStateMachine(controller: KafkaController) extends Logging {
   private val partitionState: mutable.Map[TopicAndPartition, PartitionState] = mutable.Map.empty
   // 用于向指定的Broker批量发送请求
   private val brokerRequestBatch = new ControllerBrokerRequestBatch(controller)
-  // 当前state machine状态
+  // 当前kafkaController状态
   private val hasStarted = new AtomicBoolean(false)
   // 默认的副本选举器，并没有真正进行副本选举，只是返回当前的Leader副本，ISR集合和AR集合
   private val noOpPartitionLeaderSelector = new NoOpLeaderSelector(controllerContext)
@@ -165,15 +165,19 @@ class PartitionStateMachine(controller: KafkaController) extends Logging {
    * @param partitions   The list of partitions that need to be transitioned to the target state
    * @param targetState  The state that the partitions should be moved to
    */
+  // 处理TopicAndPartition状态
   def handleStateChanges(partitions: Set[TopicAndPartition], targetState: PartitionState,
                          leaderSelector: PartitionLeaderSelector = noOpPartitionLeaderSelector,
                          callbacks: Callbacks = (new CallbackBuilder).build) {
     info("Invoking state change to %s for partitions %s".format(targetState, partitions.mkString(",")))
     try {
+      // 校验缓存中是否有未发生的消息
       brokerRequestBatch.newBatch()
+      // 遍历TopicAndPartition集合
       partitions.foreach { topicAndPartition =>
         handleStateChange(topicAndPartition.topic, topicAndPartition.partition, targetState, leaderSelector, callbacks)
       }
+      // 发生请求
       brokerRequestBatch.sendRequestsToBrokers(controller.epoch)
     }catch {
       case e: Throwable => error("Error while moving some partitions to %s state".format(targetState), e)
@@ -529,27 +533,29 @@ class PartitionStateMachine(controller: KafkaController) extends Logging {
     @throws(classOf[Exception])
     def handleChildChange(parentPath : String, children : java.util.List[String]) {
       inLock(controllerContext.controllerLock) {
-        // 校验state machine状态是否还在运行
+        // 校验kafkaController状态是否还在运行
         if (hasStarted.get) {
           try {
             // 获取/brokers/topics下的子节点集合
+            // 也就是获取所有topic
             val currentChildren = {
               import JavaConversions._
               debug("Topic change listener fired for path %s with children %s".format(parentPath, children.mkString(",")))
               (children: Buffer[String]).toSet
             }
-            // 过滤出zk相对缓存新增的topics
+            // 过滤出新增的topics
             val newTopics = currentChildren -- controllerContext.allTopics
-            // 过滤出缓存需要删除的topics
+            // 过滤出已删除的topics
             val deletedTopics = controllerContext.allTopics -- currentChildren
             // 更新缓存中记录的所有topic
             controllerContext.allTopics = currentChildren
-            // 获取新topics的ar副本列表
+            // 获取新topics的分区分配结果
+            // key是topic-partiton对象，value是副本id
             val addedPartitionReplicaAssignment = zkUtils.getReplicaAssignmentForTopics(newTopics.toSeq)
             // 从controllerContext.partitionReplicaAssignment中过滤掉deletedTopics队列里的topic
             controllerContext.partitionReplicaAssignment = controllerContext.partitionReplicaAssignment.filter(p =>
               !deletedTopics.contains(p._1.topic))
-            // 将新的topics累加到controllerContext的AR副本集
+            // 将新的topics累加到controllerContext.partitionReplicaAssignment的ar副本集
             controllerContext.partitionReplicaAssignment.++=(addedPartitionReplicaAssignment)
             info("New topics: [%s], deleted topics: [%s], new partition replica assignment [%s]".format(newTopics,
               deletedTopics, addedPartitionReplicaAssignment))

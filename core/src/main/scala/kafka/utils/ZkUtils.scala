@@ -615,17 +615,25 @@ class ZkUtils(val zkClient: ZkClient,
     ret
   }
 
+  // 获取topic分区的副本的分配结果
+  // key是topic-partiton对象，value是副本id
   def getReplicaAssignmentForTopics(topics: Seq[String]): mutable.Map[TopicAndPartition, Seq[Int]] = {
+    // 记录结果
     val ret = new mutable.HashMap[TopicAndPartition, Seq[Int]]
     topics.foreach { topic =>
+      // 读取/brokers/topics/{topic}节点的数据
+      // topic分区的副本分配结果，在节点上存储的格式为：{"version":2,"partitions":{"2":[0,1],"1":[0,2],"0":[1,2]}
       val jsonPartitionMapOpt = readDataMaybeNull(getTopicPath(topic))._1
       jsonPartitionMapOpt match {
         case Some(jsonPartitionMap) =>
           Json.parseFull(jsonPartitionMap) match {
+              // 获取分配结果
             case Some(m) => m.asInstanceOf[Map[String, Any]].get("partitions") match {
               case Some(repl)  =>
+                // partitions对应的数据转换为map，key是分区编号，value是副本id
                 val replicaMap = repl.asInstanceOf[Map[String, Seq[Int]]]
                 for((partition, replicas) <- replicaMap){
+                  // 记录结果
                   ret.put(TopicAndPartition(topic, partition.toInt), replicas)
                   debug("Replicas assigned to topic [%s], partition [%s] are [%s]".format(topic, partition, replicas))
                 }

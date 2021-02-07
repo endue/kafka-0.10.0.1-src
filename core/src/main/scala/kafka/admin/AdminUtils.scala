@@ -511,6 +511,7 @@ object AdminUtils extends Logging {
   }
 
   // 写分区的分配结果
+  // 写入完成触发kafka.controller.PartitionStateMachine.TopicChangeListener
   private def writeTopicPartitionAssignment(zkUtils: ZkUtils, topic: String, replicaAssignment: Map[Int, Seq[Int]], update: Boolean) {
     try {
       // 获取topic在zk上的路径/brokers/topics/{topic}
