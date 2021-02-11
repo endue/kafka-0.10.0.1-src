@@ -667,7 +667,7 @@ class PartitionStateMachine(controller: KafkaController) extends Logging {
           // 过滤出新增加的partition
           val partitionsToBeAdded = partitionReplicaAssignment.filter(p =>
             !controllerContext.partitionReplicaAssignment.contains(p._1))
-          // 如果当前topic是待删除topic则打印日志，如继续处理
+          // 如果当前topic是待删除topic则打印日志，否则继续处理
           if(controller.deleteTopicManager.isTopicQueuedUpForDeletion(topic))
             error("Skipping adding partitions %s for topic %s since it is currently being deleted"
                   .format(partitionsToBeAdded.map(_._1.partition).mkString(","), topic))
