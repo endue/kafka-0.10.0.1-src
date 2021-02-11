@@ -34,9 +34,9 @@ import org.apache.kafka.common.security.JaasUtils
   * 如果现有的leader已经死亡，这个类将处理自动重选，如果成功，它将调用leader状态更改回调
  */
 class ZookeeperLeaderElector(controllerContext: ControllerContext,
-                             electionPath: String,
-                             onBecomingLeader: () => Unit,// 回调方法
-                             onResigningAsLeader: () => Unit,// 回调方法
+                             electionPath: String,// "/controller"
+                             onBecomingLeader: () => Unit,// 成为leader后的回调方法
+                             onResigningAsLeader: () => Unit,// 退出leader后的回调方法
                              brokerId: Int)// brokerID
   extends LeaderElector with Logging {
   // 记录Controller的leaderID
@@ -49,6 +49,9 @@ class ZookeeperLeaderElector(controllerContext: ControllerContext,
   // leader发生变更后的监听器
   val leaderChangeListener = new LeaderChangeListener
 
+  // startup方法，包括两个部分：
+  // 1.注册leaderChangeListener监听器
+  // 2.leader选举，也就是kafkaController
   def startup {
     inLock(controllerContext.controllerLock) {
       // 在“/controller”节点上注册一个监听器，当leader节点变更后触发监听器的执行
@@ -99,7 +102,7 @@ class ZookeeperLeaderElector(controllerContext: ControllerContext,
        return amILeader
     }
 
-    // 选举，也就是创建节点
+    // 选举，也就是创建临时节点
     try {
       val zkCheckedEphemeral = new ZKCheckedEphemeral(electionPath,// 写入路径
                                                       electString,// 写入数据

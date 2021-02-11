@@ -51,9 +51,11 @@ class ControllerChannelManager(controllerContext: ControllerContext, config: Kaf
   protected val brokerStateInfo = new HashMap[Int, ControllerBrokerStateInfo]
   private val brokerLock = new Object
   this.logIdent = "[Channel manager on controller " + config.brokerId + "]: "
-  // 为每个broker建立ControllerBrokerStateInfo
+  // 为每个broker建立ControllerBrokerStateInfo并保存到brokerStateInfo map中
   controllerContext.liveBrokers.foreach(addNewBroker(_))
 
+  // 启动方法
+  // 逻辑简单就是启动对应每个broker的RequestSendThread线程
   def startup() = {
     brokerLock synchronized {
       brokerStateInfo.foreach(brokerState => startRequestSendThread(brokerState._1))
@@ -139,6 +141,7 @@ class ControllerChannelManager(controllerContext: ControllerContext, config: Kaf
       case Some(name) => "%s:Controller-%d-to-broker-%d-send-thread".format(name, config.brokerId, broker.id)
     }
     // 创建RequestSendThread，用来发送请求
+    // 这里并没有启动
     val requestThread = new RequestSendThread(config.brokerId, controllerContext, messageQueue, networkClient,
       brokerNode, config, time, threadName)
     requestThread.setDaemon(false)

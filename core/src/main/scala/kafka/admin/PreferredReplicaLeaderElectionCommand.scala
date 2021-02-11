@@ -89,6 +89,7 @@ object PreferredReplicaLeaderElectionCommand extends Logging {
               val partition = p.get("partition").get.asInstanceOf[Int]
               TopicAndPartition(topic, partition)
             }
+            // 计算重复的partition
             val duplicatePartitions = CoreUtils.duplicates(partitions)
             val partitionsSet = partitions.toSet
             if (duplicatePartitions.nonEmpty)

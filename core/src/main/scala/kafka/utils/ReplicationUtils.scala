@@ -70,13 +70,17 @@ object ReplicationUtils extends Logging {
     (false,-1)
   }
 
+  // 获取topic-partition的LeaderIsrAndControllerEpoch信息
   def getLeaderIsrAndEpochForPartition(zkUtils: ZkUtils, topic: String, partition: Int):Option[LeaderIsrAndControllerEpoch] = {
     // 路径：/brokers/topics/{topic}/partitions/{partitionId}
+    // 节点数据大体如下：{"controller_epoch":15,"leader":2,"version":1,"leader_epoch":25,"isr":[2,1]}
     val leaderAndIsrPath = getTopicPartitionLeaderAndIsrPath(topic, partition)
+    // 读取数据
     val (leaderAndIsrOpt, stat) = zkUtils.readDataMaybeNull(leaderAndIsrPath)
     leaderAndIsrOpt.flatMap(leaderAndIsrStr => parseLeaderAndIsr(leaderAndIsrStr, leaderAndIsrPath, stat))
   }
 
+  // 将参数封装为一个LeaderIsrAndControllerEpoch对象
   private def parseLeaderAndIsr(leaderAndIsrStr: String, path: String, stat: Stat)
       : Option[LeaderIsrAndControllerEpoch] = {
     Json.parseFull(leaderAndIsrStr).flatMap {m =>

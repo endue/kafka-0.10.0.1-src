@@ -112,7 +112,7 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePr
   private val metricConfig: MetricConfig = new MetricConfig()
     .samples(config.metricNumSamples)
     .timeWindow(config.metricSampleWindowMs, TimeUnit.MILLISECONDS)
-  // kafkaServer的状态
+  // kafkaServer的状态，当成为kafkaController后为RunningAsController
   val brokerState: BrokerState = new BrokerState
 
   var apis: KafkaApis = null

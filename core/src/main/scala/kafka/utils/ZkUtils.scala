@@ -158,10 +158,11 @@ class ZkUtils(val zkClient: ZkClient,
   def getSortedBrokerList(): Seq[Int] =
     getChildren(BrokerIdsPath).map(_.toInt).sorted
 
+  // 获取所有的broker的实例
   def getAllBrokersInCluster(): Seq[Broker] = {
     // 读取"/brokers/ids"节点下的所有数据
     val brokerIds = getChildrenParentMayNotExist(BrokerIdsPath).sorted
-    // 创建对应的Broker实例
+    // 获取brokerId对应的Broker实例
     brokerIds.map(_.toInt).map(getBrokerInfo(_)).filter(_.isDefined).map(_.get)
   }
 
@@ -335,7 +336,7 @@ class ZkUtils(val zkClient: ZkClient,
 
   /**
    *  make sure a persistent path exists in ZK. Create the path if not exist.
-    *  确保ZK中存在一个持久路径。如果不存在，请创建路径
+    *  确保ZK中存在一个path持久路径。如果不存在，就创建路径
    */
   def makeSurePersistentPathExists(path: String, acls: java.util.List[ACL] = DefaultAcls) {
     //Consumer path is kept open as different consumers will write under this node.
@@ -603,10 +604,14 @@ class ZkUtils(val zkClient: ZkClient,
     cluster
   }
 
+  // 读取zk上记录的数据，创建topic-partition集合中每个topic-pratition的LeaderIsrAndControllerEpoch对象
   def getPartitionLeaderAndIsrForTopics(zkClient: ZkClient, topicAndPartitions: Set[TopicAndPartition])
   : mutable.Map[TopicAndPartition, LeaderIsrAndControllerEpoch] = {
+    // 记录返回结果
     val ret = new mutable.HashMap[TopicAndPartition, LeaderIsrAndControllerEpoch]
+    // 遍历所有的topic-partition
     for(topicAndPartition <- topicAndPartitions) {
+      // 获取zk上的数据并封装为一个LeaderIsrAndControllerEpoch对象
       ReplicationUtils.getLeaderIsrAndEpochForPartition(this, topicAndPartition.topic, topicAndPartition.partition) match {
         case Some(leaderIsrAndControllerEpoch) => ret.put(topicAndPartition, leaderIsrAndControllerEpoch)
         case None =>
@@ -616,7 +621,7 @@ class ZkUtils(val zkClient: ZkClient,
   }
 
   // 获取topic分区的副本的分配结果
-  // key是topic-partiton对象，value是副本id
+  // key是topic-partiton对象，value是副本ids
   def getReplicaAssignmentForTopics(topics: Seq[String]): mutable.Map[TopicAndPartition, Seq[Int]] = {
     // 记录结果
     val ret = new mutable.HashMap[TopicAndPartition, Seq[Int]]
@@ -679,11 +684,16 @@ class ZkUtils(val zkClient: ZkClient,
     }
   }
 
+  // 读取zk "/admin/reassign_partitions" 节点下数据
+  // 返回数据Map[TopicAndPartition, ReassignedPartitionsContext]
   def getPartitionsBeingReassigned(): Map[TopicAndPartition, ReassignedPartitionsContext] = {
     // read the partitions and their new replica list
+    // 读取zk "/admin/reassign_partitions" 节点下数据
     val jsonPartitionMapOpt = readDataMaybeNull(ReassignPartitionsPath)._1
+    // 解析数据
     jsonPartitionMapOpt match {
       case Some(jsonPartitionMap) =>
+        // 解析数据返回Map[TopicAndPartition, Seq[Int]]，value是所有的replicas
         val reassignedPartitions = parsePartitionReassignmentData(jsonPartitionMap)
         reassignedPartitions.map(p => (p._1 -> new ReassignedPartitionsContext(p._2)))
       case None => Map.empty[TopicAndPartition, ReassignedPartitionsContext]
@@ -759,6 +769,8 @@ class ZkUtils(val zkClient: ZkClient,
 
   def getPartitionsUndergoingPreferredReplicaElection(): Set[TopicAndPartition] = {
     // read the partitions and their new replica list
+    // 读取zk "/admin/preferred_replica_election"节点下数据
+    // 数据格式大体如下：{partitions:[{topic:foo,partition:1},{topic:foobar,partition:2}]}
     val jsonPartitionListOpt = readDataMaybeNull(PreferredReplicaLeaderElectionPath)._1
     jsonPartitionListOpt match {
       case Some(jsonPartitionList) => PreferredReplicaLeaderElectionCommand.parsePreferredReplicaElectionData(jsonPartitionList)
@@ -804,6 +816,9 @@ class ZkUtils(val zkClient: ZkClient,
    * @param brokerId The broker id
    * @return An optional Broker object encapsulating the broker metadata
    */
+  // 读取"/brokers/ids" + brokerId 节点的数据
+  // 数据内容大体如下：{"listener_security_protocol_map":{"PLAINTEXT":"PLAINTEXT"},"endpoints":["PLAINTEXT://192.168.6.132:9092"],"jmx_port":-1,"host":"192.168.6.132","timestamp":"1613027158335","port":9092,"version":4}
+  // 如果有内容就创建一个对应的Broker实例
   def getBrokerInfo(brokerId: Int): Option[Broker] = {
     readDataMaybeNull(BrokerIdsPath + "/" + brokerId)._1 match {
       case Some(brokerInfo) => Some(Broker.createBroker(brokerId, brokerInfo))
@@ -835,7 +850,7 @@ class ZkUtils(val zkClient: ZkClient,
     }
   }
 
-  // 获取zk/brokers/topics路径下所有的topic
+  // 读取zk"/brokers/topics"路径下所有的topic
   def getAllTopics(): Seq[String] = {
     val topics = getChildrenParentMayNotExist(BrokerTopicsPath)
     if(topics == null)

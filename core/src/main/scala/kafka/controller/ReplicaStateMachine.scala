@@ -335,19 +335,30 @@ class ReplicaStateMachine(controller: KafkaController) extends Logging {
     }
   }
 
+  // 判断topic的所有分区的所有副本是否都已经删除
   def areAllReplicasForTopicDeleted(topic: String): Boolean = {
+    // 获取指定topic上的PartitionAndReplica，返回内容是Set[PartitionAndReplica]集合
     val replicasForTopic = controller.controllerContext.replicasForTopic(topic)
+    // 遍历topic-partition集合，获取副本状态
+    // key是topic-partiton,value是ReplicaState
     val replicaStatesForTopic = replicasForTopic.map(r => (r, replicaState(r))).toMap
     debug("Are all replicas for topic %s deleted %s".format(topic, replicaStatesForTopic))
+    // 判断是否topic-partition对应的状态为ReplicaDeletionSuccessful
     replicaStatesForTopic.forall(_._2 == ReplicaDeletionSuccessful)
   }
 
+  // 判断是否至少有一个topic-partiton的副本的ReplicaState状态为ReplicaDeletionStarted
   def isAtLeastOneReplicaInDeletionStartedState(topic: String): Boolean = {
+    // 获取指定topic上的PartitionAndReplica，返回内容是Set[PartitionAndReplica]集合
     val replicasForTopic = controller.controllerContext.replicasForTopic(topic)
+    // 遍历topic-partition集合，获取副本状态
+    // key是topic-partiton,value是ReplicaState
     val replicaStatesForTopic = replicasForTopic.map(r => (r, replicaState(r))).toMap
+    // 判断是否至少有一个topic-partiton的副本的ReplicaState状态为ReplicaDeletionStarted
     replicaStatesForTopic.foldLeft(false)((deletionState, r) => deletionState || r._2 == ReplicaDeletionStarted)
   }
 
+  // 过滤出指定topic的所有分区的所有topic-partition的状态为state的集合
   def replicasInState(topic: String, state: ReplicaState): Set[PartitionAndReplica] = {
     replicaState.filter(r => r._1.topic.equals(topic) && r._2 == state).keySet
   }
