@@ -369,11 +369,16 @@ class ControllerBrokerRequestBatch(controller: KafkaController) extends  Logging
                                          callback: AbstractRequestResponse => Unit = null) {
     // 回调函数
     def updateMetadataRequestMapFor(partition: TopicAndPartition, beingDeleted: Boolean) {
+      // 获取分区的LeaderIsrAndControllerEpoch
       val leaderIsrAndControllerEpochOpt = controllerContext.partitionLeadershipInfo.get(partition)
       leaderIsrAndControllerEpochOpt match {
+          // 如果存在
         case Some(leaderIsrAndControllerEpoch) =>
+          // 获取分区的所有副本id集合
           val replicas = controllerContext.partitionReplicaAssignment(partition).toSet
+          // 封装为一个PartitionStateInfo对象
           val partitionStateInfo = if (beingDeleted) {
+            // 如果是删除的话，重新生成一个LeaderAndIsr，设置leader为LeaderDuringDelete
             val leaderAndIsr = new LeaderAndIsr(LeaderAndIsr.LeaderDuringDelete, leaderIsrAndControllerEpoch.leaderAndIsr.isr)
             PartitionStateInfo(LeaderIsrAndControllerEpoch(leaderAndIsr, leaderIsrAndControllerEpoch.controllerEpoch), replicas)
           } else {
@@ -381,6 +386,7 @@ class ControllerBrokerRequestBatch(controller: KafkaController) extends  Logging
           }
           brokerIds.filter(b => b >= 0).foreach { brokerId =>
             updateMetadataRequestMap.getOrElseUpdate(brokerId, mutable.Map.empty[TopicPartition, PartitionStateInfo])
+            // 封装请求
             updateMetadataRequestMap(brokerId).put(new TopicPartition(partition.topic, partition.partition), partitionStateInfo)
           }
         case None =>
@@ -388,22 +394,28 @@ class ControllerBrokerRequestBatch(controller: KafkaController) extends  Logging
       }
     }
 
+    // 过滤出有效的分区
     val filteredPartitions = {
+      // 如果参数传递过来的为空，那么就取集合partitionLeadershipInfo中记录的所有TopicAndPartitions
       val givenPartitions = if (partitions.isEmpty)
         controllerContext.partitionLeadershipInfo.keySet
       else
+        // 如果参数传递过来的不为空，已参数TopicAndPartitions
         partitions
-      // 过滤要被删除的分区
+      // 如果partitionsToBeDeleted为空，表示没有待删除的分区，返回计算出的givenPartitions
       if (controller.deleteTopicManager.partitionsToBeDeleted.isEmpty)
         givenPartitions
       else
+        // 如果partitionsToBeDeleted不为空，表示有待删除的分区，过滤待删除的分区
         givenPartitions -- controller.deleteTopicManager.partitionsToBeDeleted
     }
+    // 有效的分区为空
     if (filteredPartitions.isEmpty)
       brokerIds.filter(b => b >= 0).foreach { brokerId =>
         updateMetadataRequestMap.getOrElseUpdate(brokerId, mutable.Map.empty[TopicPartition, PartitionStateInfo])
       }
     else
+    // 遍历所有的分区，执行updateMetadataRequestMapFor回调方法
       filteredPartitions.foreach(partition => updateMetadataRequestMapFor(partition, beingDeleted = false))
 
     controller.deleteTopicManager.partitionsToBeDeleted.foreach(partition => updateMetadataRequestMapFor(partition, beingDeleted = true))

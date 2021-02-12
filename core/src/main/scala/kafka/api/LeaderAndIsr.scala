@@ -32,6 +32,7 @@ object LeaderAndIsr {
   val LeaderDuringDelete = -2
 }
 
+// 如果是删除操作，会标记leader为LeaderDuringDelete
 case class LeaderAndIsr(var leader: Int, var leaderEpoch: Int, var isr: List[Int], var zkVersion: Int) {
   def this(leader: Int, isr: List[Int]) = this(leader, LeaderAndIsr.initialLeaderEpoch, isr, LeaderAndIsr.initialZKVersion)
 

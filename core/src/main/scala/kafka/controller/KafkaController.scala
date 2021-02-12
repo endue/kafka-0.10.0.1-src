@@ -65,7 +65,7 @@ class ControllerContext(val zkUtils: ZkUtils,
   var allTopics: Set[String] = Set.empty
   // 记录每一个topic-partition的ar集合：key是topic-partition,value是副本ids
   var partitionReplicaAssignment: mutable.Map[TopicAndPartition, Seq[Int]] = mutable.Map.empty
-  // 记录每一个分区的leader副本所在的brokerId、ISR列表、controller_epoch、LeaderEpoch
+  // 记录每一个topic-partition的leader副本所在的brokerId、ISR列表、controller_epoch、LeaderEpoch
   var partitionLeadershipInfo: mutable.Map[TopicAndPartition, LeaderIsrAndControllerEpoch] = mutable.Map.empty
   // 记录正在重新分配副本的分区
   val partitionsBeingReassigned: mutable.Map[TopicAndPartition, ReassignedPartitionsContext] = new mutable.HashMap

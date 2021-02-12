@@ -202,6 +202,7 @@ private[server] class MetadataCache(brokerId: Int) extends Logging {
       updateMetadataRequest.partitionStates.asScala.foreach { case (tp, info) =>
         val controllerId = updateMetadataRequest.controllerId
         val controllerEpoch = updateMetadataRequest.controllerEpoch
+        // 如果是删除，参考：kafka.controller.ControllerBrokerRequestBatch.addUpdateMetadataRequestForBrokers
         if (info.leader == LeaderAndIsr.LeaderDuringDelete) {
           removePartitionInfo(tp.topic, tp.partition)
           stateChangeLogger.trace(s"Broker $brokerId deleted partition $tp from metadata cache in response to UpdateMetadata " +
