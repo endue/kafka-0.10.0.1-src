@@ -166,6 +166,7 @@ object TopicCommand extends Logging {
   }
 
   // 删除topic
+  // 触发kafka.controller.PartitionStateMachine.DeleteTopicsListener.DeleteTopicsListener
   def deleteTopic(zkUtils: ZkUtils, opts: TopicCommandOptions) {
     val topics = getTopics(zkUtils, opts)
     val ifExists = if (opts.options.has(opts.ifExistsOpt)) true else false
@@ -173,11 +174,14 @@ object TopicCommand extends Logging {
       throw new IllegalArgumentException("Topic %s does not exist on ZK path %s".format(opts.options.valueOf(opts.topicOpt),
           opts.options.valueOf(opts.zkConnectOpt)))
     }
+    // 遍历待删除的topic
     topics.foreach { topic =>
       try {
+        // 内部topic不允许删除
         if (Topic.isInternal(topic)) {
           throw new AdminOperationException("Topic %s is a kafka internal topic and is not allowed to be marked for deletion.".format(topic))
         } else {
+          // 根据待删除的topic在/admin/delete_topics/路径下创建永久节点 /admin/delete_topics/{topic}
           zkUtils.createPersistentPath(getDeleteTopicPath(topic))
           println("Topic %s is marked for deletion.".format(topic))
           println("Note: This will have no impact if delete.topic.enable is not set to true.")

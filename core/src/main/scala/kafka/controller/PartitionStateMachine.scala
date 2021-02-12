@@ -62,7 +62,7 @@ class PartitionStateMachine(controller: KafkaController) extends Logging {
   private val noOpPartitionLeaderSelector = new NoOpLeaderSelector(controllerContext)
   // 监听topic的变化,路径为：/brokers/topics
   private val topicChangeListener = new TopicChangeListener()
-  // 监听topic的删除,/admin/delete_topics/<topic_name>
+  // 监听topic的删除,路径为：/admin/delete_topics
   private val deleteTopicsListener = new DeleteTopicsListener()
   // 监听分区的修改，key是topic，路径为:/brokers/topics/{topic}
   private val partitionModificationsListeners: mutable.Map[String, PartitionModificationsListener] = mutable.Map.empty
@@ -602,10 +602,10 @@ class PartitionStateMachine(controller: KafkaController) extends Logging {
         debug("Delete topics listener fired for topics %s to be deleted".format(topicsToBeDeleted.mkString(",")))
         // 从topicsToBeDeleted集合过滤出controllerContext.allTopics不包含的topic
         val nonExistentTopics = topicsToBeDeleted.filter(t => !controllerContext.allTopics.contains(t))
-        // 如果缓存中没有对应的topic,那么直接删除“/admin/delete_topics/<topic_name>”节点即可
+        // 如果缓存中没有对应的topic,那么直接删除“/admin/delete_topics/{topic}”节点即可
         if(nonExistentTopics.size > 0) {
           warn("Ignoring request to delete non-existing topics " + nonExistentTopics.mkString(","))
-          // 删除对应的topic
+          // 删除对应topic的zk路径
           nonExistentTopics.foreach(topic => zkUtils.deletePathRecursive(getDeleteTopicPath(topic)))
         }
         // 过滤掉不存在的topic，计算剩余存在的topic

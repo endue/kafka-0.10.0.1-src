@@ -91,7 +91,7 @@ class TopicDeletionManager(controller: KafkaController,
   val replicaStateMachine = controller.replicaStateMachine
   // 待删除的topic
   val topicsToBeDeleted: mutable.Set[String] = mutable.Set.empty[String] ++ initialTopicsToBeDeleted
-  // 待删除topic-partition的分区
+  // 待删除的分区：topic-partition
   val partitionsToBeDeleted: mutable.Set[TopicAndPartition] = topicsToBeDeleted.flatMap(controllerContext.partitionsForTopic)
   // 锁
   val deleteLock = new ReentrantLock()
@@ -202,9 +202,9 @@ class TopicDeletionManager(controller: KafkaController,
   /**
    * Halt delete topic if -
     * 暂停删除的主题，包括以下情况
-   * 1. replicas being down
-   * 2. partition reassignment in progress for some partitions of the topic
-   * 3. preferred replica election in progress for some partitions of the topic
+   * 1. replicas being down 副本下线
+   * 2. partition reassignment in progress for some partitions of the topic 真正进行分区重分配
+   * 3. preferred replica election in progress for some partitions of the topic 真正进行分区leader选举
    * @param topics Topics that should be marked ineligible for deletion. No op if the topic is was not previously queued up for deletion
    */
   def markTopicIneligibleForDeletion(topics: Set[String]) {

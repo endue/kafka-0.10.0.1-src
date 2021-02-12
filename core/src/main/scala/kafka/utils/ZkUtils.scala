@@ -118,7 +118,7 @@ object ZkUtils {
   // /config/{entityType}/{entity}
   def getEntityConfigPath(entityType: String, entity: String): String =
     getEntityConfigRootPath(entityType) + "/" + entity
-  // 获取审查topic的路径/admin/delete_topics/{topic}
+  // 获取删除topic的路径/admin/delete_topics/{topic}
   def getDeleteTopicPath(topic: String): String =
     DeleteTopicsPath + "/" + topic
 }
