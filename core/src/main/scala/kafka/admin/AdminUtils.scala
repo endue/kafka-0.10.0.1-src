@@ -291,13 +291,16 @@ object AdminUtils extends Logging {
   * @param replicaAssignmentStr Manual replica assignment
   * @param checkBrokerAvailable Ignore checking if assigned replica broker is available. Only used for testing
   */
+ // 添加分区
   def addPartitions(zkUtils: ZkUtils,
                     topic: String,
-                    numPartitions: Int = 1,
-                    replicaAssignmentStr: String = "",
+                    numPartitions: Int = 1,// --partitions 配置
+                    replicaAssignmentStr: String = "",// --replica-assignment 配置
                     checkBrokerAvailable: Boolean = true,
                     rackAwareMode: RackAwareMode = RackAwareMode.Enforced) {
+   // 获取topic各个分区的副本分配结果，返回类型Map[TopicAndPartition, Seq[Int]]
     val existingPartitionsReplicaList = zkUtils.getReplicaAssignmentForTopics(List(topic))
+   // topic不存在
     if (existingPartitionsReplicaList.size == 0)
       throw new AdminOperationException("The topic %s does not exist".format(topic))
 
@@ -305,19 +308,27 @@ object AdminUtils extends Logging {
       case None => throw new AdminOperationException("the topic does not have partition with id 0, it should never happen")
       case Some(headPartitionReplica) => headPartitionReplica._2
     }
+   // 分区数只能增加不能减少，从这里可以看出--partitions 是一定需要配置的
     val partitionsToAdd = numPartitions - existingPartitionsReplicaList.size
     if (partitionsToAdd <= 0)
       throw new AdminOperationException("The number of partitions for a topic can only be increased")
 
     // create the new partition replication list
+   // 获取所有broker的元数据BrokerMetadata
     val brokerMetadatas = getBrokerMetadatas(zkUtils, rackAwareMode)
+   // 获取分配结果Map[Int, Seq[Int]]
+   // key是分区编号，value是brokerId集合
     val newPartitionReplicaList =
+      // 没有指定 --replica-assignment 配置
       if (replicaAssignmentStr == null || replicaAssignmentStr == "") {
+        // 计算起始索引
         val startIndex = math.max(0, brokerMetadatas.indexWhere(_.id >= existingReplicaListForPartitionZero.head))
+        // 执行重分配
         AdminUtils.assignReplicasToBrokers(brokerMetadatas, partitionsToAdd, existingReplicaListForPartitionZero.size,
           startIndex, existingPartitionsReplicaList.size)
       }
       else
+        // 如果用户指定了---replica-assignment 配置那么解析手动分配的结果
         getManualReplicaAssignment(replicaAssignmentStr, brokerMetadatas.map(_.id).toSet,
           existingPartitionsReplicaList.size, checkBrokerAvailable)
 
@@ -331,9 +342,18 @@ object AdminUtils extends Logging {
     val partitionReplicaList = existingPartitionsReplicaList.map(p => p._1.partition -> p._2)
     // add the new list
     partitionReplicaList ++= newPartitionReplicaList
+   // 将分配结果写入zk
     AdminUtils.createOrUpdateTopicPartitionAssignmentPathInZK(zkUtils, topic, partitionReplicaList, update = true)
   }
 
+  /**
+    * 解析手动分配结果
+    * @param replicaAssignmentList 为 --replica-assignment 配置
+    * @param availableBrokerList 所有brokerId集合
+    * @param startPartitionId 起始分区索引下标
+    * @param checkBrokerAvailable 是否需要检查broker的状态
+    * @return
+    */
   def getManualReplicaAssignment(replicaAssignmentList: String, availableBrokerList: Set[Int], startPartitionId: Int, checkBrokerAvailable: Boolean = true): Map[Int, List[Int]] = {
     var partitionList = replicaAssignmentList.split(",")
     val ret = new mutable.HashMap[Int, List[Int]]()
@@ -510,8 +530,9 @@ object AdminUtils extends Logging {
     writeTopicPartitionAssignment(zkUtils, topic, partitionReplicaAssignment, update)
   }
 
-  // 写分区的分配结果
+  // 写或更新分区的分配结果
   // 写入完成触发kafka.controller.PartitionStateMachine.TopicChangeListener
+  // 更新完成触发kafka.controller.PartitionStateMachine.PartitionModificationsListener.PartitionModificationsListener
   private def writeTopicPartitionAssignment(zkUtils: ZkUtils, topic: String, replicaAssignment: Map[Int, Seq[Int]], update: Boolean) {
     try {
       // 获取topic在zk上的路径/brokers/topics/{topic}
@@ -522,7 +543,7 @@ object AdminUtils extends Logging {
       // 新增
       if (!update) {
         info("Topic creation " + jsonPartitionData.toString)
-        // 将数据写入zk上的/brokers/topics/{topic}节点
+        // 在zk上的路径/brokers/topics/下创建一个永久节点/brokers/topics/{topic}，并将数据写入zk
         zkUtils.createPersistentPath(zkPath, jsonPartitionData)
       // 更新
       } else {
@@ -559,6 +580,7 @@ object AdminUtils extends Logging {
    *                 existing configs need to be deleted, it should be done prior to invoking this API
    *
    */
+  // 更新现有topic的配置
   def changeTopicConfig(zkUtils: ZkUtils, topic: String, configs: Properties) {
     if(!topicExists(zkUtils, topic))
       throw new AdminOperationException("Topic \"%s\" does not exist.".format(topic))
@@ -569,9 +591,11 @@ object AdminUtils extends Logging {
 
   private def changeEntityConfig(zkUtils: ZkUtils, entityType: String, entityName: String, configs: Properties) {
     // write the new config--may not exist if there were previously no overrides
+    // 将topic配置写入zk
     writeEntityConfig(zkUtils, entityType, entityName, configs)
 
     // create the change notification
+    // 创建一个永久有序节点并节数据写入该节点  "/config/changes/config_change_"
     val seqNode = ZkUtils.EntityConfigChangesPath + "/" + EntityConfigChangeZnodePrefix
     val content = Json.encode(getConfigChangeZnodeData(entityType, entityName))
     zkUtils.zkClient.createPersistentSequential(seqNode, content)
@@ -590,6 +614,8 @@ object AdminUtils extends Logging {
       config
     }
     val map = Map("version" -> 1, "config" -> configMap)
+    // 将配置写入zk /config/{entityType}/{entity}路径
+    // 内容大体如下：{"version":1,"config":{"segment.bytes":"104857600","compression.type":"producer","cleanup.policy":"compact"}}
     zkUtils.updatePersistentPath(getEntityConfigPath(entityType, entityName), Json.encode(map))
   }
 

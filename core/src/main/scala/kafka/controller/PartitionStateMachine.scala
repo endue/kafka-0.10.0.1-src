@@ -60,11 +60,11 @@ class PartitionStateMachine(controller: KafkaController) extends Logging {
   private val hasStarted = new AtomicBoolean(false)
   // 默认的副本选举器，并没有真正进行副本选举，只是返回当前的Leader副本，ISR集合和AR集合
   private val noOpPartitionLeaderSelector = new NoOpLeaderSelector(controllerContext)
-  // 监听topic的变化,/brokers/topics
+  // 监听topic的变化,路径为：/brokers/topics
   private val topicChangeListener = new TopicChangeListener()
   // 监听topic的删除,/admin/delete_topics/<topic_name>
   private val deleteTopicsListener = new DeleteTopicsListener()
-  // 监听分区的修改，key是topic
+  // 监听分区的修改，key是topic，路径为:/brokers/topics/{topic}
   private val partitionModificationsListeners: mutable.Map[String, PartitionModificationsListener] = mutable.Map.empty
   private val stateChangeLogger = KafkaController.stateChangeLogger
 
@@ -100,6 +100,7 @@ class PartitionStateMachine(controller: KafkaController) extends Logging {
   }
 
   // de-register topic and partition change listeners
+  // 取消注册主题和分区更改侦听器
   def deregisterListeners() {
     deregisterTopicChangeListener()
     partitionModificationsListeners.foreach {

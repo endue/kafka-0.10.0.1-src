@@ -116,6 +116,7 @@ object TopicCommand extends Logging {
     }
   }
 
+  // 修改topic
   def alterTopic(zkUtils: ZkUtils, opts: TopicCommandOptions) {
     val topics = getTopics(zkUtils, opts)
     val ifExists = if (opts.options.has(opts.ifExistsOpt)) true else false
@@ -125,6 +126,7 @@ object TopicCommand extends Logging {
     }
     topics.foreach { topic =>
       val configs = AdminUtils.fetchEntityConfig(zkUtils, ConfigType.Topic, topic)
+      // 处理配置相关
       if(opts.options.has(opts.configOpt) || opts.options.has(opts.deleteConfigOpt)) {
         println("WARNING: Altering topic configuration from this script has been deprecated and may be removed in future releases.")
         println("         Going forward, please use kafka-configs.sh for this functionality")
@@ -137,15 +139,15 @@ object TopicCommand extends Logging {
         AdminUtils.changeTopicConfig(zkUtils, topic, configs)
         println("Updated config for topic \"%s\".".format(topic))
       }
-
+      // 处理分区相关
       if(opts.options.has(opts.partitionsOpt)) {
         if (topic == TopicConstants.GROUP_METADATA_TOPIC_NAME) {
           throw new IllegalArgumentException("The number of partitions for the offsets topic cannot be changed.")
         }
         println("WARNING: If partitions are increased for a topic that has a key, the partition " +
           "logic or ordering of the messages will be affected")
-        val nPartitions = opts.options.valueOf(opts.partitionsOpt).intValue
-        val replicaAssignmentStr = opts.options.valueOf(opts.replicaAssignmentOpt)
+        val nPartitions = opts.options.valueOf(opts.partitionsOpt).intValue// 读取 --partitions 配置
+        val replicaAssignmentStr = opts.options.valueOf(opts.replicaAssignmentOpt)// 读取 --replica-assignment 配置
         AdminUtils.addPartitions(zkUtils, topic, nPartitions, replicaAssignmentStr)
         println("Adding partitions succeeded!")
       }
@@ -163,6 +165,7 @@ object TopicCommand extends Logging {
     }
   }
 
+  // 删除topic
   def deleteTopic(zkUtils: ZkUtils, opts: TopicCommandOptions) {
     val topics = getTopics(zkUtils, opts)
     val ifExists = if (opts.options.has(opts.ifExistsOpt)) true else false
