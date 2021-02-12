@@ -225,21 +225,23 @@ class TopicDeletionManager(controller: KafkaController,
         info("Halted deletion of topics %s".format(newTopicsToHaltDeletion.mkString(",")))
     }
   }
-
+  // 判断当前topic是否是暂停删除的topic
   def isTopicIneligibleForDeletion(topic: String): Boolean = {
     if(isDeleteTopicEnabled) {
       topicsIneligibleForDeletion.contains(topic)
     } else
       true
   }
-
+  // 判断当前topic是否正在删除
   def isTopicDeletionInProgress(topic: String): Boolean = {
     if(isDeleteTopicEnabled) {
+      // 判断是否至少有一个topic-partiton的副本的ReplicaState状态为ReplicaDeletionStarted
       controller.replicaStateMachine.isAtLeastOneReplicaInDeletionStartedState(topic)
     } else
       false
   }
 
+  // 判断当前分区是否是需要删除的分区
   def isPartitionToBeDeleted(topicAndPartition: TopicAndPartition) = {
     if(isDeleteTopicEnabled) {
       partitionsToBeDeleted.contains(topicAndPartition)
@@ -247,6 +249,7 @@ class TopicDeletionManager(controller: KafkaController,
       false
   }
 
+  // 判断当前topic是否是需要删除的topic
   def isTopicQueuedUpForDeletion(topic: String): Boolean = {
     if(isDeleteTopicEnabled) {
       topicsToBeDeleted.contains(topic)
@@ -258,6 +261,7 @@ class TopicDeletionManager(controller: KafkaController,
    * Invoked by the delete-topic-thread to wait until events that either trigger, restart or halt topic deletion occur.
    * controllerLock should be acquired before invoking this API
    */
+  // 由delete-topic-thread调用，以等待事件触发
   private def awaitTopicDeletionNotification() {
     inLock(deleteLock) {
       while(deleteTopicsThread.isRunning.get() && !deleteTopicStateChanged.compareAndSet(true, false)) {
