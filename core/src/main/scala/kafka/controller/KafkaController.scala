@@ -133,7 +133,7 @@ class ControllerContext(val zkUtils: ZkUtils,
     replicasOnBrokers(liveBrokerIds)
   }
 
-  // 将Set[TopicAndPartition]转换为Set[PartitionAndReplica]
+  // 将参数将Set[TopicAndPartition]转换为Set[PartitionAndReplica]，获取每个分区的所有副本，然后将这些副本封装到集合中返回一个Set[PartitionAndReplica]
   def replicasForPartition(partitions: collection.Set[TopicAndPartition]): collection.Set[PartitionAndReplica] = {
     partitions.map { p =>
       val replicas = partitionReplicaAssignment(p)
@@ -200,7 +200,7 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
   // 配置"auto.leader.rebalance.enable"为true
   // 定时任务执行leader副本的重新选举
   private val autoRebalanceScheduler = new KafkaScheduler(1)
-  // topic删除管理器
+  // topic删除管理器,kafkaController才会初始化
   var deleteTopicManager: TopicDeletionManager = null
   // 分区副本中的leader选举
   val offlinePartitionSelector = new OfflinePartitionLeaderSelector(controllerContext, config)
@@ -1009,7 +1009,7 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
     // 获取正在重新分配副本的topic-partition的topic
     val topicsForWhichPartitionReassignmentIsInProgress = controllerContext.partitionsBeingReassigned.keySet.map(_.topic)
     // 计算不适合被删除的topic
-    // 当前topic-partition对应的副本宕机、真正leader选举、正在副本分配
+    // 当前topic-partition对应的副本宕机、正在leader选举、正在副本分配
     val topicsIneligibleForDeletion = topicsWithReplicasOnDeadBrokers | topicsForWhichPartitionReassignmentIsInProgress |
                                   topicsForWhichPreferredReplicaElectionIsInProgress
     info("List of topics to be deleted: %s".format(topicsQueuedForDeletion.mkString(",")))

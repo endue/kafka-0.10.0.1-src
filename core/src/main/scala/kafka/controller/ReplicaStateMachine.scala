@@ -230,7 +230,7 @@ class ReplicaStateMachine(controller: KafkaController) extends Logging {
           // 修改副本状态
           replicaState.put(partitionAndReplica, ReplicaDeletionStarted)
           // send stop replica command
-          // 准备要发送的StopReplicaRequest请求到其他broker
+          // 准备要发送的StopReplicaRequest请求到这个分区所管理的副本
           brokerRequestBatch.addStopReplicaRequestForBrokers(List(replicaId), topic, partition, deletePartition = true,
             callbacks.stopReplicaResponseCallback)
           stateChangeLogger.trace("Controller %d epoch %d changed state of replica %d for partition %s from %s to %s"
@@ -364,6 +364,7 @@ class ReplicaStateMachine(controller: KafkaController) extends Logging {
     replicaState.filter(r => r._1.topic.equals(topic) && r._2 == state).keySet
   }
 
+  // 参数topic的所有副本中是否有状态为state的
   def isAnyReplicaInState(topic: String, state: ReplicaState): Boolean = {
     replicaState.exists(r => r._1.topic.equals(topic) && r._2 == state)
   }

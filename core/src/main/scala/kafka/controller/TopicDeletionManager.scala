@@ -103,11 +103,11 @@ class TopicDeletionManager(controller: KafkaController,
     (initialTopicsIneligibleForDeletion & initialTopicsToBeDeleted)
   // 删除topic线程条件通知
   val deleteTopicsCond = deleteLock.newCondition()
-  // 状态,标记topic删除操作是否开始
+  // 标记topic删除是否发生，如果存在需要删除的topic时会被置为true
   val deleteTopicStateChanged: AtomicBoolean = new AtomicBoolean(false)
   // 删除topic的后台线程
   var deleteTopicsThread: DeleteTopicsThread = null
-  // 是否允许删除topic
+  //  "delete.topic.enable"是否允许删除topic
   val isDeleteTopicEnabled = controller.config.deleteTopicEnable
 
   /**
@@ -191,9 +191,11 @@ class TopicDeletionManager(controller: KafkaController,
    * @param replicas Replicas for which deletion has failed
    */
   // 处理删除失败的副本
+  // 1.标记删除失败的副本状态为ReplicaDeletionIneligible
+  // 2.暂停topic的删除
   def failReplicaDeletion(replicas: Set[PartitionAndReplica]) {
     if(isDeleteTopicEnabled) {
-      // 过滤出topic在删除队列中的副本
+      // 过滤出副本所处的topic在删除队列中的副本
       val replicasThatFailedToDelete = replicas.filter(r => isTopicQueuedUpForDeletion(r.topic))
       if(replicasThatFailedToDelete.size > 0) {
         val topics = replicasThatFailedToDelete.map(_.topic)
@@ -264,6 +266,9 @@ class TopicDeletionManager(controller: KafkaController,
   // 由delete-topic-thread调用，以等待事件触发
   private def awaitTopicDeletionNotification() {
     inLock(deleteLock) {
+      // 1.如果删除topic的线程已经启动
+      // 2.没有删除topic的操作发生
+      // 那么阻塞delete-topic-thread线程的执行
       while(deleteTopicsThread.isRunning.get() && !deleteTopicStateChanged.compareAndSet(true, false)) {
         debug("Waiting for signal to start or continue topic deletion")
         deleteTopicsCond.await()
@@ -317,6 +322,7 @@ class TopicDeletionManager(controller: KafkaController,
   // 重试删除topic
   private def markTopicForDeletionRetry(topic: String) {
     // reset replica states from ReplicaDeletionIneligible to OfflineReplica
+    // 获取topic所有副本中状态为ReplicaDeletionIneligible的
     val failedReplicas = controller.replicaStateMachine.replicasInState(topic, ReplicaDeletionIneligible)
     info("Retrying delete topic for topic %s since replicas %s were not successfully deleted"
       .format(topic, failedReplicas.mkString(",")))
@@ -367,16 +373,18 @@ class TopicDeletionManager(controller: KafkaController,
   private def onTopicDeletion(topics: Set[String]) {
     info("Topic deletion callback for %s".format(topics.mkString(",")))
     // send update metadata so that brokers stop serving data for topics to be deleted
-    // 获取所有待删除topic上的TopicAndPartition，返回类型Set[TopicAndPartition]
+    // 获取所有待删除topic的TopicAndPartition，返回类型Set[TopicAndPartition]
+    // 也就是分区信息
     val partitions = topics.flatMap(controllerContext.partitionsForTopic)
-    // 发送UpdateMetadataRequest请求给所有的broker节点，告诉它们删除自己本地记录的这些分区
+    // 发送UpdateMetadataRequest请求给所有的broker节点，告诉它们删除自己本地记录的关于这些分区的信息
+    // 参考：kafka.server.MetadataCache.updateCache
     controller.sendUpdateMetadataRequest(controllerContext.liveOrShuttingDownBrokerIds.toSeq, partitions)
     // 将本地记录的所有分区的副本集合根据topic进行分组
     // 返回类型为：Map[topic,Map[TopicAndPartition, Seq[Int]]]
     val partitionReplicaAssignmentByTopic = controllerContext.partitionReplicaAssignment.groupBy(p => p._1.topic)
     // 遍历待删除的topic
     topics.foreach { topic =>
-      // 获取每一个topic的Set[TopicAndPartition]传递给onPartitionDeletion方法
+      // 获取每一个topic的Set[TopicAndPartition]也就是副本集合传递给onPartitionDeletion方法
       onPartitionDeletion(partitionReplicaAssignmentByTopic(topic).map(_._1).toSet)
     }
   }
@@ -401,22 +409,23 @@ class TopicDeletionManager(controller: KafkaController,
   private def startReplicaDeletion(replicasForTopicsToBeDeleted: Set[PartitionAndReplica]) {
     // 遍历待删除的副本
     replicasForTopicsToBeDeleted.groupBy(_.topic).foreach { case(topic, replicas) =>
-      // 过滤出分区所有副本中活跃的broker
+      // 过滤出分区所有副本
       var aliveReplicasForTopic = controllerContext.allLiveReplicas().filter(p => p.topic.equals(topic))
-      // 过滤出分区所有副本中已经处于Dead状态的broker
+      // 过滤出分区所有副本中处于Dead状态的
       val deadReplicasForTopic = replicasForTopicsToBeDeleted -- aliveReplicasForTopic
-      // 过滤出分区所有副本中状态为ReplicaDeletionSuccessful的
+      // 过滤出分区所有副本中处于ReplicaDeletionSuccessful状态的
       val successfullyDeletedReplicas = controller.replicaStateMachine.replicasInState(topic, ReplicaDeletionSuccessful)
-      // 过滤出需要重试删除的副本
+      // 过滤出分区所有副本中未完成删除的
       val replicasForDeletionRetry = aliveReplicasForTopic -- successfullyDeletedReplicas
       // move dead replicas directly to failed state
       // 将不可用副本的状态标记为ReplicaDeletionIneligible
       replicaStateMachine.handleStateChanges(deadReplicasForTopic, ReplicaDeletionIneligible)
       // send stop replica to all followers that are not in the OfflineReplica state so they stop sending fetch requests to the leader
-      // 将待删除的副本的状态标记为OfflineReplica
+      // 将未完成删除的副本的状态标记为OfflineReplica
       replicaStateMachine.handleStateChanges(replicasForDeletionRetry, OfflineReplica)
       debug("Deletion started for replicas %s".format(replicasForDeletionRetry.mkString(",")))
       // 将待删除的副本状态标记为ReplicaDeletionStarted，标记当前副本准备好开始删除
+      // 并发送StopReplicaRequest请求到这个分区所管理的副本上，然后等待响应后的回调
       controller.replicaStateMachine.handleStateChanges(replicasForDeletionRetry, ReplicaDeletionStarted,
         new Callbacks.CallbackBuilder().stopReplicaCallback(deleteTopicStopReplicaCallback).build)
       // 如果当前topic存在不可用的副本，标记topic暂停删除
@@ -441,8 +450,8 @@ class TopicDeletionManager(controller: KafkaController,
   // 当删除分区时触发，删除分区对应的副本
   private def onPartitionDeletion(partitionsToBeDeleted: Set[TopicAndPartition]) {
     info("Partition deletion callback for %s".format(partitionsToBeDeleted.mkString(",")))
-    // 将Set[TopicAndPartition]转换为Set[PartitionAndReplica]
-    // 也就是获取待删除topic每个分区以及分区对应的副本，返回类型Set[PartitionAndReplica]
+    // 将参数将Set[TopicAndPartition]转换为Set[PartitionAndReplica]，
+    // 获取每个分区的所有副本，然后将这些副本封装到集合中返回一个Set[PartitionAndReplica]
     val replicasPerPartition = controllerContext.replicasForPartition(partitionsToBeDeleted)
     // 开始删除副本
     startReplicaDeletion(replicasPerPartition)
@@ -450,6 +459,7 @@ class TopicDeletionManager(controller: KafkaController,
 
   // 删除副本后的回调
   private def deleteTopicStopReplicaCallback(stopReplicaResponseObj: AbstractRequestResponse, replicaId: Int) {
+    // 获取StopReplicaRequest请求的响应
     val stopReplicaResponse = stopReplicaResponseObj.asInstanceOf[StopReplicaResponse]
     debug("Delete topic callback invoked for %s".format(stopReplicaResponse))
     val responseMap = stopReplicaResponse.responses.asScala
@@ -457,12 +467,13 @@ class TopicDeletionManager(controller: KafkaController,
     val partitionsInError =
       if (stopReplicaResponse.errorCode != Errors.NONE.code) responseMap.keySet
       else responseMap.filter { case (_, error) => error != Errors.NONE.code }.map(_._1).toSet
-    // 将删除失败的分区集合转换为删除失败的副本集合
+    // 将删除失败的分区集合转换为副本集合
     val replicasInError = partitionsInError.map(p => PartitionAndReplica(p.topic, p.partition, replicaId))
     inLock(controllerContext.controllerLock) {
       // move all the failed replicas to ReplicaDeletionIneligible
       // 处理删除失败的副本
       failReplicaDeletion(replicasInError)
+      // 成立说明有些副本删除成功
       if (replicasInError.size != responseMap.size) {
         // some replicas could have been successfully deleted
         // 有些副本删除成功
