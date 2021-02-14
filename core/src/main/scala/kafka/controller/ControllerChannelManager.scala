@@ -169,6 +169,7 @@ class ControllerChannelManager(controllerContext: ControllerContext, config: Kaf
   }
 }
 
+// 发送出去的请求会封装为一个QueueItem
 case class QueueItem(apiKey: ApiKeys, apiVersion: Option[Short], request: AbstractRequest, callback: AbstractRequestResponse => Unit)
 
 /**
@@ -337,13 +338,13 @@ class ControllerBrokerRequestBatch(controller: KafkaController) extends  Logging
                                        leaderIsrAndControllerEpoch: LeaderIsrAndControllerEpoch,
                                        replicas: Seq[Int], callback: AbstractRequestResponse => Unit = null) {
     val topicPartition = new TopicPartition(topic, partition)
-    // 遍历要接收请求的每一个broker获取对应的Map[TopicPartition, PartitionStateInfo]
-    // 不存在时返回空map，然后将请求添加都map中
+    // 遍历要接收请求的每一个broker
+    // 获取其对应的Map[TopicPartition, PartitionStateInfo]集合，然后封装一个PartitionStateInfo请求进入
     brokerIds.filter(_ >= 0).foreach { brokerId =>
       val result = leaderAndIsrRequestMap.getOrElseUpdate(brokerId, mutable.Map.empty)
       result.put(topicPartition, PartitionStateInfo(leaderIsrAndControllerEpoch, replicas.toSet))
     }
-
+    // 添加UpdateMetadataRequest
     addUpdateMetadataRequestForBrokers(controllerContext.liveOrShuttingDownBrokerIds.toSeq,
                                        Set(TopicAndPartition(topic, partition)))
   }
@@ -384,6 +385,7 @@ class ControllerBrokerRequestBatch(controller: KafkaController) extends  Logging
           } else {
             PartitionStateInfo(leaderIsrAndControllerEpoch, replicas)
           }
+          // 为每个broker都生成一个updateMetadataRequest
           brokerIds.filter(b => b >= 0).foreach { brokerId =>
             updateMetadataRequestMap.getOrElseUpdate(brokerId, mutable.Map.empty[TopicPartition, PartitionStateInfo])
             // 封装请求
@@ -400,7 +402,7 @@ class ControllerBrokerRequestBatch(controller: KafkaController) extends  Logging
       val givenPartitions = if (partitions.isEmpty)
         controllerContext.partitionLeadershipInfo.keySet
       else
-        // 如果参数传递过来的不为空，已参数TopicAndPartitions
+        // 如果参数传递过来的不为空，返回参数TopicAndPartitions
         partitions
       // 如果partitionsToBeDeleted为空，表示没有待删除的分区，返回计算出的givenPartitions
       if (controller.deleteTopicManager.partitionsToBeDeleted.isEmpty)
@@ -418,6 +420,7 @@ class ControllerBrokerRequestBatch(controller: KafkaController) extends  Logging
     // 遍历所有的分区，执行updateMetadataRequestMapFor回调方法
       filteredPartitions.foreach(partition => updateMetadataRequestMapFor(partition, beingDeleted = false))
 
+    // 遍历待删除的分区，发送给对应的broker节点，告诉他们删除该分区
     controller.deleteTopicManager.partitionsToBeDeleted.foreach(partition => updateMetadataRequestMapFor(partition, beingDeleted = true))
   }
 
@@ -483,12 +486,14 @@ class ControllerBrokerRequestBatch(controller: KafkaController) extends  Logging
             new UpdateMetadataRequest(controllerId, controllerEpoch, liveBrokers.asJava, partitionStates.asJava)
           }
           else {
+            // 获取所有liveBroker的信息
             val liveBrokers = controllerContext.liveOrShuttingDownBrokers.map { broker =>
               val endPoints = broker.endPoints.map { case (securityProtocol, endPoint) =>
                 securityProtocol -> new UpdateMetadataRequest.EndPoint(endPoint.host, endPoint.port)
               }
               new UpdateMetadataRequest.Broker(broker.id, endPoints.asJava, broker.rack.orNull)
             }
+            // 封装UpdateMetadataRequest
             new UpdateMetadataRequest(version, controllerId, controllerEpoch, partitionStates.asJava, liveBrokers.asJava)
           }
         // 添加请求到对应broker的queue中

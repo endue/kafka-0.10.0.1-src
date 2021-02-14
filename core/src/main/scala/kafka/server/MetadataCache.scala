@@ -44,7 +44,7 @@ private[server] class MetadataCache(brokerId: Int) extends Logging {
   private var controllerId: Option[Int] = None
   // 记录活跃的broker，key是brokerId
   private val aliveBrokers = mutable.Map[Int, Broker]()
-  // 记录活跃的Node
+  // 记录活跃的Node，key是brokerId
   private val aliveNodes = mutable.Map[Int, collection.Map[SecurityProtocol, Node]]()
   private val partitionMetadataLock = new ReentrantReadWriteLock()
 
@@ -185,12 +185,14 @@ private[server] class MetadataCache(brokerId: Int) extends Logging {
           case id if id < 0 => None
           case id => Some(id)
         }
-      // 清空aliveNodes和aliveBrokers,准备更新为最新的记录
+      // 清空缓存中的aliveNodes和aliveBrokers,准备更新为最新的记录
       aliveNodes.clear()
       aliveBrokers.clear()
+      // 更新lieveBrokers
       updateMetadataRequest.liveBrokers.asScala.foreach { broker =>
         val nodes = new EnumMap[SecurityProtocol, Node](classOf[SecurityProtocol])
         val endPoints = new EnumMap[SecurityProtocol, EndPoint](classOf[SecurityProtocol])
+        // 遍历endPoints,将相关内容保存到定义的集合中
         broker.endPoints.asScala.foreach { case (protocol, ep) =>
           endPoints.put(protocol, EndPoint(ep.host, ep.port, protocol))
           nodes.put(protocol, new Node(broker.id, ep.host, ep.port))
@@ -198,7 +200,7 @@ private[server] class MetadataCache(brokerId: Int) extends Logging {
         aliveBrokers(broker.id) = Broker(broker.id, endPoints.asScala, Option(broker.rack))
         aliveNodes(broker.id) = nodes.asScala
       }
-
+      // 更新本地分区信息
       updateMetadataRequest.partitionStates.asScala.foreach { case (tp, info) =>
         val controllerId = updateMetadataRequest.controllerId
         val controllerEpoch = updateMetadataRequest.controllerEpoch
@@ -208,6 +210,7 @@ private[server] class MetadataCache(brokerId: Int) extends Logging {
           stateChangeLogger.trace(s"Broker $brokerId deleted partition $tp from metadata cache in response to UpdateMetadata " +
             s"request sent by controller $controllerId epoch $controllerEpoch with correlation id $correlationId")
         } else {
+          // 解析info返回一个PartitionStateInfo
           val partitionInfo = partitionStateToPartitionStateInfo(info)
           addOrUpdatePartitionInfo(tp.topic, tp.partition, partitionInfo)
           stateChangeLogger.trace(s"Broker $brokerId cached leader info $partitionInfo for partition $tp in response to " +
@@ -233,7 +236,7 @@ private[server] class MetadataCache(brokerId: Int) extends Logging {
   private def removePartitionInfo(topic: String, partitionId: Int): Boolean = {
     cache.get(topic).map { infos =>
       infos.remove(partitionId)
-      if (infos.isEmpty) cache.remove(topic)
+      if (infos.isEmpty) cache.remove(topic)// 如果分区信息为空，那么删除这个topic
       true
     }.getOrElse(false)
   }

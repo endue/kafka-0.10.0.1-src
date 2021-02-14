@@ -85,10 +85,13 @@ public class UpdateMetadataRequest extends AbstractRequest {
     private static final String HOST_KEY_NAME = "host";
     private static final String PORT_KEY_NAME = "port";
     private static final String SECURITY_PROTOCOL_TYPE_KEY_NAME = "security_protocol_type";
-
+    // kafkaController的brokerId
     private final int controllerId;
+    // kafkaController的代
     private final int controllerEpoch;
+    // 分区信息
     private final Map<TopicPartition, PartitionState> partitionStates;
+    // 活跃有效的broker集合
     private final Set<Broker> liveBrokers;
 
     /**

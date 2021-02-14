@@ -697,6 +697,7 @@ class ReplicaManager(val config: KafkaConfig,
       } else {
         // 更新metadataCache信息
         metadataCache.updateCache(correlationId, updateMetadataRequest)
+        // 更新controllerEpoch
         controllerEpoch = updateMetadataRequest.controllerEpoch
       }
     }
