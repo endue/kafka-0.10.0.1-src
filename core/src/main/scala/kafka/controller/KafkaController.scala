@@ -212,7 +212,7 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
   // 监听分区重分配，路径"/admin/reassign_partitions"
   // 当执行分区重分配后，会在创建上述路径并写入数据
   private val partitionReassignedListener = new PartitionsReassignedListener(this)
-  // leader副本优化监听器
+  // leader副本优化监听器，路径"/admin/preferred_replica_election"
   private val preferredReplicaElectionListener = new PreferredReplicaElectionListener(this)
   // ISR列表变更通知器,/isr_change_notification
   private val isrChangeNotificationListener = new IsrChangeNotificationListener(this)

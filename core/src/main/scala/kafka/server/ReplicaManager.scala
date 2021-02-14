@@ -318,8 +318,9 @@ class ReplicaManager(val config: KafkaConfig,
         // 更新controller epoch
         controllerEpoch = stopReplicaRequest.controllerEpoch
         // First stop fetchers for all partitions, then stop the corresponding replicas
-        // 删除去要暂停partitions的replicaFetcher请求
+        // 删除掉要暂停partitions的replicaFetcher请求
         replicaFetcherManager.removeFetcherForPartitions(partitions.map(r => TopicAndPartition(r.topic, r.partition)))
+        // 遍历当前broker上所有分区的副本，然后执行stopReplica对副本进行处理
         for(topicPartition <- partitions){
           // 停止
           val errorCode = stopReplica(topicPartition.topic, topicPartition.partition, stopReplicaRequest.deletePartitions)

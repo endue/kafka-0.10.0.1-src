@@ -67,7 +67,7 @@ class ReplicaStateMachine(controller: KafkaController) extends Logging {
   private val zkUtils = controllerContext.zkUtils
   // 记录partition-replica对应的副本状态，也就是某个分区副本的状态
   private val replicaState: mutable.Map[PartitionAndReplica, ReplicaState] = mutable.Map.empty
-  // 监听broker的变化
+  // 监听broker的变化,路径"/brokers/ids"
   private val brokerChangeListener = new BrokerChangeListener()
   // 用于向指定的Broker批量发送请求
   private val brokerRequestBatch = new ControllerBrokerRequestBatch(controller)
