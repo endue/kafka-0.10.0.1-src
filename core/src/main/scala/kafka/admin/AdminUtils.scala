@@ -109,7 +109,7 @@ object AdminUtils extends Logging {
                               nPartitions: Int,// 分区数
                               replicationFactor: Int,// 副本数
                               fixedStartIndex: Int = -1,// 起始索引，第一个Broker的位置
-                              startPartitionId: Int = -1): Map[Int, Seq[Int]] = {
+                              startPartitionId: Int = -1): Map[Int, Seq[Int]] = {// 起始索引，第一个分区的位置
     // 校验
     if (nPartitions <= 0)
       throw new AdminOperationException("number of partitions must be larger than 0")
@@ -118,6 +118,7 @@ object AdminUtils extends Logging {
     if (replicationFactor > brokerMetadatas.size)
       throw new AdminOperationException(s"replication factor: $replicationFactor larger than available brokers: ${brokerMetadatas.size}")
     // 如果传递过来的所有可用Broker的机架信息都为空
+    // 机架信息如何来的？可以参考：kafkaServer创建的KafkaHealthcheck
     if (brokerMetadatas.forall(_.rack.isEmpty))
       // 分配副本，没有机架信息
       assignReplicasToBrokersRackUnaware(nPartitions, replicationFactor, brokerMetadatas.map(_.id), fixedStartIndex,
@@ -145,7 +146,7 @@ object AdminUtils extends Logging {
     val brokerArray = brokerList.toArray
     // 计算获取副本的起始索引
     val startIndex = if (fixedStartIndex >= 0) fixedStartIndex else rand.nextInt(brokerArray.length)
-    // 保证startPartitionId >= 0
+    // 计算获取起始的分区id,保证currentPartitionId >= 0
     var currentPartitionId = math.max(0, startPartitionId)
     // 计算副本之间的间隔
     var nextReplicaShift = if (fixedStartIndex >= 0) fixedStartIndex else rand.nextInt(brokerArray.length)
@@ -252,7 +253,7 @@ object AdminUtils extends Logging {
   // 参数传递进来map，key是brokerId，value是rack信息
   // 返回信息是brokerId集合
   private[admin] def getRackAlternatedBrokerList(brokerRackMap: Map[Int, String]): IndexedSeq[Int] = {
-    // 反正map，将机架信息相同的brokerId归类
+    // 翻转map，将机架信息相同的brokerId归类
     // 参数：key是brokerId，value是rack信息
     // 结果：key是rack信息，value是brokerId集合
     val brokersIteratorByRack = getInverseMap(brokerRackMap).map { case (rack, brokers) =>
@@ -274,7 +275,7 @@ object AdminUtils extends Logging {
     result
   }
 
-  // 反正map，将机架信息相同的brokerId归类
+  // 翻转map，将机架信息相同的brokerId归类
   // 参数：key是brokerId，value是rack信息
   // 结果：key是rack信息，value是brokerId集合
   private[admin] def getInverseMap(brokerRackMap: Map[Int, String]): Map[String, Seq[Int]] = {
@@ -444,15 +445,17 @@ object AdminUtils extends Logging {
     zkUtils.zkClient.exists(getTopicPath(topic))
 
   // 获取所有broker的元数据BrokerMetadata
+  // rackAwareMode默认为Enforced
   def getBrokerMetadatas(zkUtils: ZkUtils, rackAwareMode: RackAwareMode = RackAwareMode.Enforced,
                         brokerList: Option[Seq[Int]] = None): Seq[BrokerMetadata] = {
     // 获取所有的broker集合
     val allBrokers = zkUtils.getAllBrokersInCluster()
-    // 从allBrokers集合中过滤出包含在brokerList集合中的Broker
+    // 从allBrokers集合中过滤出包含在brokerList集合中的Broker，如果brokerList为空那么返回allBrokers
+    // 这里获取的broker就是下面要进行分区副本分配被候选的broker
     val brokers = brokerList.map(brokerIds => allBrokers.filter(b => brokerIds.contains(b.id))).getOrElse(allBrokers)
-    // 再次过滤出包含机架信息的Broker
+    // 过滤出包含机架信息的Broker
     val brokersWithRack = brokers.filter(_.rack.nonEmpty)
-    // 这里就是验证在Enforced模式下，如果有含义机架信息的broker并且数量和全部broker数量不一致，那么抛出异常
+    // 这里就是验证在Enforced模式下，如果有含义机架信息的broker数量和全部broker数量不一致，那么抛出异常
     if (rackAwareMode == RackAwareMode.Enforced && brokersWithRack.nonEmpty && brokersWithRack.size < brokers.size) {
       throw new AdminOperationException("Not all brokers have rack information. Add --disable-rack-aware in command line" +
         " to make replica assignment without rack information.")
@@ -477,8 +480,8 @@ object AdminUtils extends Logging {
                   partitions: Int,// 分区个数
                   replicationFactor: Int,// 副本个数
                   topicConfig: Properties = new Properties,// topic的一些配置参数，如 config max.message.bytes=64000、config flush.messages=1
-                  rackAwareMode: RackAwareMode = RackAwareMode.Enforced) {
-    // 获取所有broker的元数据
+                  rackAwareMode: RackAwareMode = RackAwareMode.Enforced) {// 默认模式Enforced
+    // 获取所有broker的元数据Seq[BrokerMetadata]
     val brokerMetadatas = getBrokerMetadatas(zkUtils, rackAwareMode)
     // 创建分区副本列表，返回类型为Map[Int, Seq[Int]]，key是分区编号，value是brokerId集合
     val replicaAssignment = AdminUtils.assignReplicasToBrokers(brokerMetadatas, partitions, replicationFactor)
