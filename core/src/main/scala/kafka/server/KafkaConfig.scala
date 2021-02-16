@@ -969,6 +969,7 @@ class KafkaConfig(val props: java.util.Map[_, _], doLog: Boolean) extends Abstra
   // If the user did not define listeners but did define host or port, let's use them in backward compatible way
   // If none of those are defined, we default to PLAINTEXT://:9092
   private def getListeners(): immutable.Map[SecurityProtocol, EndPoint] = {
+    // "listeners"
     if (getString(KafkaConfig.ListenersProp) != null) {
       validateUniquePortAndProtocol(getString(KafkaConfig.ListenersProp))
       CoreUtils.listenerListToEndPoints(getString(KafkaConfig.ListenersProp))
@@ -981,9 +982,11 @@ class KafkaConfig(val props: java.util.Map[_, _], doLog: Boolean) extends Abstra
   // If he didn't but did define advertised host or port, we'll use those and fill in the missing value from regular host / port or defaults
   // If none of these are defined, we'll use the listeners
   private def getAdvertisedListeners(): immutable.Map[SecurityProtocol, EndPoint] = {
+    // "advertised.listeners"
     if (getString(KafkaConfig.AdvertisedListenersProp) != null) {
       validateUniquePortAndProtocol(getString(KafkaConfig.AdvertisedListenersProp))
       CoreUtils.listenerListToEndPoints(getString(KafkaConfig.AdvertisedListenersProp))
+      // "advertised.host.name" 和 "advertised.port"
     } else if (getString(KafkaConfig.AdvertisedHostNameProp) != null || getInt(KafkaConfig.AdvertisedPortProp) != null) {
       CoreUtils.listenerListToEndPoints("PLAINTEXT://" + advertisedHostName + ":" + advertisedPort)
     } else {

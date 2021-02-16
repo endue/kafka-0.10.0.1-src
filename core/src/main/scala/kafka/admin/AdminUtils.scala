@@ -297,8 +297,8 @@ object AdminUtils extends Logging {
                     topic: String,
                     numPartitions: Int = 1,// --partitions 配置
                     replicaAssignmentStr: String = "",// --replica-assignment 配置
-                    checkBrokerAvailable: Boolean = true,
-                    rackAwareMode: RackAwareMode = RackAwareMode.Enforced) {
+                    checkBrokerAvailable: Boolean = true,// 是否校验broker是否存活
+                    rackAwareMode: RackAwareMode = RackAwareMode.Enforced) {// 副本分配模式
    // 获取topic各个分区的副本分配结果，返回类型Map[TopicAndPartition, Seq[Int]]
     val existingPartitionsReplicaList = zkUtils.getReplicaAssignmentForTopics(List(topic))
    // topic不存在
@@ -309,7 +309,8 @@ object AdminUtils extends Logging {
       case None => throw new AdminOperationException("the topic does not have partition with id 0, it should never happen")
       case Some(headPartitionReplica) => headPartitionReplica._2
     }
-   // 分区数只能增加不能减少，从这里可以看出--partitions 是一定需要配置的
+   // 分区数只能增加不能减少，从这里可以看出--partitions 是一定需要配置的，指定分区数
+   // 计算出需要增加的分区数
     val partitionsToAdd = numPartitions - existingPartitionsReplicaList.size
     if (partitionsToAdd <= 0)
       throw new AdminOperationException("The number of partitions for a topic can only be increased")
@@ -324,12 +325,12 @@ object AdminUtils extends Logging {
       if (replicaAssignmentStr == null || replicaAssignmentStr == "") {
         // 计算起始索引
         val startIndex = math.max(0, brokerMetadatas.indexWhere(_.id >= existingReplicaListForPartitionZero.head))
-        // 执行重分配
+        // 执行分区扩容，不指定分配到哪台机器上
         AdminUtils.assignReplicasToBrokers(brokerMetadatas, partitionsToAdd, existingReplicaListForPartitionZero.size,
           startIndex, existingPartitionsReplicaList.size)
       }
       else
-        // 如果用户指定了---replica-assignment 配置那么解析手动分配的结果
+        // 如果用户指定了---replica-assignment 配置那么解析手动分配的结果，指定分配到哪台机器上
         getManualReplicaAssignment(replicaAssignmentStr, brokerMetadatas.map(_.id).toSet,
           existingPartitionsReplicaList.size, checkBrokerAvailable)
 
@@ -349,19 +350,24 @@ object AdminUtils extends Logging {
 
   /**
     * 解析手动分配结果
-    * @param replicaAssignmentList 为 --replica-assignment 配置
+    * @param replicaAssignmentList 为 --replica-assignment 配置例如：--replica-assignment 1:2,2:1
     * @param availableBrokerList 所有brokerId集合
     * @param startPartitionId 起始分区索引下标
     * @param checkBrokerAvailable 是否需要检查broker的状态
     * @return
     */
   def getManualReplicaAssignment(replicaAssignmentList: String, availableBrokerList: Set[Int], startPartitionId: Int, checkBrokerAvailable: Boolean = true): Map[Int, List[Int]] = {
+    // 解析分区列表
     var partitionList = replicaAssignmentList.split(",")
     val ret = new mutable.HashMap[Int, List[Int]]()
+    // 这里只读取了新的分区的分配结果，对于旧分区的指定分配结果跳过处理
     var partitionId = startPartitionId
+    // 从右边开始，也就是只获取新的分区的指定分配结果
     partitionList = partitionList.takeRight(partitionList.size - partitionId)
     for (i <- 0 until partitionList.size) {
+      // 解析分配的brokerId
       val brokerList = partitionList(i).split(":").map(s => s.trim().toInt)
+      // 校验
       if (brokerList.size <= 0)
         throw new AdminOperationException("replication factor must be larger than 0")
       if (brokerList.size != brokerList.toSet.size)
@@ -369,9 +375,11 @@ object AdminUtils extends Logging {
       if (checkBrokerAvailable && !brokerList.toSet.subsetOf(availableBrokerList))
         throw new AdminOperationException("some specified brokers not available. specified brokers: " + brokerList.toString +
           "available broker:" + availableBrokerList.toString)
+      // 记录结果
       ret.put(partitionId, brokerList.toList)
       if (ret(partitionId).size != ret(startPartitionId).size)
         throw new AdminOperationException("partition " + i + " has different replication factor: " + brokerList)
+      // 计算下一个分区
       partitionId = partitionId + 1
     }
     ret.toMap
