@@ -61,15 +61,18 @@ public class NetworkClient implements KafkaClient {
     private final ClusterConnectionStates connectionStates;
 
     /* the set of requests currently being sent or awaiting a response */
-    // 已发生或正在发送没有收到响应的消息集合
+    // 获取"max.in.flight.requests.per.connection",默认5
+    // 客户端在单个服务连接上发送的未确认请求的最大数量
     private final InFlightRequests inFlightRequests;
 
     /* the socket send buffer size in bytes */
-    // 发送缓冲区
+    // 获取 "send.buffer.bytes",默认128 * 1024
+    // 发送数据时的tcp缓冲区
     private final int socketSendBuffer;
 
     /* the socket receive size buffer in bytes */
-    // 接收缓冲器
+    // 获取"receive.buffer.bytes",默认32 * 1024
+    // 接收数据时的tcp缓冲区
     private final int socketReceiveBuffer;
 
     /* the client id used to identify this client in requests to the server */

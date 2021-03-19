@@ -80,6 +80,7 @@ public class Selector implements Selectable {
     private static final Logger log = LoggerFactory.getLogger(Selector.class);
     // java nio selector
     private final java.nio.channels.Selector nioSelector;
+    // 初始化时为new HashMap<>()
     // 记录了与node节点的连接，key是node节点ID，value是对应的KafkaChannel
     private final Map<String, KafkaChannel> channels;
     // 记录每一次poll时，已发送的消息数据send(也就是底层存储在Bytebuffer中的数据)
@@ -102,11 +103,13 @@ public class Selector implements Selectable {
     private final ChannelBuilder channelBuilder;
     // key是channel id
     private final Map<String, Long> lruConnections;
+    // 等待多久后关闭空闲连接,默认9 * 60 * 1000ms * 1000 * 1000
     private final long connectionsMaxIdleNanos;
-    //
+    // 初始化时为-1
     private final int maxReceiveSize;
     private final boolean metricsPerConnection;
     private long currentTimeNanos;
+    // 初始化时为currentTimeNanos + connectionsMaxIdleNanos
     private long nextIdleCloseCheckTime;
 
 
@@ -115,6 +118,7 @@ public class Selector implements Selectable {
      */
     public Selector(int maxReceiveSize, long connectionMaxIdleMs, Metrics metrics, Time time, String metricGrpPrefix, Map<String, String> metricTags, boolean metricsPerConnection, ChannelBuilder channelBuilder) {
         try {
+            // 初始化nio
             this.nioSelector = java.nio.channels.Selector.open();
         } catch (IOException e) {
             throw new KafkaException(e);

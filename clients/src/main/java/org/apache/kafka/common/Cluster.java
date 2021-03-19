@@ -31,11 +31,11 @@ import java.util.Set;
 public final class Cluster {
 
     private final boolean isBootstrapConfigured;
-    // 记录kafka集群节点，也就是kafka broker
+    // 记录kafka集群节点，也就是kafka broker,换句话说就是"bootstrap.servers", "192.168.6.130:9092,192.168.6.131:9092,192.168.6.132:9092"中配置的服务节点
     private final List<Node> nodes;
     // 记录为授权的topic
     private final Set<String> unauthorizedTopics;
-    // 记录【主题与其所有分区】关系
+    // 记录【topic-partiton与其所有分区信息】关系,初始化时为new HashMap<>
     private final Map<TopicPartition, PartitionInfo> partitionsByTopicPartition;
     // 记录【主题与其所有分区】关系
     private final Map<String, List<PartitionInfo>> partitionsByTopic;
@@ -66,13 +66,14 @@ public final class Cluster {
      */
     private Cluster(boolean isBootstrapConfigured,
                     Collection<Node> nodes,
-                    Collection<PartitionInfo> partitions,
-                    Set<String> unauthorizedTopics) {
+                    Collection<PartitionInfo> partitions,// 初始化时为new ArrayList<PartitionInfo>(0)
+                    Set<String> unauthorizedTopics) {// 初始化时为Collections.<String>emptySet()
         this.isBootstrapConfigured = isBootstrapConfigured;
 
         // make a randomized, unmodifiable copy of the nodes
         // 生成的nodes节点，只允许get操作，任何修改操作都将报错
         List<Node> copy = new ArrayList<>(nodes);
+        // 打乱顺序
         Collections.shuffle(copy);
         this.nodes = Collections.unmodifiableList(copy);
         // 记录node节点与其ID的关系到nodesById

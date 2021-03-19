@@ -39,25 +39,25 @@ import org.slf4j.LoggerFactory;
 public final class Metadata {
 
     private static final Logger log = LoggerFactory.getLogger(Metadata.class);
-    // 发送消息失败后的重试间隔，默认200ms
+    // 发送消息失败后的重试间隔，默认100ms
     private final long refreshBackoffMs;
     // metadata自动刷新的时间间隔，默认 5 * 60 * 1000ms
     private final long metadataExpireMs;
-    // 版本
+    // 版本号,每次更新后+1,初始化为0
     private int version;
-    // 上一次刷新metadata的时间戳
+    // 上一次刷新metadata的时间戳,初始化为0
     private long lastRefreshMs;
-    // 上一次成功刷新metadata的时间戳
+    // 上一次成功刷新metadata的时间戳,初始化为0
     private long lastSuccessfulRefreshMs;
-    // 集群信息
+    // 集群信息,初始化为Cluster.empty();
     private Cluster cluster;
-    // 是否需要更新标识
+    // 是否需要更新标识,初始化为false
     private boolean needUpdate;
-    // 记录包含的主题
+    // 记录包含的主题,初始化为new HashSet<String>()
     private final Set<String> topics;
-    // 监听者
+    // 监听者,初始化为new ArrayList<>()
     private final List<Listener> listeners;
-    // 是否需要拉取所有的topic
+    // 是否需要拉取所有的topic,初始化为false
     private boolean needMetadataForAllTopics;
 
     /**
@@ -187,16 +187,22 @@ public final class Metadata {
      * Update the cluster metadata
      * 更新metadata
      */
+    // 该方法调用地点如下:
+    // 1.KafkaProducer初始化:org.apache.kafka.clients.producer.KafkaProducer.KafkaProducer()
     public synchronized void update(Cluster cluster, long now) {
+        // 修改needUpdate为false,表示不需要刷新了
         this.needUpdate = false;
+        // 更新最近一次刷新以及成功刷新metadata的时间戳为当前时间
         this.lastRefreshMs = now;
         this.lastSuccessfulRefreshMs = now;
+        // 版本号+1
         this.version += 1;
-
+        // 遍历listeners,初始化时为空
         for (Listener listener: listeners)
             listener.onMetadataUpdate(cluster);
 
         // Do this after notifying listeners as subscribed topics' list can be changed by listeners
+        // needMetadataForAllTopics默认初始化为false,在调用地点1的情况下,返回cluster,也就是"bootstrap.servers"配置的服务列表List<InetSocketAddress>
         this.cluster = this.needMetadataForAllTopics ? getClusterForCurrentTopics(cluster) : cluster;
 
         notifyAll();

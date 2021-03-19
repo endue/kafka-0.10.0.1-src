@@ -129,7 +129,7 @@ import org.slf4j.LoggerFactory;
 public class KafkaProducer<K, V> implements Producer<K, V> {
 
     private static final Logger log = LoggerFactory.getLogger(KafkaProducer.class);
-    // 用于生成clientId
+    // 用于生成clientId自增序号
     private static final AtomicInteger PRODUCER_CLIENT_ID_SEQUENCE = new AtomicInteger(1);
     private static final String JMX_PREFIX = "kafka.producer";
     // clientId
@@ -160,7 +160,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
     private final ProducerConfig producerConfig;
     // 发送消息的阻塞消耗时间(更新metadata时间 + 缓冲区填满之后的阻塞时间)，默认60s
     private final long maxBlockTimeMs;
-    // 请求超时时间，默认30s
+    // 客户端请求超时时间，默认30s,也就是等待server返回响应的时间,如果超时会进行重试
     private final int requestTimeoutMs;
     // 拦截器
     private final ProducerInterceptors<K, V> interceptors;
@@ -238,42 +238,62 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
                     MetricsReporter.class);
             reporters.add(new JmxReporter(JMX_PREFIX));
             this.metrics = new Metrics(metricConfig, reporters, time);
-            // 获取partitioner.class，默认为DefaultPartitioner.class.getName()
+            // 获取"partitioner.class"，默认为DefaultPartitioner.class.getName()
             // 决定发送的消息路由到Topic的哪个partition(分区)
             this.partitioner = config.getConfiguredInstance(ProducerConfig.PARTITIONER_CLASS_CONFIG, Partitioner.class);
-            // 消息发送失败后重试等待时间，默认100ms
+            // 获取"retry.backoff.ms"
+            // 消息发送失败后再次重试需要等待的时间，默认100ms
             long retryBackoffMs = config.getLong(ProducerConfig.RETRY_BACKOFF_MS_CONFIG);
-            // metadata，其中参数metadata.max.age.ms默认是5分钟，默认每隔5分钟强制刷新一下
+            // 获取"metadata.max.age.ms"
+            // metadata元数据强制刷新时间间隔，默认5 * 60 * 1000ms
             this.metadata = new Metadata(retryBackoffMs, config.getLong(ProducerConfig.METADATA_MAX_AGE_CONFIG));
-            // max.request.size，每个请求的最大大小，默认1M
+            // 获取"max.request.size"
+            // 单个请求消息的最大字节数，默认1M
             this.maxRequestSize = config.getInt(ProducerConfig.MAX_REQUEST_SIZE_CONFIG);
-            // buffer.memory，缓冲区的内存大小，默认32M
+            // 获取"buffer.memory"
+            // producer用来缓冲发送到服务消息的内存字节数，默认32 * 1024 * 1024L
             this.totalMemorySize = config.getLong(ProducerConfig.BUFFER_MEMORY_CONFIG);
-            // 压缩类型，默认none
+            // 获取"compression.type"
+            // 消息压缩类型，默认none
+            // 压缩是全批数据，所以批处理的效果也会影响压缩比(批处理越多，压缩效果越好)
             this.compressionType = CompressionType.forName(config.getString(ProducerConfig.COMPRESSION_TYPE_CONFIG));
             /* check for user defined settings.
              * If the BLOCK_ON_BUFFER_FULL is set to true,we do not honor METADATA_FETCH_TIMEOUT_CONFIG.
              * This should be removed with release 0.9 when the deprecated configs are removed.
              */
-            // 缓冲区填满之后的阻塞时间，默认60s
+            // 获取"block.on.buffer.full",默认false
+            // 当producer消息缓冲区填满后,必须停止接受新消息或抛出错误
+            // 该配置默认为false,也就是producer不会抛出BufferExhaustException,而是使用"max.block.ms"配置来阻塞中当前操作,超时后抛出TimeoutException
+            // 该配置设置为true,那么设置"max.block.ms"为Long.MAX_VALUE
+
+            // 用户设置了"block.on.buffer.full"
             if (userProvidedConfigs.containsKey(ProducerConfig.BLOCK_ON_BUFFER_FULL_CONFIG)) {
                 log.warn(ProducerConfig.BLOCK_ON_BUFFER_FULL_CONFIG + " config is deprecated and will be removed soon. " +
                         "Please use " + ProducerConfig.MAX_BLOCK_MS_CONFIG);
+                // 获取"block.on.buffer.full"的布尔值
                 boolean blockOnBufferFull = config.getBoolean(ProducerConfig.BLOCK_ON_BUFFER_FULL_CONFIG);
+                // 如果"block.on.buffer.full"为true,那么设置"max.block.ms"为Long.MAX_VALUE
                 if (blockOnBufferFull) {
                     this.maxBlockTimeMs = Long.MAX_VALUE;
+                // 如果用户设置的"block.on.buffer.full"为false并且用户设置了"metadata.fetch.timeout.ms"
                 } else if (userProvidedConfigs.containsKey(ProducerConfig.METADATA_FETCH_TIMEOUT_CONFIG)) {
                     log.warn(ProducerConfig.METADATA_FETCH_TIMEOUT_CONFIG + " config is deprecated and will be removed soon. " +
                             "Please use " + ProducerConfig.MAX_BLOCK_MS_CONFIG);
+                    // 那么更新"max.block.ms"为"metadata.fetch.timeout.ms"
                     this.maxBlockTimeMs = config.getLong(ProducerConfig.METADATA_FETCH_TIMEOUT_CONFIG);
                 } else {
+                    // 否则更新"max.block.ms"为"max.block.ms"
                     this.maxBlockTimeMs = config.getLong(ProducerConfig.MAX_BLOCK_MS_CONFIG);
                 }
+            // 用户没有设置"block.on.buffer.full"但是设置了 "metadata.fetch.timeout.ms";
             } else if (userProvidedConfigs.containsKey(ProducerConfig.METADATA_FETCH_TIMEOUT_CONFIG)) {
                 log.warn(ProducerConfig.METADATA_FETCH_TIMEOUT_CONFIG + " config is deprecated and will be removed soon. " +
                         "Please use " + ProducerConfig.MAX_BLOCK_MS_CONFIG);
+                // 更新"max.block.ms"为"metadata.fetch.timeout.ms"
                 this.maxBlockTimeMs = config.getLong(ProducerConfig.METADATA_FETCH_TIMEOUT_CONFIG);
+            // 用户没有设置"block.on.buffer.full"也没设置 "metadata.fetch.timeout.ms";
             } else {
+                // 更新"max.block.ms"为"max.block.ms"
                 this.maxBlockTimeMs = config.getLong(ProducerConfig.MAX_BLOCK_MS_CONFIG);
             }
 
@@ -281,23 +301,28 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
              * If the TIME_OUT config is set use that for request timeout.
              * This should be removed with release 0.9
              */
-            // 请求超时时间，默认30s
+            // 获取"timeout.ms",默认30 * 1000ms
+            // 设置server等待follower返回acknowledgments的超时时间
+
+            // 如果用户设置了"timeout.ms"
             if (userProvidedConfigs.containsKey(ProducerConfig.TIMEOUT_CONFIG)) {
                 log.warn(ProducerConfig.TIMEOUT_CONFIG + " config is deprecated and will be removed soon. Please use " +
                         ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG);
+                //获取用户配置的
                 this.requestTimeoutMs = config.getInt(ProducerConfig.TIMEOUT_CONFIG);
             } else {
+                // 用户没有配置"timeout.ms",获取"request.timeout.ms",默认30 * 1000ms
                 this.requestTimeoutMs = config.getInt(ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG);
             }
-            // 缓冲区，负责消息的缓冲机制
-            this.accumulator = new RecordAccumulator(config.getInt(ProducerConfig.BATCH_SIZE_CONFIG),
-                    this.totalMemorySize,
-                    this.compressionType,
+            // 消息缓冲区，负责消息的缓冲机制
+            this.accumulator = new RecordAccumulator(config.getInt(ProducerConfig.BATCH_SIZE_CONFIG),// 获取"batch.size",默认16384,当发送多少消息时，生产者才会尝试将消息批处理
+                    this.totalMemorySize,// 上面获取的"buffer.memory",默认32M
+                    this.compressionType,// 上面获取的"compression.type",默认none
                     config.getLong(ProducerConfig.LINGER_MS_CONFIG),// 如果在指定时间范围内，都没凑出来一个batch把这条消息发送出去，那么到了指定linger.ms的时间，就必须立即把这个消息发送出去
-                    retryBackoffMs,
+                    retryBackoffMs,// 上面获取的"retry.backoff.ms",默认100ms
                     metrics,
                     time);
-            // 保存broker服务列表
+            // 获取"bootstrap.servers"配置的服务列表,解析后返回List<InetSocketAddress>
             List<InetSocketAddress> addresses = ClientUtils.parseAndValidateAddresses(config.getList(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG));
             // 拉取集群元数据
             // 其实并没有真正的去拉取集群元数据，而是对metadata中的一些属性做了初始化
@@ -305,12 +330,22 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             ChannelBuilder channelBuilder = ClientUtils.createChannelBuilder(config.values());
             // 网络通信组件
             NetworkClient client = new NetworkClient(
+                    // 获取"connections.max.idle.ms",默认9 * 60 * 1000ms
+                    // 等待多久后关闭空闲连接
                     new Selector(config.getLong(ProducerConfig.CONNECTIONS_MAX_IDLE_MS_CONFIG), this.metrics, time, "producer", channelBuilder),
                     this.metadata,
                     clientId,
+                    // 获取"max.in.flight.requests.per.connection",默认5
+                    // 客户端在单个服务连接上发送的未确认请求的最大数量
                     config.getInt(ProducerConfig.MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION),
+                    // 获取"reconnect.backoff.ms",默认50ms
+                    // 重新连接到server的等待时间
                     config.getLong(ProducerConfig.RECONNECT_BACKOFF_MS_CONFIG),
+                    // 获取 "send.buffer.bytes",默认128 * 1024
+                    // 发送数据时的tcp缓冲区
                     config.getInt(ProducerConfig.SEND_BUFFER_CONFIG),
+                    // 获取"receive.buffer.bytes",默认32 * 1024
+                    // 接收数据时的tcp缓冲区
                     config.getInt(ProducerConfig.RECEIVE_BUFFER_CONFIG),
                     this.requestTimeoutMs, time);
             // Sender线程，负责从缓冲区里获取消息发送到broker上去
@@ -332,8 +367,10 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             this.ioThread.start();
 
             this.errors = this.metrics.sensor("errors");
-            // 序列号器
-            if (keySerializer == null) {
+            // 序列化器
+            if (keySerializer == null) {// 用户没指定
+                // 获取"key.serializer",默认
+                // key序列化器
                 this.keySerializer = config.getConfiguredInstance(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG,
                         Serializer.class);
                 this.keySerializer.configure(config.originals(), true);
@@ -341,7 +378,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
                 config.ignore(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG);
                 this.keySerializer = keySerializer;
             }
-            if (valueSerializer == null) {
+            if (valueSerializer == null) {// 用户没指定
                 this.valueSerializer = config.getConfiguredInstance(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG,
                         Serializer.class);
                 this.valueSerializer.configure(config.originals(), false);
@@ -351,8 +388,8 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             }
 
             // load interceptors and make sure they get clientId
-            // 拦截器
             userProvidedConfigs.put(ProducerConfig.CLIENT_ID_CONFIG, clientId);
+            // 获取"interceptor.classes"配置,默认无
             // 获取配置的拦截器
             List<ProducerInterceptor<K, V>> interceptorList = (List) (new ProducerConfig(userProvidedConfigs)).getConfiguredInstances(ProducerConfig.INTERCEPTOR_CLASSES_CONFIG,
                     ProducerInterceptor.class);

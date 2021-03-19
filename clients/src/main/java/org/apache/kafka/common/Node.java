@@ -15,16 +15,19 @@ package org.apache.kafka.common;
 /**
  * Information about a Kafka node
  * 关于Kafka节点的信息，也就是kafka broker
+ * 也就是配置props.put("bootstrap.servers", "192.168.6.130:9092,192.168.6.131:9092,192.168.6.132:9092");被解析后传进来的一个个服务节点
  */
 public class Node {
 
     private static final Node NO_NODE = new Node(-1, "", -1);
     // 初始化int nodeId = -1;每创建一个node时，id传进来的为nodeId--
-    // 所以id从-2开始
     private final int id;
     private final String idString;
+    // 服务端的ip地址
     private final String host;
+    // 服务器的port
     private final int port;
+    // 服务端的机架信息
     private final String rack;
 
     public Node(int id, String host, int port) {
