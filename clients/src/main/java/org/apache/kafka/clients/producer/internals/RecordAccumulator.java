@@ -66,7 +66,7 @@ public final class RecordAccumulator {
     private final AtomicInteger appendsInProgress;
     // 记录每次申请RecordBatch的大小，默认16kb
     private final int batchSize;
-    // 压缩类型
+    // 压缩类型,默认none
     private final CompressionType compression;
     // RecordBatch等待lingerMs后，必须发送出去
     private final long lingerMs;
@@ -77,10 +77,10 @@ public final class RecordAccumulator {
     private final Time time;
     // 记录TopicPartition与自身的Deque<RecordBatch>
     private final ConcurrentMap<TopicPartition, Deque<RecordBatch>> batches;
-    // 记录发送后待确认的RecordBatch
+    // 记录待发送的RecordBatch
     private final IncompleteRecordBatches incomplete;
     // The following variables are only accessed by the sender thread, so we don't need to protect them.
-    // 记录所有需要保证消息有序性的分区topic
+    // 记录所有需要保证消息有序性的分区topic-partition
     private final Set<TopicPartition> muted;
     private int drainIndex;
 
@@ -165,19 +165,19 @@ public final class RecordAccumulator {
      * @param callback The user-supplied callback to execute when the request is complete
      * @param maxTimeToBlock The maximum time in milliseconds to block for buffer memory to be available
      */
-    public RecordAppendResult append(TopicPartition tp,
-                                     long timestamp,
+    public RecordAppendResult append(TopicPartition tp,// 消息发送的topic-partition
+                                     long timestamp,// 消息的时间戳
                                      byte[] key,
                                      byte[] value,
-                                     Callback callback,
-                                     long maxTimeToBlock) throws InterruptedException {
+                                     Callback callback,// 用户回调
+                                     long maxTimeToBlock) throws InterruptedException {// 最大阻塞等待时间
         // We keep track of the number of appending thread to make sure we do not miss batches in
         // abortIncompleteBatches().
         // AtomicInteger类型累计并发线程数
         appendsInProgress.incrementAndGet();
         try {
             // check if we have an in-progress batch
-            // 获取topic对应的Deque
+            // 获取topic-partition对应的Deque
             Deque<RecordBatch> dq = getOrCreateDeque(tp);
             synchronized (dq) {
                 if (closed)
@@ -215,7 +215,7 @@ public final class RecordAccumulator {
                 FutureRecordMetadata future = Utils.notNull(batch.tryAppend(timestamp, key, value, callback, time.milliseconds()));
                 // 将RecordBatch保存到Deque的末尾
                 dq.addLast(batch);
-                // 将待发送RecordBatch记录到IncompleteRecordBatches中
+                // 将待发送RecordBatch记录到IncompleteRecordBatches队列中
                 incomplete.add(batch);
                 return new RecordAppendResult(future, dq.size() > 1 || batch.records.isFull(), true);
             }
@@ -227,8 +227,9 @@ public final class RecordAccumulator {
     /**
      * If `RecordBatch.tryAppend` fails (i.e. the record batch is full), close its memory records to release temporary
      * resources (like compression streams buffers).
-     * 将消息放到对应主题的Deque<RecordBatch>尾部的RecordBatch中
+     *
      */
+    // 将消息放到对应topic-partition的Deque<RecordBatch>尾部的RecordBatch中
     private RecordAppendResult tryAppend(long timestamp, byte[] key, byte[] value, Callback callback, Deque<RecordBatch> deque) {
         // 获取topic对应的Deque末尾的RecordBatch
         RecordBatch last = deque.peekLast();
@@ -327,44 +328,46 @@ public final class RecordAccumulator {
      * </ul>
      * </ol>
      */
-    // 获取可发送的消息
+    // 获取待发送的消息
     public ReadyCheckResult ready(Cluster cluster, long nowMs) {
-        // 记录可发送消息记录的topic的leader节点
+        // 记录可发送消息记录的topic-partition的leader节点
         Set<Node> readyNodes = new HashSet<>();
-        // 记录触发下次检查可发送消息需要等待的时间
+        // 记录触发下次检查待发送消息时需要等待的时间
         long nextReadyCheckDelayMs = Long.MAX_VALUE;
+        // 记录是否存在不知道leader节点的topic-partition
         boolean unknownLeadersExist = false;
         // 记录是否有等待分配空间的线程(即当前BufferPool已用尽)
         boolean exhausted = this.free.queued() > 0;
-        // 遍历所有的分区
+        // 遍历所有的要发送到topic-partition的消息
         for (Map.Entry<TopicPartition, Deque<RecordBatch>> entry : this.batches.entrySet()) {
             TopicPartition part = entry.getKey();
             Deque<RecordBatch> deque = entry.getValue();
             // 获取当前分区的leader节点
             Node leader = cluster.leaderFor(part);
+            // 不知道leader节点
             if (leader == null) {
                 // 当前分区的leaser节点未知
                 unknownLeadersExist = true;
             } else if (!readyNodes.contains(leader) && !muted.contains(part)) {
                 synchronized (deque) {
-                    // 获取topic第一个RecordBatch，这里每次调用只获取每个分区的第一个
+                    // 获取topic-partition第一个RecordBatch，这里每次调用只获取每个topic-partition的第一个
                     RecordBatch batch = deque.peekFirst();
                     if (batch != null) {
-                        // 记录当前RecordBatch是否为重试 并且 (最后一次重试时间 + 重试间隔 > 当前时间)
+                        // 记录当前RecordBatch是否为重试并且已符合再次发送的要求(最后一次放入消息的时间戳 + 重试间隔 > 当前时间)
                         boolean backingOff = batch.attempts > 0 && batch.lastAttemptMs + retryBackoffMs > nowMs;
-                        // 记录当前RecordBatch已等待时间waitedTimeMs = 当前时间 - 最后一次重试时间的间隔
+                        // 记录当前RecordBatch已等待时间waitedTimeMs = 当前时间 - 最后一次放入消息的时间戳
                         long waitedTimeMs = nowMs - batch.lastAttemptMs;
                         // 记录当前RecordBatch需要等待的时间 timeToWaitMs = 如果是重试消息则记录retryBackoffMs，如果不是则记录lingerMs
                         long timeToWaitMs = backingOff ? retryBackoffMs : lingerMs;
                         // 记录当前RecordBatch消息剩余等待时间timeLeftMs
                         long timeLeftMs = Math.max(timeToWaitMs - waitedTimeMs, 0);
-                        // 记录当前topic的deque数量是否超过1个或者RecordBatch中的MemoryRecords已准备发送
+                        // 记录当前topic-partition的deque数量是否超过1个或者队列中第一个RecordBatch中的MemoryRecords已准备发送
                         boolean full = deque.size() > 1 || batch.records.isFull();
                         // 记录当前RecordBatch是否超时
                         boolean expired = waitedTimeMs >= timeToWaitMs;
                         // 最终总结下来就是方法注释中的四种场景就会触发当前RecordBatch需要发送出去
                         boolean sendable = full || expired || exhausted || closed || flushInProgress();
-                        // RecordBatch可发送 && (非重试 || 重试时间已到)
+                        // RecordBatch可发送 && (非重试 || (重试 && 重试时间已到))
                         if (sendable && !backingOff) {
                             readyNodes.add(leader);
                         } else {

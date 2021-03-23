@@ -80,15 +80,18 @@ public class Compressor {
                 .getConstructor(InputStream.class, Boolean.TYPE);
         }
     });
-
+    // 消息压缩类型,默认none
     private final CompressionType type;
+    // 写消息时的输出流,是根据压缩类型对bufferStream的包装
     private final DataOutputStream appendStream;
+    // 写消息时的byte数组输出流
     private final ByteBufferOutputStream bufferStream;
     private final int initPos;
     // 记录未压缩消息的数量
     public long writtenUncompressed;
     // 记录已写消息的数量
     public long numRecords;
+    // 压缩比,默认1
     public float compressionRate;
     public long maxTimestamp;
 

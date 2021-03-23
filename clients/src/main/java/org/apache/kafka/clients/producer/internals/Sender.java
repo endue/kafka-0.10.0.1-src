@@ -187,12 +187,12 @@ public class Sender implements Runnable {
         RecordAccumulator.ReadyCheckResult result = this.accumulator.ready(cluster, now);
 
         // if there are any partitions whose leaders are not known yet, force metadata update
-        // 如果有topic不知道它的leader节点，则修改元数据metadata标志位needUpdate为true
+        // 如果有topic-partition不知道它的leader节点，则修改元数据metadata标志位needUpdate为true
         if (result.unknownLeadersExist)
             this.metadata.requestUpdate();
 
         // remove any nodes we aren't ready to send to
-        // 如果有node的连接未准备好，则剔除当前node
+        // 如果有node(leader)的连接未准备好，则剔除当前node
         Iterator<Node> iter = result.readyNodes.iterator();
         // 记录node重连需要等待的时间
         long notReadyTimeout = Long.MAX_VALUE;

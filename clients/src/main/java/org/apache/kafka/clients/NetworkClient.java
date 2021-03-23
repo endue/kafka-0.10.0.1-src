@@ -62,7 +62,7 @@ public class NetworkClient implements KafkaClient {
 
     /* the set of requests currently being sent or awaiting a response */
     // 获取"max.in.flight.requests.per.connection",默认5
-    // 客户端在单个服务连接上发送的未确认请求的最大数量
+    // 客户端在单个服务连接上发送的未确认消息的最大数量
     private final InFlightRequests inFlightRequests;
 
     /* the socket send buffer size in bytes */

@@ -28,6 +28,7 @@ import java.util.Map;
 final class InFlightRequests {
 
     private final int maxInFlightRequestsPerConnection;
+    // key是leader节点的id
     private final Map<String, Deque<ClientRequest>> requests = new HashMap<String, Deque<ClientRequest>>();
 
     public InFlightRequests(int maxInFlightRequestsPerConnection) {

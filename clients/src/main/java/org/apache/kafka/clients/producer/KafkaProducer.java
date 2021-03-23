@@ -498,6 +498,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
     @Override
     public Future<RecordMetadata> send(ProducerRecord<K, V> record, Callback callback) {
         // intercept the record, which can be potentially modified; this method does not throw exceptions
+        // 在发送消息前调用判断是否有拦截器然后调用拦截器的onSend()方法
         // 执行实现了ProducerInterceptor接口的自定义实现类的onSend()方法
         ProducerRecord<K, V> interceptedRecord = this.interceptors == null ? record : this.interceptors.onSend(record);
         return doSend(interceptedRecord, callback);
@@ -509,7 +510,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
      * 发送消息实现
      */
     private Future<RecordMetadata> doSend(ProducerRecord<K, V> record, Callback callback) {
-        // 要发往的分区
+        // 要发往的topic-partition
         TopicPartition tp = null;
         try {
             // first make sure the metadata for the topic is available
@@ -867,8 +868,11 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
      * notifies producer interceptors about the request completion.
      */
     private static class InterceptorCallback<K, V> implements Callback {
+        // 用户自定义的回调
         private final Callback userCallback;
+        // 拦截器
         private final ProducerInterceptors<K, V> interceptors;
+        // 消息发送到的topic-partition
         private final TopicPartition tp;
 
         public InterceptorCallback(Callback userCallback, ProducerInterceptors<K, V> interceptors,
