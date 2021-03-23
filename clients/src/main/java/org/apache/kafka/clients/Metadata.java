@@ -204,7 +204,11 @@ public final class Metadata {
         // Do this after notifying listeners as subscribed topics' list can be changed by listeners
         // needMetadataForAllTopics默认初始化为false,在调用地点1的情况下,返回cluster,也就是"bootstrap.servers"配置的服务列表List<InetSocketAddress>
         this.cluster = this.needMetadataForAllTopics ? getClusterForCurrentTopics(cluster) : cluster;
-
+        // 唤醒,因为更新上下文,此时可能KafkaProducer阻塞在
+        // org.apache.kafka.clients.producer.KafkaProducer.doSend -->
+        // org.apache.kafka.clients.producer.KafkaProducer.waitOnMetadata -->
+        // org.apache.kafka.clients.Metadata.awaitUpdate方法上
+        // 所以此时唤醒它,继续往下执行发送消息
         notifyAll();
         log.debug("Updated cluster metadata version {} to {}", this.version, this.cluster);
     }

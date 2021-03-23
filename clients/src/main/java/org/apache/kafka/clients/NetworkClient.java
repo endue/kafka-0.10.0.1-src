@@ -600,7 +600,7 @@ public class NetworkClient implements KafkaClient {
             // metadata是否应该更新
             // 获取下次更新metadata的时间戳，如果needUpdate=true，返回0
             long timeToNextMetadataUpdate = metadata.timeToNextUpdate(now);
-            // 如果连接失败后等待重试的世界
+            // 如果连接失败后等待重试的时间
             long timeToNextReconnectAttempt = Math.max(this.lastNoNodeAvailableMs + metadata.refreshBackoff() - now, 0);
             // 如果一条metadata的fetch请求还未从server收到回复,那么时间设置为Integer.MAX_VALUE
             long waitForMetadataFetch = this.metadataFetchInProgress ? Integer.MAX_VALUE : 0;
@@ -677,6 +677,7 @@ public class NetworkClient implements KafkaClient {
             this.metadataFetchInProgress = false;
             // 转换响应
             MetadataResponse response = new MetadataResponse(body);
+            // 根据响应生成Cluster
             Cluster cluster = response.cluster();
             // check if any topics metadata failed to get updated
             Map<String, Errors> errors = response.errors();
@@ -685,6 +686,7 @@ public class NetworkClient implements KafkaClient {
 
             // don't update the cluster if there are no valid nodes...the topic we want may still be in the process of being
             // created which means we will get errors and no nodes until it exists
+            // 如果有有效节点信息,那么更新metadata
             if (cluster.nodes().size() > 0) {
                 this.metadata.update(cluster, now);
             } else {
@@ -719,11 +721,11 @@ public class NetworkClient implements KafkaClient {
                 this.metadataFetchInProgress = true;
                 // 创建metadata请求
                 MetadataRequest metadataRequest;
-                // 更新所有的topic
+                // 拉取所有的topic
                 if (metadata.needMetadataForAllTopics())
                     metadataRequest = MetadataRequest.allTopics();
                 else
-                    // 基于metadata中的topics集合进行更新
+                    // 基于metadata中的topics集合进行拉取
                     metadataRequest = new MetadataRequest(new ArrayList<>(metadata.topics()));
                 // 封装请求
                 ClientRequest clientRequest = request(now, nodeConnectionId, metadataRequest);

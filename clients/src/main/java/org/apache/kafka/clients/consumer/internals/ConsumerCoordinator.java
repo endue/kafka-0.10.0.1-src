@@ -152,6 +152,8 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
         return metadataList;
     }
 
+    // 添加元数据更新的监听器,当元数据更新时会调用监听器中的onMetadataUpdate()方法
+    // 将最新的集群数据传到进来
     private void addMetadataListener() {
         this.metadata.addListener(new Metadata.Listener() {
             @Override
