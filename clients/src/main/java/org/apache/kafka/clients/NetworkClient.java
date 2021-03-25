@@ -76,9 +76,11 @@ public class NetworkClient implements KafkaClient {
     private final int socketReceiveBuffer;
 
     /* the client id used to identify this client in requests to the server */
+    // 客户端id，用于在向服务器发出的请求中标识此客户端
     private final String clientId;
 
     /* the current correlation id to use when sending requests to servers */
+    // 当向服务端发送请求时使用
     private int correlation;
 
     /* max time in ms for the producer to wait for acknowledgement from server*/
@@ -244,6 +246,7 @@ public class NetworkClient implements KafkaClient {
      */
     @Override
     public void send(ClientRequest request, long now) {
+        // 获取请求发送的目的地
         String nodeId = request.request().destination();
         if (!canSendRequest(nodeId))
             throw new IllegalStateException("Attempt to send a request to node " + nodeId + " which is not ready.");
@@ -254,7 +257,7 @@ public class NetworkClient implements KafkaClient {
         request.setSendTimeMs(now);
         // 这里又将request暂存到inFlightRequests的Map<String, Deque<ClientRequest>> requests中
         this.inFlightRequests.add(request);
-        // 将request保存到对应KafkaChannel的Send属性中并关注OP_WRITE事件
+        // 将发送的消息request保存到对应KafkaChannel的Send属性中并关注OP_WRITE事件
         selector.send(request.request());
     }
 
@@ -285,7 +288,8 @@ public class NetworkClient implements KafkaClient {
         handleCompletedSends(responses, updatedNow);
         // 处理接受到的响应，
         handleCompletedReceives(responses, updatedNow);
-        // 处理断开的链接
+        // 处理断开的链接,如果有则标记metadata需要更新同时会清空发完该节点的消息记录
+        // 修改节点对应的状态为DISCONNECTED
         handleDisconnections(responses, updatedNow);
         // 处理建立连接的节点，修改状态为CONNECTED
         handleConnections();
@@ -478,7 +482,7 @@ public class NetworkClient implements KafkaClient {
     /**
      * Handle any completed receives and update the response list with the responses received.
      * 处理接收到的服务器响应消息，然后在inFlightRequests找到对应的客户端请求并出队
-     * 如果是元数据更新的响应消息，则maybeHandleCompletedReceive会处理并返回false
+     * 如果是元数据更新的响应消息，则maybeHandleCompletedReceive会处理并返回true
      * 如果不是，封装一个回调到responses中
      * @param responses The list of responses to update
      * @param now The current time

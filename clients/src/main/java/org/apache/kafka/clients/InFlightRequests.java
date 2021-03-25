@@ -26,9 +26,9 @@ import java.util.Map;
  * 已经发送或正在发送但还没有收到响应的请求集
  */
 final class InFlightRequests {
-
+    // 每个链接允许的最大已发送但是还未收到响应的消息的数量
     private final int maxInFlightRequestsPerConnection;
-    // key是leader节点的id
+    // key是leader节点的id,values是待发送的消息
     private final Map<String, Deque<ClientRequest>> requests = new HashMap<String, Deque<ClientRequest>>();
 
     public InFlightRequests(int maxInFlightRequestsPerConnection) {

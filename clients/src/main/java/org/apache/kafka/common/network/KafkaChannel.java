@@ -29,11 +29,14 @@ import java.security.Principal;
 import org.apache.kafka.common.utils.Utils;
 
 public class KafkaChannel {
+    // node节点ID
     private final String id;
     private final TransportLayer transportLayer;
     private final Authenticator authenticator;
     private final int maxReceiveSize;
+    // 每次接收响应时创建的对象,当接收完响应后,该值会被赋值为null
     private NetworkReceive receive;
+    // 记录每次要发送的消息,当消息发送完毕后,该值会被赋值为null
     private Send send;
 
     public KafkaChannel(String id, TransportLayer transportLayer, Authenticator authenticator, int maxReceiveSize) throws IOException {

@@ -100,6 +100,7 @@ public final class RecordBatch {
      * @param timestamp The timestamp returned by the broker.
      * @param exception The exception that occurred (or null if the request was successful)
      */
+    // 发送完消息后的回调
     public void done(long baseOffset, long timestamp, RuntimeException exception) {
         log.trace("Produced messages to topic-partition {} with base offset offset {} and error: {}.",
                   topicPartition,
@@ -109,6 +110,7 @@ public final class RecordBatch {
         for (int i = 0; i < this.thunks.size(); i++) {
             try {
                 Thunk thunk = this.thunks.get(i);
+                // 根据异常执行不同的回调方法
                 if (exception == null) {
                     // If the timestamp returned by server is NoTimestamp, that means CreateTime is used. Otherwise LogAppendTime is used.
                     RecordMetadata metadata = new RecordMetadata(this.topicPartition,  baseOffset, thunk.future.relativeOffset(),

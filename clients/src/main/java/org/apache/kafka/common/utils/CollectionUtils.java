@@ -26,6 +26,7 @@ public class CollectionUtils {
      * @param <T> Partition data type
      * @return partitioned data
      */
+    // 根据topic进行数据分组,返回的数据为<topic,<partition,数据>>
     public static <T> Map<String, Map<Integer, T>> groupDataByTopic(Map<TopicPartition, T> data) {
         Map<String, Map<Integer, T>> dataByTopic = new HashMap<String, Map<Integer, T>>();
         for (Map.Entry<TopicPartition, T> entry: data.entrySet()) {

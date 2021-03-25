@@ -19,10 +19,13 @@ import org.apache.kafka.common.protocol.types.Struct;
  * originally sent.
  */
 public class ClientResponse {
-
+    // 接受到响应的时间戳
     private final long receivedTimeMs;
+    // 是否断开连接
     private final boolean disconnected;
+    // 客户端发送的请求数据
     private final ClientRequest request;
+    // 服务端响应的数据
     private final Struct responseBody;
 
     /**

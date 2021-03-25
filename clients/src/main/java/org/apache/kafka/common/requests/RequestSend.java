@@ -21,8 +21,9 @@ import org.apache.kafka.common.protocol.types.Struct;
  * A send object for a kafka request
  */
 public class RequestSend extends NetworkSend {
-
+    // 请求头
     private final RequestHeader header;
+    // 发送的数据
     private final Struct body;
 
     public RequestSend(String destination, RequestHeader header, Struct body) {

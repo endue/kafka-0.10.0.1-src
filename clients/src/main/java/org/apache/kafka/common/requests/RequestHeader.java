@@ -30,10 +30,12 @@ public class RequestHeader extends AbstractRequestResponse {
     private static final Field API_VERSION_FIELD = REQUEST_HEADER.get("api_version");
     private static final Field CLIENT_ID_FIELD = REQUEST_HEADER.get("client_id");
     private static final Field CORRELATION_ID_FIELD = REQUEST_HEADER.get("correlation_id");
-
+    // 消息的类型
     private final short apiKey;
     private final short apiVersion;
+    // 发送消息的客户端ID
     private final String clientId;
+    // 发送消息的关联ID,每次发送消息都自增1
     private final int correlationId;
 
     public RequestHeader(Struct header) {

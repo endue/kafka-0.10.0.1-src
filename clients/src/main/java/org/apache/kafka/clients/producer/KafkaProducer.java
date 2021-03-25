@@ -883,6 +883,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
         }
 
         public void onCompletion(RecordMetadata metadata, Exception exception) {
+            // 如果拦截器不为空,执行连接器的onAcknowledgement方法
             if (this.interceptors != null) {
                 if (metadata == null) {
                     this.interceptors.onAcknowledgement(new RecordMetadata(tp, -1, -1, Record.NO_TIMESTAMP, -1, -1, -1),
@@ -891,6 +892,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
                     this.interceptors.onAcknowledgement(metadata, exception);
                 }
             }
+            // 执行用户自定义的回调
             if (this.userCallback != null)
                 this.userCallback.onCompletion(metadata, exception);
         }

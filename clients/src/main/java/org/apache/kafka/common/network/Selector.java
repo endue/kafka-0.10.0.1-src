@@ -85,7 +85,7 @@ public class Selector implements Selectable {
     private final Map<String, KafkaChannel> channels;
     // 记录每一次poll时，已发送的消息数据send(也就是底层存储在Bytebuffer中的数据)
     private final List<Send> completedSends;
-    // 记录每一次poll时，接受到的响应
+    // 记录每一次poll时，遍历stagedReceives中的响应记录到该集合中
     private final List<NetworkReceive> completedReceives;
     // 记录每一次poll时，OP_READ事件的数据，也就是KafkaChannel对应的响应
     private final Map<KafkaChannel, Deque<NetworkReceive>> stagedReceives;
@@ -95,6 +95,7 @@ public class Selector implements Selectable {
     private final List<String> disconnected;
     // 记录每一次poll时，创建完连接的node ID
     private final List<String> connected;
+    // 记录发送消息失败的node Id
     private final List<String> failedSends;
     private final Time time;
     private final SelectorMetrics sensors;
@@ -108,6 +109,7 @@ public class Selector implements Selectable {
     // 初始化时为-1
     private final int maxReceiveSize;
     private final boolean metricsPerConnection;
+    // 当前时间戳
     private long currentTimeNanos;
     // 初始化时为currentTimeNanos + connectionsMaxIdleNanos
     private long nextIdleCloseCheckTime;
@@ -335,6 +337,7 @@ public class Selector implements Selectable {
 
         long endIo = time.nanoseconds();
         this.sensors.ioTime.record(endIo - endSelect, time.milliseconds());
+        // 判断是否空闲连接需要关闭
         maybeCloseOldestConnection();
     }
 
@@ -382,7 +385,7 @@ public class Selector implements Selectable {
                     NetworkReceive networkReceive;
                     // 读取响应
                     while ((networkReceive = channel.read()) != null)
-                        // 暂存响应
+                        // 暂存响应保存到stagedReceives集合中
                         addToStagedReceives(channel, networkReceive);
                 }
 
@@ -391,7 +394,7 @@ public class Selector implements Selectable {
                 if (channel.ready() && key.isWritable()) {
                     // 获取KafkaChannel中的Send并写消息到channel中
                     Send send = channel.write();
-                    // 当send不为空时，说明消息已全部发送完毕，否则需要等待下一次的执行
+                    // 当send不为空时，说明消息已全部发送完毕，返回非null时说明没有发送完毕,出现拆包需要等待下一次再次发送
                     if (send != null) {
                         this.completedSends.add(send);
                         this.sensors.recordBytesSent(channel.id(), send.size());
@@ -469,14 +472,20 @@ public class Selector implements Selectable {
             unmute(channel);
     }
 
+    // 关闭空闲的连接
     private void maybeCloseOldestConnection() {
+        // 当前时间已经到了计算下一个超时时间的时刻
         if (currentTimeNanos > nextIdleCloseCheckTime) {
+            // 如果lru连接为空,重新计算nextIdleCloseCheckTime
             if (lruConnections.isEmpty()) {
                 nextIdleCloseCheckTime = currentTimeNanos + connectionsMaxIdleNanos;
+            // 如果lru不为空
             } else {
+                // 遍历lru中的channel id以及商场活跃的时间戳
                 Map.Entry<String, Long> oldestConnectionEntry = lruConnections.entrySet().iterator().next();
                 Long connectionLastActiveTime = oldestConnectionEntry.getValue();
                 nextIdleCloseCheckTime = connectionLastActiveTime + connectionsMaxIdleNanos;
+                // 超时了,关闭连接
                 if (currentTimeNanos > nextIdleCloseCheckTime) {
                     String connectionId = oldestConnectionEntry.getKey();
                     if (log.isTraceEnabled())
@@ -624,7 +633,7 @@ public class Selector implements Selectable {
      * checks if there are any staged receives and adds to completedReceives
      */
     private void addToCompletedReceives() {
-        // 遍历响应，然后只处理一个，然后将响应消息保存到completedReceives中
+        // 遍历响应，只处理每一个KafkaChannel中的一个N响应networkReceive，然后将响应消息保存到completedReceives中
         if (!this.stagedReceives.isEmpty()) {
             Iterator<Map.Entry<KafkaChannel, Deque<NetworkReceive>>> iter = this.stagedReceives.entrySet().iterator();
             while (iter.hasNext()) {

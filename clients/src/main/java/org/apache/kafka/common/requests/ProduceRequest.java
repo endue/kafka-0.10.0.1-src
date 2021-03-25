@@ -49,10 +49,12 @@ public class ProduceRequest extends AbstractRequest {
 
     public ProduceRequest(short acks, int timeout, Map<TopicPartition, ByteBuffer> partitionRecords) {
         super(new Struct(CURRENT_SCHEMA));
+        // 将待发送的数据转换为<topic,<partition,ByteBuffer>>
         Map<String, Map<Integer, ByteBuffer>> recordsByTopic = CollectionUtils.groupDataByTopic(partitionRecords);
-        struct.set(ACKS_KEY_NAME, acks);
-        struct.set(TIMEOUT_KEY_NAME, timeout);
+        struct.set(ACKS_KEY_NAME, acks);// 设置acks
+        struct.set(TIMEOUT_KEY_NAME, timeout);// 设置timeout
         List<Struct> topicDatas = new ArrayList<Struct>(recordsByTopic.size());
+        // 遍历刚刚转换后的<topic,<partition,ByteBuffer>>集合,将里面的数据转换为一个个的Struct
         for (Map.Entry<String, Map<Integer, ByteBuffer>> entry : recordsByTopic.entrySet()) {
             Struct topicData = struct.instance(TOPIC_DATA_KEY_NAME);
             topicData.set(TOPIC_KEY_NAME, entry.getKey());

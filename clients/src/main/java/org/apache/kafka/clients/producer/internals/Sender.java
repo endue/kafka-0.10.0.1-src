@@ -249,7 +249,7 @@ public class Sender implements Runnable {
             log.trace("Created {} produce requests: {}", requests.size(), requests);
             pollTimeout = 0;
         }
-        // 发送消息(实际底层只是关注了对应node的channel的OP_WRITE事件并且将数据发送到了InFlightRequests中)
+        // 发送消息(实际底层只是关注了对应node的channel的OP_WRITE事件并且将数据发送到了InFlightRequests和KafkaChannel.send上)
         for (ClientRequest request : requests)
             client.send(request, now);
 
@@ -291,6 +291,7 @@ public class Sender implements Runnable {
             log.trace("Cancelled request {} due to node {} being disconnected", response, response.request()
                                                                                                   .request()
                                                                                                   .destination());
+            // 消息记录发送失败
             for (RecordBatch batch : batches.values())
                 completeBatch(batch, Errors.NETWORK_EXCEPTION, -1L, Record.NO_TIMESTAMP, correlationId, now);
         } else {
@@ -343,12 +344,14 @@ public class Sender implements Runnable {
             this.accumulator.reenqueue(batch, now);
             this.sensors.recordRetries(batch.topicPartition.topic(), batch.recordCount);
         } else {
+            // 记录发送失败的异常
             RuntimeException exception;
             if (error == Errors.TOPIC_AUTHORIZATION_FAILED)
                 exception = new TopicAuthorizationException(batch.topicPartition.topic());
             else
                 exception = error.exception();
             // tell the user the result of their request
+            // 执行回调
             batch.done(baseOffset, timestamp, exception);
             // 释放消息累加器的空间
             this.accumulator.deallocate(batch);
