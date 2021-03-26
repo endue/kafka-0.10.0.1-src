@@ -351,7 +351,7 @@ public class Sender implements Runnable {
             else
                 exception = error.exception();
             // tell the user the result of their request
-            // 执行回调
+            // 针对一个RecordBatch执行一个回调
             batch.done(baseOffset, timestamp, exception);
             // 释放消息累加器的空间
             this.accumulator.deallocate(batch);
@@ -409,7 +409,7 @@ public class Sender implements Runnable {
         // 封装回调方法，在发送完消息后会回调这里
         RequestCompletionHandler callback = new RequestCompletionHandler() {
             public void onComplete(ClientResponse response) {
-                // 消息发送后的回调方法
+                // 消息发送后或收到响应后等的回调方法
                 handleProduceResponse(response, recordsByPartition, time.milliseconds());
             }
         };

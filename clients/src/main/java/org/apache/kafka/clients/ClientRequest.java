@@ -27,7 +27,7 @@ public final class ClientRequest {
     private final RequestSend request;
     // 回调函数
     private final RequestCompletionHandler callback;
-    // 该消息是否有客户端来创建如果是则为true
+    // 该消息是否由客户端来创建如果是则为true
     // org.apache.kafka.clients.NetworkClient.DefaultMetadataUpdater.request该方法会设置为true
     private final boolean isInitiatedByNetworkClient;
     // 发送时间戳

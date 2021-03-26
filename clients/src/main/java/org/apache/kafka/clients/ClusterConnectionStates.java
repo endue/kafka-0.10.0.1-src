@@ -154,8 +154,9 @@ final class ClusterConnectionStates {
      * The state of our connection to a node
      */
     private static class NodeConnectionState {
-
+        // 对应节点的连接状态
         ConnectionState state;
+        // 上一次尝试连接的时间戳
         long lastConnectAttemptMs;
 
         public NodeConnectionState(ConnectionState state, long lastConnectAttempt) {

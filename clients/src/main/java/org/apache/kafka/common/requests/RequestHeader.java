@@ -36,6 +36,7 @@ public class RequestHeader extends AbstractRequestResponse {
     // 发送消息的客户端ID
     private final String clientId;
     // 发送消息的关联ID,每次发送消息都自增1
+    // 当服务端响应消息时也会带上该值,最后发送端可根据该值对响应进行校验
     private final int correlationId;
 
     public RequestHeader(Struct header) {
