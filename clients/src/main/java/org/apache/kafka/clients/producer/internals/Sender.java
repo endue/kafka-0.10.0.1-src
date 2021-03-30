@@ -361,7 +361,7 @@ public class Sender implements Runnable {
         if (error.exception() instanceof InvalidMetadataException)
             metadata.requestUpdate();
         // Unmute the completed partition.
-        // 是否保证发生的有序性
+        // 是否保证发送的有序性
         if (guaranteeMessageOrder)
             this.accumulator.unmutePartition(batch.topicPartition);
     }

@@ -95,8 +95,7 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePr
   private val isShuttingDown = new AtomicBoolean(false)
   // kafkaServer是否正在启动标识符
   private val isStartingUp = new AtomicBoolean(false)
-
-  // 服务启动和关闭时使用
+  // 服务启动和关闭时使用,参考kafka.Kafka.main()
   private var shutdownLatch = new CountDownLatch(1)
 
   private val jmxPrefix: String = "kafka.server"
@@ -112,7 +111,8 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePr
   private val metricConfig: MetricConfig = new MetricConfig()
     .samples(config.metricNumSamples)
     .timeWindow(config.metricSampleWindowMs, TimeUnit.MILLISECONDS)
-  // kafkaServer的状态，当成为kafkaController后为RunningAsController
+  // kafkaServer的状态，默认为NotRunning
+  // 当成为kafkaController后为RunningAsController
   val brokerState: BrokerState = new BrokerState
 
   var apis: KafkaApis = null
@@ -174,11 +174,11 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePr
       // 校验是否完成启动
       if(startupComplete.get)
         return
-
+      // 设置kafkaServer正在启动标识符为true
       val canStartup = isStartingUp.compareAndSet(false, true)
       if (canStartup) {
         metrics = new Metrics(metricConfig, reporters, kafkaMetricsTime, true)
-        // 更新kafkaServer状态
+        // 更新kafkaServer状态为Starting
         brokerState.newState(Starting)
 
         /* start scheduler */
@@ -290,7 +290,9 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePr
     catch {
       case e: Throwable =>
         fatal("Fatal error during KafkaServer startup. Prepare to shutdown", e)
+        // 起始失败后,更新kafkaServer正在启动标识符为false
         isStartingUp.set(false)
+        // 停止所有的服务
         shutdown()
         throw e
     }
@@ -300,19 +302,25 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePr
   private def initZk(): ZkUtils = {
     // config.zkConnect 取的 zookeeper.connect的配置值
     info("Connecting to zookeeper on " + config.zkConnect)
-    // 获取根目录
+    // 获取根目录,默认""
     val chroot = {
+      // 读取"zookeeper.connect"
+      // 这里可以看出在配置zookeeper.connect是如果设置为ip:port,ip:port/test
+      // 那么kafka后续集群相关信息都会记录到/test路径下
       if (config.zkConnect.indexOf("/") > 0)
         config.zkConnect.substring(config.zkConnect.indexOf("/"))
       else
         ""
     }
 
+    // 1.
+    // 2. zookeeper.set.acl
     val secureAclsEnabled = JaasUtils.isZkSecurityEnabled() && config.zkEnableSecureAcls
 
     if(config.zkEnableSecureAcls && !secureAclsEnabled) {
       throw new java.lang.SecurityException("zkEnableSecureAcls is true, but the verification of the JAAS login file failed.")
     }
+    // 如果用户自定义了路径
     if (chroot.length > 1) {
       val zkConnForChrootCreation = config.zkConnect.substring(0, config.zkConnect.indexOf("/"))
       // 初始化ZkUtils
@@ -323,6 +331,7 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePr
       // 创建一个永远的根路径chroot
       zkClientForChrootCreation.makeSurePersistentPathExists(chroot)
       info("Created zookeeper path " + chroot)
+      // 关闭ZkUtils
       zkClientForChrootCreation.zkClient.close()
     }
     // 创建一个ZkUtils

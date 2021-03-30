@@ -86,7 +86,7 @@ public class JaasUtils {
         boolean isSecurityEnabled = false;
         // 读取配置zookeeper.sasl.client，默认true
         boolean zkSaslEnabled = Boolean.parseBoolean(System.getProperty(ZK_SASL_CLIENT, "true"));
-        // 读取配置zookeeper.sasl.clientconfig
+        // 读取配置zookeeper.sasl.clientconfig,默认Client
         String zkLoginContextName = System.getProperty(ZK_LOGIN_CONTEXT_NAME_KEY, "Client");
 
         try {

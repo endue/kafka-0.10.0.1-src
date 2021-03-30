@@ -71,14 +71,18 @@ class KafkaScheduler(val threads: Int,
   private var executor: ScheduledThreadPoolExecutor = null
   private val schedulerThreadId = new AtomicInteger(0)
 
-  // 初始化executor
+  // 初始化并启动KafkaScheduler
   override def startup() {
     debug("Initializing task scheduler.")
     this synchronized {
       if(isStarted)
         throw new IllegalStateException("This scheduler has already been started!")
       executor = new ScheduledThreadPoolExecutor(threads)
+      // 设置为false,表示调用ScheduledThreadPoolExecutor对象的shutdown()方法后
+      // 周期性任务不在循环执行
       executor.setContinueExistingPeriodicTasksAfterShutdownPolicy(false)
+      // 设置为false,表示调用ScheduledThreadPoolExecutor对象的shutdown()方法后
+      // 延迟任务不在执行
       executor.setExecuteExistingDelayedTasksAfterShutdownPolicy(false)
       executor.setThreadFactory(new ThreadFactory() {
                                   def newThread(runnable: Runnable): Thread = 

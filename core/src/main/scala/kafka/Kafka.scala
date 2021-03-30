@@ -64,7 +64,7 @@ object Kafka extends Logging {
     try {
       // 加载配置
       val serverProps = getPropsFromArgs(args)
-      // 基于配置投建一个KafkaServerStartable
+      // 基于配置新建一个KafkaServerStartable并初始化一个KafkaServer
       val kafkaServerStartable = KafkaServerStartable.fromProps(serverProps)
 
       // attach shutdown handler to catch control-c
@@ -74,9 +74,10 @@ object Kafka extends Logging {
           kafkaServerStartable.shutdown
         }
       })
-      // 调用KafkaServerStartable.startup方法启动kafkaServer
+      // 调用KafkaServerStartable.startup方法启动上面刚刚创建的kafkaServer
       kafkaServerStartable.startup
-      // 启动kafkaServer后，底层调用shutdownLatch.await()方法，阻塞在这里，等待钩子函数执行时被唤醒
+      // 启动kafkaServer后，底层调用shutdownLatch.await()方法，阻塞在这里
+      // 等待钩子函数执行时被唤醒,后退出程序
       kafkaServerStartable.awaitShutdown
     }
     catch {
