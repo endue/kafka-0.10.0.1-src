@@ -24,13 +24,18 @@ import java.nio.channels._
  * 
  * The given path will be created and opened if it doesn't exist.
  */
+// 自定义的文件锁,底层还是依赖于java.nio.channels.FileLock
 class FileLock(val file: File) extends Logging {
+  // 创建文件
   file.createNewFile() // create the file if it doesn't exist
+  // 获取文件对应的channel,类型为FileChannel
   private val channel = new RandomAccessFile(file, "rw").getChannel()
+  // java提供的文件锁
   private var flock: java.nio.channels.FileLock = null
 
   /**
    * Lock the file or throw an exception if the lock is already held
+    * 锁定文件，如果锁已经被持有，则抛出异常
    */
   def lock() {
     this synchronized {
@@ -41,6 +46,7 @@ class FileLock(val file: File) extends Logging {
 
   /**
    * Try to lock the file and return true if the locking succeeds
+    * 尝试锁定文件，如果锁定成功则返回true.失败返回false
    */
   def tryLock(): Boolean = {
     this synchronized {
@@ -59,6 +65,7 @@ class FileLock(val file: File) extends Logging {
 
   /**
    * Unlock the lock if it is held
+    * 释放锁
    */
   def unlock() {
     this synchronized {
@@ -70,6 +77,7 @@ class FileLock(val file: File) extends Logging {
 
   /**
    * Destroy this lock, closing the associated FileChannel
+    * 销毁此锁，关闭相关的FileChannel
    */
   def destroy() = {
     this synchronized {

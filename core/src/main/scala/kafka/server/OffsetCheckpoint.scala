@@ -111,20 +111,21 @@ class OffsetCheckpoint(val file: File) extends Logging {
         line = reader.readLine()
         if (line == null)
           return Map.empty
-        // 转换版本号
+        // string转int
+        // 转换版本号为int类型
         val version = line.toInt
         version match {
           case CurrentVersion =>
-            // 读取topic-partition的数量
+            // 读取已经记录checkpoint的topic-partition的数量
             line = reader.readLine()
             // 没有，返回空Map
             if (line == null)
               return Map.empty
-            // 转换topic-partition数量
+            // 转换topic-partition数量为int类型
             val expectedSize = line.toInt
             // 创建记录topic-partition checkpoint的offsets
             val offsets = mutable.Map[TopicAndPartition, Long]()
-            // 开始循环读取topic-partition的checkpoint
+            // 开始循环读取每一个topic-partition的checkpoint
             line = reader.readLine()
             while (line != null) {
               WhiteSpacesPattern.split(line) match {

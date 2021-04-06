@@ -328,7 +328,7 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePr
                                               config.zkSessionTimeoutMs,
                                               config.zkConnectionTimeoutMs,
                                               secureAclsEnabled)
-      // 创建一个永远的根路径chroot
+      // 创建持久的根路径chroot
       zkClientForChrootCreation.makeSurePersistentPathExists(chroot)
       info("Created zookeeper path " + chroot)
       // 关闭ZkUtils

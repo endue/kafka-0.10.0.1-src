@@ -39,9 +39,9 @@ import java.util.concurrent.{ExecutionException, ExecutorService, Executors, Fut
  */
 @threadsafe
 class LogManager(val logDirs: Array[File],// 日志目录列表，加载的是"log.dirs"为空则加载"log.dir"
-                 val topicConfigs: Map[String, LogConfig],// log配置
-                 val defaultConfig: LogConfig,
-                 val cleanerConfig: CleanerConfig,
+                 val topicConfigs: Map[String, LogConfig],// topic的配置信息
+                 val defaultConfig: LogConfig,// log默认配置信息
+                 val cleanerConfig: CleanerConfig,// 清理日志所需配置信息
                  ioThreads: Int,// 默认1
                  val flushCheckMs: Long,// flush检查时间 Long.MaxValue
                  val flushCheckpointMs: Long,// flushCheckpoint检查时间 60000
@@ -51,17 +51,20 @@ class LogManager(val logDirs: Array[File],// 日志目录列表，加载的是"l
                  private val time: Time) extends Logging {
   val RecoveryPointCheckpointFile = "recovery-point-offset-checkpoint"
   val LockFile = ".lock"
+  // 日志相关定义任务在执行首次任务时延迟的毫秒数
   val InitialTaskDelayMs = 30*1000
+  // 删除或创建日志的锁
   private val logCreationOrDeletionLock = new Object
   // 底层基于ConcurrentHashMap,key是TopicAndPartition，value是log
   // 记录topic-partition<-->log关系的map也就是用于管理TopicAndPartition和Log之间的对应关系
   private val logs = new Pool[TopicAndPartition, Log]()
-  // 检查日志目录不存在则创建
+  // 检查参数logDirs也就是日志目录
+  // 不存在则创建
   createAndValidateLogDirs(logDirs)
   // 对所有的日志目录生成对应的FileLock
   private val dirLocks = lockLogDirs(logDirs)
-  // logDirs是指“log.dirs”中配置的多个日志目录
-  // RecoveryPointCheckpointFile记录日志目录下所有topic-partition日志已经刷新到磁盘的位置
+  // 为logDirs(是指“log.dirs”中配置的多个日志目录)中所有的日志目录下创建recovery-point-offset-checkpoint文件
+  // 该文件记录自己日志目录下所有topic-partition日志已经刷新到磁盘的位置
   private val recoveryPointCheckpoints = logDirs.map(dir => (dir, new OffsetCheckpoint(new File(dir, RecoveryPointCheckpointFile)))).toMap
   // 加载日志
   loadLogs()
@@ -95,7 +98,7 @@ class LogManager(val logDirs: Array[File],// 日志目录列表，加载的是"l
       // 如果日志目录不存在
       if(!dir.exists) {
         info("Log directory '" + dir.getAbsolutePath + "' not found, creating it.")
-        // 创建
+        // 创建目录
         val created = dir.mkdirs()
         // 创建失败
         if(!created)
@@ -109,13 +112,13 @@ class LogManager(val logDirs: Array[File],// 日志目录列表，加载的是"l
   
   /**
    * Lock all the given directories
-    * 锁住所有的文件目录
+    * 为所有的文件目录生成文件锁
     *
    */
   private def lockLogDirs(dirs: Seq[File]): Seq[FileLock] = {
-    // 遍历目录然后生成
+    // 遍历目录然后生成FileLock
     dirs.map { dir =>
-      // 将目录转为FileLock
+      // 给文件目录加锁,内部会在dir目录下创建一个LockFile文件
       val lock = new FileLock(new File(dir, LockFile))
       // 尝试加锁并返回
       if(!lock.tryLock())
@@ -127,11 +130,11 @@ class LogManager(val logDirs: Array[File],// 日志目录列表，加载的是"l
   
   /**
    * Recover and load all logs in the given data directories
-    * 恢复并加载给定日志目录
+    * 恢复并加载给定日志目录里的日志
    */
   private def loadLogs(): Unit = {
     info("Loading logs.")
-
+    // 线程池数组
     val threadPools = mutable.ArrayBuffer.empty[ExecutorService]
     val jobs = mutable.Map.empty[File, Seq[Future[_]]]
     // 遍历日志目录
@@ -139,11 +142,11 @@ class LogManager(val logDirs: Array[File],// 日志目录列表，加载的是"l
       // 一个日志目录对应一个线程池，默认ioThreads = 1
       val pool = Executors.newFixedThreadPool(ioThreads)
       threadPools.append(pool)
-      // 创建".kafka_cleanshutdown"文件
+      // 在每个日志目录下创建一个".kafka_cleanshutdown"文件
       val cleanShutdownFile = new File(dir, Log.CleanShutdownFile)
       // .kafka_cleanshutdown文件存在，说明已经开始恢复日志了
       if (cleanShutdownFile.exists) {
-        // 打印日志，跳过所有日志的恢复工作
+        // 打印日志，跳过当前日志目录下日志的恢复
         debug(
           "Found clean shutdown file. " +
           "Skipping recovery for all logs in data directory: " +
@@ -158,6 +161,7 @@ class LogManager(val logDirs: Array[File],// 日志目录列表，加载的是"l
       var recoveryPoints = Map[TopicAndPartition, Long]()
       try {
         // 基于recovery-point-offset-checkpoint文件
+        // 恢复当前日志目录下每个topic-partition对应的checkpoint
         recoveryPoints = this.recoveryPointCheckpoints(dir).read
       } catch {
         case e: Exception => {
@@ -169,17 +173,17 @@ class LogManager(val logDirs: Array[File],// 日志目录列表，加载的是"l
       val jobsForDir = for {
         // 获取日志目录dir下的所有文件
         dirContent <- Option(dir.listFiles).toList
-        // 过滤出文件夹(此时一个文件夹对应的就是一个topic-partition)，然后处理
+        // 过滤出所有的文件夹(此时一个文件夹对应的就是一个topic-partition)，然后处理
         logDir <- dirContent if logDir.isDirectory
       } yield {
-        // 每个topic-partition对应一个线程
+        // 每个topic-partition创建一个线程
         CoreUtils.runnable {
           debug("Loading log '" + logDir.getName + "'")
           // 根据logDir获取对应的topic和partition
           val topicPartition = Log.parseTopicPartitionName(logDir)
           // 获取topic对应的配置
           val config = topicConfigs.getOrElse(topicPartition.topic, defaultConfig)
-          // 获取对应log的recoveryPoint也就是offset
+          // 获取对应topic-partition对应的checkpoint
           val logRecoveryPoint = recoveryPoints.getOrElse(topicPartition, 0L)
           // 创建Log，同时会执行kafka.log.Log.loadSegments()加载所有的Segment
           val current = new Log(logDir, config, logRecoveryPoint, scheduler, time)
@@ -194,6 +198,8 @@ class LogManager(val logDirs: Array[File],// 日志目录列表，加载的是"l
         }
       }
       // 提交任务，记录结果到jobs
+      // key是".kafka_cleanshutdown"对应的File文件
+      // value是".kafka_cleanshutdown"文件对应的日志目录下的所有的topic-partition的恢复线程
       jobs(cleanShutdownFile) = jobsForDir.map(pool.submit).toSeq
     }
 
@@ -210,6 +216,7 @@ class LogManager(val logDirs: Array[File],// 日志目录列表，加载的是"l
         throw e.getCause
       }
     } finally {
+      // 关闭所有的线程池
       threadPools.foreach(_.shutdown())
     }
 
