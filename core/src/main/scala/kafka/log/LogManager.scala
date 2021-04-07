@@ -49,6 +49,11 @@ class LogManager(val logDirs: Array[File],// 日志目录列表，加载的是"l
                  scheduler: Scheduler,// 任务调度线程池
                  val brokerState: BrokerState,// broker状态
                  private val time: Time) extends Logging {
+  // 总体初始化分如下几步:
+  // 1.创建logDirs对应的所有日志目录
+  // 2.在logDirs指向的每个日志目录中创建.lock文件并让FileLock包装
+  // 3.创建logDirs指向的每个日志目录的OffsetCheckpoint对象,里面有recovery-point-offset-checkpoint文件
+  // 4.恢复磁盘上日志文件
   val RecoveryPointCheckpointFile = "recovery-point-offset-checkpoint"
   val LockFile = ".lock"
   // 日志相关定义任务在执行首次任务时延迟的毫秒数
@@ -65,6 +70,7 @@ class LogManager(val logDirs: Array[File],// 日志目录列表，加载的是"l
   private val dirLocks = lockLogDirs(logDirs)
   // 为logDirs(是指“log.dirs”中配置的多个日志目录)中所有的日志目录下创建recovery-point-offset-checkpoint文件
   // 该文件记录自己日志目录下所有topic-partition日志已经刷新到磁盘的位置
+  // key是日志文件目录,value是OffsetCheckpoint
   private val recoveryPointCheckpoints = logDirs.map(dir => (dir, new OffsetCheckpoint(new File(dir, RecoveryPointCheckpointFile)))).toMap
   // 加载日志
   loadLogs()
@@ -394,7 +400,7 @@ class LogManager(val logDirs: Array[File],// 日志目录列表，加载的是"l
   private def checkpointLogsInDir(dir: File): Unit = {
     val recoveryPoints = this.logsByDir.get(dir.toString)
     if (recoveryPoints.isDefined) {
-      // 对日志目录下的所有的topic-partiton，写入检查点文件
+      // 对日志目录下的所有Log的topic-partiton，写入检查点文件
       this.recoveryPointCheckpoints(dir).write(recoveryPoints.get.mapValues(_.recoveryPoint))
     }
   }
@@ -489,11 +495,12 @@ class LogManager(val logDirs: Array[File],// 日志目录列表，加载的是"l
    */
   private def cleanupExpiredSegments(log: Log): Int = {
     // 如果日志永久保留，则不删除
-    // retention.ms默认 24 * 7 *  * 60 * 60 * 1000L
+    // retention.ms默认 24 * 7 *  * 60 * 60 * 1000L,设置小于0表示永久保留
     if (log.config.retentionMs < 0)
       return 0
+    // 获取当前时间戳
     val startMs = time.milliseconds
-    // 遍历log目录下的所有Segment，如果startMs - Segment的lastModified > log.config.retentionMs就删除
+    // 遍历log目录下的所有Segment，如果当前时间戳startMs - Segment的lastModified > log.config.retentionMs就删除
     // 这里传入的是一个predicate
     log.deleteOldSegments(startMs - _.lastModified > log.config.retentionMs)
   }
@@ -533,7 +540,7 @@ class LogManager(val logDirs: Array[File],// 日志目录列表，加载的是"l
     var total = 0
     val startMs = time.milliseconds
     // 遍历所有的日志目录下topic-partition对应的log
-    // 如果log的清理策略cleanup.policy设置为非compact
+    // 如果Log的清理策略cleanup.policy设置为非compact,默认Delete,那么就清理该Log
     for(log <- allLogs; if !log.config.compact) {
       debug("Garbage collecting '" + log.name + "'")
       total += cleanupExpiredSegments(log) + cleanupSegmentsToMaintainSize(log)
@@ -544,6 +551,7 @@ class LogManager(val logDirs: Array[File],// 日志目录列表，加载的是"l
 
   /**
    * Get all the partition logs
+    * 获取topic-partition对应的Log对象
    */
   def allLogs(): Iterable[Log] = logs.values
 

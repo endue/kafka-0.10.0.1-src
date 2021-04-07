@@ -45,7 +45,7 @@ import scala.collection.mutable.ArrayBuffer
  */
 @nonthreadsafe
 class FileMessageSet private[kafka](@volatile var file: File,// 指向底层日志文件,如：xxxx.log
-                                    private[log] val channel: FileChannel,// FileChannel类型，读写日志文件
+                                    private[log] val channel: FileChannel,// 对应底层日志文件的File的FileChannel，用于读写日志文件
                                     private[log] val start: Int,// FileMessageSet中存储消息的物理起始偏移量
                                     private[log] val end: Int,// FileMessageSet中存储消息的物理结束偏移量
                                     isSlice: Boolean) extends MessageSet with Logging {// 表示当前FileMessageSet是否为日志文件的分片

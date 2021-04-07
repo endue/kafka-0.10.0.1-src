@@ -349,8 +349,10 @@ class LogSegment(val log: FileMessageSet,// 存储消息集的FileMessageSet对�
     * 从文件系统中删除此日志段
    */
   def delete() {
+    // 删除LogSegment对应的底层.log和.index文件
     val deletedLog = log.delete()
     val deletedIndex = index.delete()
+    // 校验是否删除成功
     if(!deletedLog && log.file.exists)
       throw new KafkaStorageException("Delete of log " + log.file.getName + " failed.")
     if(!deletedIndex && index.file.exists)
@@ -359,11 +361,13 @@ class LogSegment(val log: FileMessageSet,// 存储消息集的FileMessageSet对�
 
   /**
    * The last modified time of this log segment as a unix time stamp
+    * 获取日志段对应的底层File文件最后的修改时间
    */
   def lastModified = log.file.lastModified
 
   /**
    * Change the last modified time for this log segment
+    * 修改日志段对应的底层File文件最后的修改时间
    */
   def lastModified_=(ms: Long) = {
     log.file.setLastModified(ms)

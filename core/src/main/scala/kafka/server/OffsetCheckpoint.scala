@@ -26,6 +26,11 @@ import kafka.utils.Logging
 import kafka.common._
 import java.io._
 
+/**
+  * 一个OffsetCheckpoint类,对应一个日志目录文件
+  * 该日志目录文件下保存了多个topic-partiton
+  * 于是该文件用来记录每个topic-partition checkpoint到磁盘的点
+  */
 object OffsetCheckpoint {
   private val WhiteSpacesPattern = Pattern.compile("\\s+")
   private val CurrentVersion = 0

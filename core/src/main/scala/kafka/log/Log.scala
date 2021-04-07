@@ -74,13 +74,13 @@ case class LogAppendInfo(var firstOffset: Long,// 消息集起始offset
  * @param time The time instance used for checking the clock
  *
  */
-// 日志对应logs配置
+// 某个topic-partion对应的日志
 @threadsafe
-class Log(val dir: File,// 日志文件对应的磁盘目录，如：/tmp/kafka-logs/simon-topic-0
+class Log(val dir: File,// 某个topic-partion对应的日志文件所在磁盘目录，如：/tmp/kafka-logs/simon-topic-0
           @volatile var config: LogConfig,// 日志配置设置
-          @volatile var recoveryPoint: Long = 0L,// Log对应已刷入磁盘的偏移量，默认0，当存在Log日志时会被初始化为其他值(参考：kafka.log.LogManager.loadLogs())
-          scheduler: Scheduler,
-          time: Time = SystemTime) extends Logging with KafkaMetricsGroup {
+          @volatile var recoveryPoint: Long = 0L,// Log对应已刷入磁盘的偏移量，默认0，当存在Log日志时会被初始化为最后刷入磁盘的位置(参考：kafka.log.LogManager.loadLogs())
+          scheduler: Scheduler,// kafkaServer初始时的KafkaScheduler
+          time: Time = SystemTime) /* 当前时间戳 */ extends Logging with KafkaMetricsGroup {
 
   import kafka.log.Log._
 
@@ -103,11 +103,11 @@ class Log(val dir: File,// 日志文件对应的磁盘目录，如：/tmp/kafka-
   /* the actual segments of the log */
   // 记录所有的LogSegment是一个跳表，key是LogSegment的baseOffset
   private val segments: ConcurrentNavigableMap[java.lang.Long, LogSegment] = new ConcurrentSkipListMap[java.lang.Long, LogSegment]
-  // 加载日志目录下的LogSegments
+  // 加载日志目录下的所有LogSegments
   loadSegments()
 
   /* Calculate the offset of the next message */
-  // 记录了当前LogSegment下一条消息的偏移量、当前LogSegment起始位置、当前LogSegment的相对物理位置
+  // 记录了当前活跃LogSegment下一条消息的偏移量、当前活跃LogSegment起始位置、当前活跃LogSegment的相对物理位置
   @volatile var nextOffsetMetadata = new LogOffsetMetadata(activeSegment.nextOffset(), activeSegment.baseOffset, activeSegment.size.toInt)
   // 记录当前log对应的主题和分区
   val topicAndPartition: TopicAndPartition = Log.parseTopicPartitionName(dir)
@@ -153,7 +153,7 @@ class Log(val dir: File,// 日志文件对应的磁盘目录，如：/tmp/kafka-
     // create the log directory if it doesn't exist
     // 日志目录不存在则创建
     dir.mkdirs()
-    // 记录.swap结尾的文件
+    // 记录.swap结尾的日志文件
     var swapFiles = Set[File]()
 
     // first do a pass through the files in the log directory and remove any temporary files
@@ -704,29 +704,31 @@ class Log(val dir: File,// 日志文件对应的磁盘目录，如：/tmp/kafka-
     lock synchronized {
       //find any segments that match the user-supplied predicate UNLESS it is the final segment
       //and it is empty (since we would just end up re-creating it)
-      // 上来就是获取segments列表中的对应一个Entry
+      // 上来就是获取segments列表中的最后一个Entry
       // 注意：这里获取的是Entry，而不是value
       val lastEntry = segments.lastEntry
       // 通过predicate来判断是否需要删除
+      // deletable记录了所有需要删除的LogSegment
       val deletable =
         // lastEntry为null，segments为空没日志
         if (lastEntry == null) Seq.empty
-        // 获取segments的value也就是所有的LogSegment，从尾部循环遍历
+        // 获取segments的value也就是所有当前Log下的所有LogSegment，从尾部循环遍历
         // 如果遍历出的LogSegment符合predicate && s不是最后一个lastEntry那么就将s加入到deletable中暂存
         // 那么问题来了，什么时候执行到【s.size > 0】?
         // 看代码一定是前面的false了，也就是s是最后一个LogSegment并且符合被删除的条件，那么才会删除，否则删除LogSegment的
         // 时候都是从倒数第二个开始
         else logSegments.takeWhile(s => predicate(s) && (s.baseOffset != lastEntry.getValue.baseOffset || s.size > 0))
       val numToDelete = deletable.size
-      // 开始删除
+      // 有符合条件需要删除的LogSegment
       if (numToDelete > 0) {
         // we must always have at least one segment, so if we are going to delete all the segments, create a new one first
-        // 如果删除了所有的segment，那么需要在新建立一个segment
+        // 如果删除了所有的segment，那么需要在新建立一个LogSegment
         // 要不日志就没地方写了
         if (segments.size == numToDelete)
+          // 新建一个LogSegment
           roll()
         // remove the segments for lookups
-        // 循环删除segment
+        // 循环删除LogSegment
         deletable.foreach(deleteSegment(_))
       }
       numToDelete
@@ -750,6 +752,7 @@ class Log(val dir: File,// 日志文件对应的磁盘目录，如：/tmp/kafka-
 
   /**
    *  The offset of the next message that will be appended to the log
+    *  将追加到日志中的下一条消息的偏移量
    */
   def logEndOffset: Long = nextOffsetMetadata.messageOffset
 
@@ -858,6 +861,8 @@ class Log(val dir: File,// 日志文件对应的磁盘目录，如：/tmp/kafka-
    * Flush log segments for all offsets up to offset-1
     * 刷新到offset-1的所有偏移的日志段
    * @param offset The offset to flush up to (non-inclusive); the new recovery point
+    * 由于每次刷磁盘时刷入的数据都是小于offset的并且刷磁盘后更新recoveryPoint为offset,所以每次
+    * 刷磁盘时都只需查找[recoveryPoint,offset)之间的数据即可
    */
   def flush(offset: Long) : Unit = {
     // offset之前的数据已经全部刷到磁盘，所以不需要刷新
@@ -865,7 +870,7 @@ class Log(val dir: File,// 日志文件对应的磁盘目录，如：/tmp/kafka-
       return
     debug("Flushing log '" + name + " up to offset " + offset + ", last flushed: " + lastFlushTime + " current time: " +
           time.milliseconds + " unflushed = " + unflushedMessages)
-    // segments是跳表，查找recoveryPoint和offset(LEO)之间的LogSegment对象
+    // segments是跳表，查找recoveryPoint和offset(LEO并且不包含offset)之间的LogSegment对象
     for(segment <- logSegments(this.recoveryPoint, offset))
       // 调用操作系统fsync命令刷新到磁盘
       segment.flush()
@@ -962,6 +967,7 @@ class Log(val dir: File,// 日志文件对应的磁盘目录，如：/tmp/kafka-
 
   /**
    * All the log segments in this log ordered from oldest to newest
+    * 获取当前topic-partition对应的Log下的所有日志段
    */
   def logSegments: Iterable[LogSegment] = {
     import JavaConversions._
@@ -983,7 +989,7 @@ class Log(val dir: File,// 日志文件对应的磁盘目录，如：/tmp/kafka-
         // 返回小于to的所有entry
         segments.headMap(to).values
       else
-       // 返回所有介于[from,to)直接的entry
+       // 返回所有介于[from,to)之间的entry
         segments.subMap(floor, true, to, false).values
     }
   }
@@ -1110,13 +1116,13 @@ object Log {
   /** an index file */
   val IndexFileSuffix = ".index"
 
-  /** a file that is scheduled to be deleted */
+  /** a file that is scheduled to be deleted 计划要删除的文件 */
   val DeletedFileSuffix = ".deleted"
 
-  /** A temporary file that is being used for log cleaning */
+  /** A temporary file that is being used for log cleaning 用于清理日志的临时文件*/
   val CleanedFileSuffix = ".cleaned"
 
-  /** A temporary file used when swapping files into the log */
+  /** A temporary file used when swapping files into the log 在将文件交换到日志中时使用的临时文件*/
   val SwapFileSuffix = ".swap"
 
   /** Clean shutdown file that indicates the broker was cleanly shutdown in 0.8. This is required to maintain backwards compatibility
