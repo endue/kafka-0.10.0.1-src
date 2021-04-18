@@ -69,6 +69,7 @@ public class ProduceRequest extends AbstractRequest {
             topicData.set(PARTITION_DATA_KEY_NAME, partitionArray.toArray());
             topicDatas.add(topicData);
         }
+        // 设置一个topic_data
         struct.set(TOPIC_DATA_KEY_NAME, topicDatas.toArray());
         this.acks = acks;
         this.timeout = timeout;

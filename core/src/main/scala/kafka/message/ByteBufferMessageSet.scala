@@ -208,6 +208,7 @@ object ByteBufferMessageSet {
   }
 }
 
+// offset分配者,通过内部遍历index,不断+1获取下一个
 private object OffsetAssigner {
 
   def apply(offsetCounter: LongRef, size: Int): OffsetAssigner =
@@ -326,6 +327,7 @@ class ByteBufferMessageSet(val buffer: ByteBuffer) extends MessageSet with Loggi
   }
 
   /** Write the messages in this set to the given channel */
+  // 将消息写入指定的channel
   def writeFullyTo(channel: GatheringByteChannel): Int = {
     buffer.mark()
     var written = 0
@@ -338,6 +340,7 @@ class ByteBufferMessageSet(val buffer: ByteBuffer) extends MessageSet with Loggi
   /** Write the messages in this set to the given channel starting at the given offset byte.
     * Less than the complete amount may be written, but no more than maxSize can be. The number
     * of bytes written is returned */
+  // 将指定偏移量的消息写入指定的channel
   def writeTo(channel: GatheringByteChannel, offset: Long, maxSize: Int): Int = {
     if (offset > Int.MaxValue)
       throw new IllegalArgumentException(s"offset should not be larger than Int.MaxValue: $offset")

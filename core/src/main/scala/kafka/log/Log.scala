@@ -147,7 +147,7 @@ class Log(val dir: File,// 某个topic-partion对应的日志文件所在磁盘�
   /* Load the log segments from the log files on disk */
   /**
     * 此方法只有在创建Log时会被调用
-    * 从磁盘加载LogSegments
+    * 从磁盘加载LogSegments恢复日志
     */
   private def loadSegments() {
     // create the log directory if it doesn't exist
@@ -410,14 +410,16 @@ class Log(val dir: File,// 某个topic-partion对应的日志文件所在磁盘�
         // 判断是否需要为当前消息集分配offset，默认true
         if (assignOffsets) {
           // assign offsets to the message set
-          // 计算当前消息集对应的offset
+          // 基于nextOffsetMetadata.messageOffset生成一个LongRef
+          // 然后在validateMessagesAndAssignOffsets()方法中递增该值来分配给每一条消息offset
           val offset = new LongRef(nextOffsetMetadata.messageOffset)
-          // 修改当前消息集appendInfo的firstOffset为上面分配的offset
+          // 获取生成LongRef中的值,然后分配给第一条消息
           appendInfo.firstOffset = offset.value
           val now = time.milliseconds
           // 再次验证
           val (validatedMessages, messageSizesMaybeChanged) = try {
-            // 验证并分配消息offset，内部会递增offset，返回一个元组
+            // 验证并分配消息offset，内部会递增LongRef，返回一个元组
+            // 此时并没有将nextOffsetMetadata.messageOffset逐步递增
             validMessages.validateMessagesAndAssignOffsets(offset,
                                                            now,
                                                            appendInfo.sourceCodec,
@@ -521,7 +523,7 @@ class Log(val dir: File,// 某个topic-partion对应的日志文件所在磁盘�
     var firstOffset, lastOffset = -1L
     // producer的消息压缩方式
     var sourceCodec: CompressionCodec = NoCompressionCodec
-    //
+    // 消息集合是否单独递增
     var monotonic = true
     // 遍历消息集合
     for(messageAndOffset <- messages.shallowIterator) {
@@ -614,13 +616,14 @@ class Log(val dir: File,// 某个topic-partion对应的日志文件所在磁盘�
 
     // Because we don't use lock for reading, the synchronization is a little bit tricky.
     // We create the local variables to avoid race conditions with updates to the log.
-    // 获取当前的LEO
+    // 获取当前的LEO,也就是下一条消息的offset
     val currentNextOffsetMetadata = nextOffsetMetadata
     val next = currentNextOffsetMetadata.messageOffset
     // 要读的startOffset = next(LEO)，无数据可读
     if(startOffset == next)
       return FetchDataInfo(currentNextOffsetMetadata, MessageSet.Empty)
     // 根据startOffset定位LogSegment，segments是一个跳表
+    // 返回一个小于等于(最接近)startOffset的Entry对象,没有则返回null
     var entry = segments.floorEntry(startOffset)
 
     // attempt to read beyond the log end offset is an error
@@ -661,6 +664,7 @@ class Log(val dir: File,// 某个topic-partion对应的日志文件所在磁盘�
         }
       }
       // 读取消息
+      // entry.getValue获取LogSegment
       val fetchInfo = entry.getValue.read(startOffset, maxOffset, maxLength, maxPosition)
       // 消息为空查找下一个segment
       if(fetchInfo == null) {

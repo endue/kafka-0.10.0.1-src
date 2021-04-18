@@ -86,6 +86,7 @@ public final class RecordBatch {
                                                                    timestamp, checksum,
                                                                    key == null ? -1 : key.length,
                                                                    value == null ? -1 : value.length);
+            // 如果有回调添加一个thunk,一个消息对应一个thunk,用于回调
             if (callback != null)
                 thunks.add(new Thunk(callback, future));
             this.recordCount++;
@@ -106,6 +107,7 @@ public final class RecordBatch {
                   topicPartition,
                   baseOffset,
                   exception);
+        // 执行所有消息的回调
         // execute callbacks
         for (int i = 0; i < this.thunks.size(); i++) {
             try {

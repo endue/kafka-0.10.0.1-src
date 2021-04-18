@@ -56,6 +56,7 @@ private[log] class LogCleanerManager(val logDirs: Array[File], val logs: Pool[To
   
   /* the offset checkpoints holding the last cleaned point for each log */
   // Map[File,OffsetCheckpoint]类型，用来维护日志目录和cleaner-offset-checkpoint文件之间的对应关系
+  // 每个日志目录文件夹都会存在一个cleaner-offset-checkpoint文件
   private val checkpoints = logDirs.map(dir => (dir, new OffsetCheckpoint(new File(dir, offsetCheckpointFile)))).toMap
 
   /* the set of logs currently being cleaned */

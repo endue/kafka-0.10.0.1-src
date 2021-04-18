@@ -84,6 +84,7 @@ class LogCleaner(val config: CleanerConfig,
                                         time = time)
   
   /* the threads */
+  // 初始化清理线程CleanerThread
   // log.cleaner.threads默认1
   private val cleaners = (0 until config.numThreads).map(new CleanerThread(_))
   
@@ -113,6 +114,7 @@ class LogCleaner(val config: CleanerConfig,
    */
   def startup() {
     info("Starting the log cleaner")
+    // 启动所有的CleanerThread
     cleaners.foreach(_.start())
   }
   
