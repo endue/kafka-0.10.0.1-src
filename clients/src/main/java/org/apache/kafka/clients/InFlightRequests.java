@@ -84,7 +84,10 @@ final class InFlightRequests {
 
     /**
      * Can we send more requests to this node?
-     * 
+     * 判断是否允许发送更多的消息
+     * 1.队列为null
+     * 2.队列为空
+     * 3.第一个请求已发送完毕(即使出现了拆包也得要求发送完毕) 而且 当前队列中请求的数量 < maxInFlightRequestsPerConnection
      * @param node Node in question
      * @return true iff we have no requests still being sent to the given node
      */

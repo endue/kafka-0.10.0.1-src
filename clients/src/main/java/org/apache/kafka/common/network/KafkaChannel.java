@@ -123,7 +123,7 @@ public class KafkaChannel {
     }
 
     /**
-     * 发送数据
+     * 准备发送数据
      * 这里只是将数据传到给了send属性，然后关注OP_WRITE事件
      * @param send
      */
@@ -136,6 +136,11 @@ public class KafkaChannel {
         this.transportLayer.addInterestOps(SelectionKey.OP_WRITE);
     }
 
+    /**
+     * 读取消息
+     * @return
+     * @throws IOException
+     */
     public NetworkReceive read() throws IOException {
         NetworkReceive result = null;
 
@@ -154,6 +159,7 @@ public class KafkaChannel {
     }
 
     /**
+     * 发送消息
      * KafkaChannel写消息
      * 返回null说明消息没有发生完毕
      * 返回之前的send，并清空send说明消息发送完毕，等待下一轮消息
@@ -176,7 +182,7 @@ public class KafkaChannel {
     }
 
     /**
-     * 真正的写消息
+     * 真正的发送消息
      * @param send
      * @return
      * @throws IOException

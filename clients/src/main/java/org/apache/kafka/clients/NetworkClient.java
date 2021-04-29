@@ -248,6 +248,7 @@ public class NetworkClient implements KafkaClient {
     public void send(ClientRequest request, long now) {
         // 获取请求发送的目的地
         String nodeId = request.request().destination();
+        // 判断是否允许发送
         if (!canSendRequest(nodeId))
             throw new IllegalStateException("Attempt to send a request to node " + nodeId + " which is not ready.");
         doSend(request, now);

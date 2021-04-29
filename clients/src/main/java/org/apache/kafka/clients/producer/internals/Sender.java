@@ -250,6 +250,7 @@ public class Sender implements Runnable {
             pollTimeout = 0;
         }
         // 发送消息(实际底层只是关注了对应node的channel的OP_WRITE事件并且将数据发送到了InFlightRequests和KafkaChannel.send上)
+        // 里面同时判断了是否允许发送消息
         for (ClientRequest request : requests)
             client.send(request, now);
 

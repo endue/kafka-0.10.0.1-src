@@ -27,7 +27,7 @@ public class ByteBufferSend implements Send {
     private final int size;
     // 待写入到channel的数据
     protected final ByteBuffer[] buffers;
-    // buffers剩余空间
+    // buffers剩余空间,发送完毕后为0
     private int remaining;
     //
     private boolean pending = false;
@@ -46,6 +46,11 @@ public class ByteBufferSend implements Send {
         return destination;
     }
 
+    /**
+     * 判断是否发送完毕
+     * 剩余空间<=0 并且
+     * @return
+     */
     @Override
     public boolean completed() {
         return remaining <= 0 && !pending;
