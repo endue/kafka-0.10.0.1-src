@@ -548,7 +548,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             ensureValidRecordSize(serializedSize);
             // 初始化TopicPartition(保存主题和分区)
             tp = new TopicPartition(record.topic(), partition);
-            // 生成时间戳
+            // 获取时间戳，如果用户在创建的record定义了则使用用户定义的，否则使用当前时间戳
             long timestamp = record.timestamp() == null ? time.milliseconds() : record.timestamp();
             log.trace("Sending record {} with callback {} to topic {} partition {}", record, callback, record.topic(), partition);
             // producer callback will make sure to call both 'callback' and interceptor callback

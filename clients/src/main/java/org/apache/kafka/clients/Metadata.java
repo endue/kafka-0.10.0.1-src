@@ -30,7 +30,7 @@ import org.slf4j.LoggerFactory;
  * A class encapsulating some of the logic around metadata.
  * <p>
  * This class is shared by the client thread (for partitioning) and the background sender thread.
- * 这个类由客户机线程(用于分区也就是kafka producer)和后台发送方线程共享。
+ * 这个类由客户线程(用于分区也就是kafka producer)和后台发送方线程共享。
  * 
  * Metadata is maintained for only a subset of topics, which can be added to over time. When we request metadata for a
  * topic we don't have any metadata for it will trigger a metadata update.
