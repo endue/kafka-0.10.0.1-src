@@ -185,10 +185,9 @@ public final class Metadata {
 
     /**
      * Update the cluster metadata
-     * 更新metadata
+     * 更新metadata 该方法调用地点如下:
+     * KafkaProducer初始化329行: {@link org.apache.kafka.clients.producer.KafkaProducer#KafkaProducer}
      */
-    // 该方法调用地点如下:
-    // 1.KafkaProducer初始化:org.apache.kafka.clients.producer.KafkaProducer.KafkaProducer()
     public synchronized void update(Cluster cluster, long now) {
         // 修改needUpdate为false,表示不需要刷新了
         this.needUpdate = false;

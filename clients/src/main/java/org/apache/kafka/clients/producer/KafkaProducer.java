@@ -224,7 +224,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             Map<String, Object> userProvidedConfigs = config.originals();
             this.producerConfig = config;
             this.time = new SystemTime();
-            // 生成client.id，默认：producer-1 ...
+            // 获取配置"client.id",用户未设置则自动生成
             clientId = config.getString(ProducerConfig.CLIENT_ID_CONFIG);
             if (clientId.length() <= 0)
                 clientId = "producer-" + PRODUCER_CLIENT_ID_SEQUENCE.getAndIncrement();
@@ -238,8 +238,8 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
                     MetricsReporter.class);
             reporters.add(new JmxReporter(JMX_PREFIX));
             this.metrics = new Metrics(metricConfig, reporters, time);
-            // 获取"partitioner.class"，默认为DefaultPartitioner.class.getName()
-            // 决定发送的消息路由到Topic的哪个partition(分区)
+            // 获取"partitioner.class"，默认DefaultPartitioner.class.getName()
+            // 决定将消息路由到Topic的哪个partition(分区)
             this.partitioner = config.getConfiguredInstance(ProducerConfig.PARTITIONER_CLASS_CONFIG, Partitioner.class);
             // 获取"retry.backoff.ms"
             // 消息发送失败后再次重试需要等待的时间，默认100ms
@@ -486,9 +486,9 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
      * expensive callbacks it is recommended to use your own {@link java.util.concurrent.Executor} in the callback body
      * to parallelize processing.
      *
-     * @param record The record to send
+     * @param record The record to send 要发送的记录
      * @param callback A user-supplied callback to execute when the record has been acknowledged by the server (null
-     *        indicates no callback)
+     *        indicates no callback) 当消息被服务确定后调用用户提供的回调方法，null表示不回调
      *
      * @throws InterruptException If the thread is interrupted while blocked
      * @throws SerializationException If the key or value are not valid objects given the configured serializers
@@ -498,8 +498,9 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
     @Override
     public Future<RecordMetadata> send(ProducerRecord<K, V> record, Callback callback) {
         // intercept the record, which can be potentially modified; this method does not throw exceptions
-        // 在发送消息前调用判断是否有拦截器然后调用拦截器的onSend()方法
-        // 执行实现了ProducerInterceptor接口的自定义实现类的onSend()方法
+        // 在发送消息前判断是否有拦截器
+        // 1. 有：调用实现ProducerInterceptor接口实现类的onSend()方法并返回可能已被修改的record
+        // 2. 无：使用参数record
         ProducerRecord<K, V> interceptedRecord = this.interceptors == null ? record : this.interceptors.onSend(record);
         return doSend(interceptedRecord, callback);
     }

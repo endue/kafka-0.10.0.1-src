@@ -12,6 +12,8 @@
  */
 package org.apache.kafka.clients.producer;
 
+import org.apache.kafka.common.record.TimestampType;
+
 /**
  * A key/value pair to be sent to Kafka. This consists of a topic name to which the record is being sent, an optional
  * partition number, and an optional key and value.
@@ -37,11 +39,31 @@ package org.apache.kafka.clients.producer;
  * {@link RecordMetadata}
  */
 public final class ProducerRecord<K, V> {
-
+    /**
+     * 消息记录对应的topic
+     */
     private final String topic;
+    /**
+     * 消息要发送的分区
+     * 1.如果指定了有效分区，则发送记录时使用该分区
+     * 2.如果没有指定有效分区，但是设置了有效key，则使用key的hash值计算分区
+     * 3.如果没有指定有效分区也没有设置有效key,则采用轮询的方式计算分区
+     */
     private final Integer partition;
+    /**
+     * 消息key
+     */
     private final K key;
+    /**
+     * 消息value
+     */
     private final V value;
+    /**
+     * 消息时间戳
+     * 参考{@link TimestampType}
+     * 用户指定使用用户的，未指定则Producer会添加当前时间戳
+     * 但是最终的时间戳将由
+     */
     private final Long timestamp;
 
     /**

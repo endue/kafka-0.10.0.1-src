@@ -33,15 +33,15 @@ public final class Cluster {
     private final boolean isBootstrapConfigured;
     // 记录kafka集群节点，也就是kafka broker,换句话说就是"bootstrap.servers", "192.168.6.130:9092,192.168.6.131:9092,192.168.6.132:9092"中配置的服务节点
     private final List<Node> nodes;
-    // 记录为授权的topic
+    // 记录未授权的topic
     private final Set<String> unauthorizedTopics;
     // 记录【topic-partiton与其所有分区信息】关系,初始化时为new HashMap<>
     private final Map<TopicPartition, PartitionInfo> partitionsByTopicPartition;
-    // 记录【主题与其所有分区】关系
+    // 记录【topic与其所有分区信息】关系
     private final Map<String, List<PartitionInfo>> partitionsByTopic;
-    // 记录【主题与其可用分区】关系
+    // 记录【topic与其可用分区信息】关系
     private final Map<String, List<PartitionInfo>> availablePartitionsByTopic;
-    // 记录【node节点与其可用分区】关系
+    // 记录【node节点与其可用分区信息】关系
     private final Map<Integer, List<PartitionInfo>> partitionsByNode;
     // 记录【node节点与其id】关系
     private final Map<Integer, Node> nodesById;
@@ -85,10 +85,10 @@ public final class Cluster {
         // 将参数partitions按照主题、分区的关系记录到partitionsByTopicPartition
         this.partitionsByTopicPartition = new HashMap<>(partitions.size());
         for (PartitionInfo p : partitions)
-            // todo 这里key是new TopicPartition，当一个主题存在多个分区是，partitionsByTopicPartition里会存在多条记录
+            // 这里key是new TopicPartition()，当一个主题存在多个分区时，partitionsByTopicPartition里会存在多条记录
             this.partitionsByTopicPartition.put(new TopicPartition(p.topic(), p.partition()), p);
 
-        // 分别按主题和节点索引分区
+        // 分别按主题和节点id分区
         // index the partitions by topic and node respectively, and make the lists
         // unmodifiable so we can hand them out in user-facing apis without risk
         // of the client modifying the contents
@@ -147,10 +147,14 @@ public final class Cluster {
      * 基于InetSocketAddress列表，封装一个Cluster对象
      * @param addresses The addresses
      * @return A cluster for these hosts/ports
+     *  调用地点
+     *  1. KafkaProducer初始化329行: {@link org.apache.kafka.clients.producer.KafkaProducer#KafkaProducer}
+     *     初始化kafka集群服务列表
      */
     public static Cluster bootstrap(List<InetSocketAddress> addresses) {
         List<Node> nodes = new ArrayList<>();
         int nodeId = -1;
+        // 遍历地址列表，构建一个个的Node对象，构建的Node中属性id从-1开始递减
         for (InetSocketAddress address : addresses)
             nodes.add(new Node(nodeId--, address.getHostString(), address.getPort()));
         return new Cluster(true, nodes, new ArrayList<PartitionInfo>(0), Collections.<String>emptySet());

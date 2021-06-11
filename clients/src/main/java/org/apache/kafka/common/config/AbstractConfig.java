@@ -44,6 +44,7 @@ public class AbstractConfig {
     private final Map<String, ?> originals;
 
     /* the parsed values */
+    // 解析到的值
     private final Map<String, Object> values;
 
     @SuppressWarnings("unchecked")
