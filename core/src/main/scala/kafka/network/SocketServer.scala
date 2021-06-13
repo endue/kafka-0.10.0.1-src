@@ -49,7 +49,7 @@ import scala.util.control.{ControlThrowable, NonFatal}
  *   M Handler threads that handle requests and produce responses back to the processor threads for writing.
  */
 class SocketServer(val config: KafkaConfig, val metrics: Metrics, val time: Time) extends Logging with KafkaMetricsGroup {
-  // 配置文件中的listeners列表节点
+  // 配置文件中的"listeners"配置的节点列表
   private val endpoints = config.listeners
   // 配置文件中的num.network.threads，工作线程数，默认3
   private val numProcessorThreads = config.numNetworkThreads
@@ -109,7 +109,7 @@ class SocketServer(val config: KafkaConfig, val metrics: Metrics, val time: Time
         acceptors.put(endpoint, acceptor)
         // 启动线程，执行acceptor的run方法
         Utils.newThread("kafka-socket-acceptor-%s-%d".format(protocol.toString, endpoint.port), acceptor, false).start()
-        // 阻塞，然后等待Acceptor启动完毕
+        // 阻塞，然后等待Acceptor启动完毕，之后初始化下一个acceptor
         acceptor.awaitStartup()
 
         processorBeginIndex = processorEndIndex
@@ -252,7 +252,7 @@ private[kafka] abstract class AbstractServerThread(connectionQuotas: ConnectionQ
 private[kafka] class Acceptor(val endPoint: EndPoint,// 负责的服务信息
                               val sendBufferSize: Int,// 发送缓存区
                               val recvBufferSize: Int,// 接收缓存区
-                              brokerId: Int,
+                              brokerId: Int,// 当前kafkaServer的服务ID
                               processors: Array[Processor],// Processor数组
                               connectionQuotas: ConnectionQuotas) extends AbstractServerThread(connectionQuotas) with KafkaMetricsGroup {// 每个IP的最大连接数
   // 创建一个nioSelector
@@ -548,6 +548,7 @@ private[kafka] class Processor(val id: Int,
         val channel = selector.channel(receive.source)
         val session = RequestChannel.Session(new KafkaPrincipal(KafkaPrincipal.USER_TYPE, channel.principal.getName),
           channel.socketAddress)
+        // 创建的Request中记录了对应的processor的ID
         val req = RequestChannel.Request(processor = id, connectionId = receive.source, session = session, buffer = receive.payload, startTimeMs = time.milliseconds, securityProtocol = protocol)
         // 处理接收到的请求并保存到requestQueue中
         requestChannel.sendRequest(req)

@@ -141,6 +141,7 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePr
   // ZkUtils
   var zkUtils: ZkUtils = null
   val correlationId: AtomicInteger = new AtomicInteger(0)
+  // 在日志目录下初始化meta.properties文件
   val brokerMetaPropsFile = "meta.properties"
   val brokerMetadataCheckpoints = config.logDirs.map(logDir => (logDir, new BrokerMetadataCheckpoint(new File(logDir + File.separator +brokerMetaPropsFile)))).toMap
 
