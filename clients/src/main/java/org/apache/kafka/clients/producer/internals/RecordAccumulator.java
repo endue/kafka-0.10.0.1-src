@@ -75,7 +75,7 @@ public final class RecordAccumulator {
     // BufferPool，一个ByteBuffer池子
     private final BufferPool free;
     private final Time time;
-    // 记录TopicPartition与自身的Deque<RecordBatch>
+    // 记录TopicPartition与自身消息集合Deque<RecordBatch>
     private final ConcurrentMap<TopicPartition, Deque<RecordBatch>> batches;
     // 记录待发送的RecordBatch
     private final IncompleteRecordBatches incomplete;
@@ -158,11 +158,11 @@ public final class RecordAccumulator {
      * The append result will contain the future metadata, and flag for whether the appended batch is full or a new batch is created
      * <p>
      *
-     * @param tp The topic/partition to which this record is being sent
-     * @param timestamp The timestamp of the record
-     * @param key The key for the record
-     * @param value The value for the record
-     * @param callback The user-supplied callback to execute when the request is complete
+     * @param tp The topic/partition to which this record is being sent record中记录的要发往的topic-partition
+     * @param timestamp The timestamp of the record  record中记录的时间戳，用户没指定则使用doSend()方法调用时的时间戳
+     * @param key The key for the record    record中记录的key
+     * @param value The value for the record    record中记录的value
+     * @param callback The user-supplied callback to execute when the request is complete 用户调用send()方法时，自定义的回调方法
      * @param maxTimeToBlock The maximum time in milliseconds to block for buffer memory to be available
      */
     public RecordAppendResult append(TopicPartition tp,// 消息发送的topic-partition
@@ -170,14 +170,14 @@ public final class RecordAccumulator {
                                      byte[] key,
                                      byte[] value,
                                      Callback callback,// 用户回调
-                                     long maxTimeToBlock) throws InterruptedException {// 最大阻塞等待时间
+                                     long maxTimeToBlock) throws InterruptedException {// 最大阻塞等待时间ms
         // We keep track of the number of appending thread to make sure we do not miss batches in
         // abortIncompleteBatches().
         // AtomicInteger类型累计并发线程数
         appendsInProgress.incrementAndGet();
         try {
             // check if we have an in-progress batch
-            // 获取topic-partition对应的Deque
+            // 获取topic-partition对应的集合Deque
             Deque<RecordBatch> dq = getOrCreateDeque(tp);
             synchronized (dq) {
                 if (closed)
@@ -485,6 +485,7 @@ public final class RecordAccumulator {
 
     /**
      * Get the deque for the given topic-partition, creating it if necessary.
+     * 获取发送到某topic-partition的消息集合Deque
      */
     private Deque<RecordBatch> getOrCreateDeque(TopicPartition tp) {
         Deque<RecordBatch> d = this.batches.get(tp);
@@ -639,6 +640,7 @@ public final class RecordAccumulator {
      * 记录还没被ACK的消息
      */
     private final static class IncompleteRecordBatches {
+        // 记录有等待发送消息的RecordBatch
         private final Set<RecordBatch> incomplete;
 
         public IncompleteRecordBatches() {

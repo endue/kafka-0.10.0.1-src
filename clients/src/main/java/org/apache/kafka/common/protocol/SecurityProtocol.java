@@ -37,8 +37,17 @@ public enum SecurityProtocol {
     /** Currently identical to PLAINTEXT and used for testing only. We may implement extra instrumentation when testing channel code. */
     TRACE(Short.MAX_VALUE, "TRACE", true);
 
+    /**
+     * 记录所有上面的枚举，key是id，value是枚举本身
+     */
     private static final Map<Short, SecurityProtocol> CODE_TO_SECURITY_PROTOCOL;
+    /**
+     * 记录所有上面的枚举的name
+     */
     private static final List<String> NAMES;
+    /**
+     * 记录所有上面的枚举中isTesting为false的枚举本身
+     */
     private static final Set<SecurityProtocol> NON_TESTING_VALUES;
 
     static {

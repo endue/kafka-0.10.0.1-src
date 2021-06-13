@@ -87,7 +87,7 @@ public class Compressor {
     // 写消息时的byte数组输出流
     private final ByteBufferOutputStream bufferStream;
     private final int initPos;
-    // 记录未压缩消息的数量
+    // 记录未压缩消息的大小
     public long writtenUncompressed;
     // 记录已写消息的数量
     public long numRecords;

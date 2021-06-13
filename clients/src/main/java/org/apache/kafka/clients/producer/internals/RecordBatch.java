@@ -43,7 +43,7 @@ public final class RecordBatch {
     public long drainedMs;
     // 记录最后一次放入消息的时间戳
     public long lastAttemptMs;
-    // 记录真正保存消息的类
+    // 记录底层用来保存消息的类
     public final MemoryRecords records;
     // 记录RecordBatch对应的分区
     public final TopicPartition topicPartition;
@@ -51,9 +51,14 @@ public final class RecordBatch {
     public final ProduceRequestResult produceFuture;
     // 记录最后一次放入消息时消息的时间戳
     public long lastAppendTime;
+    /**
+     * 记录在将消息添加到MemoryRecords后，如果在发送ProducerRecord时有回调则保存对应的回调
+     * {@link org.apache.kafka.clients.producer.internals.RecordBatch#tryAppend(long, byte[], byte[], org.apache.kafka.clients.producer.Callback, long)}
+     */
     private final List<Thunk> thunks;
-    // 记录当前最后放入消息的偏移量,没放入一个消息,就+1
+    // 记录当前最后放入消息的偏移量,每放入一个消息,就+1,从0开始
     private long offsetCounter = 0L;
+    // 初始化RecordBatch时为false
     private boolean retry;
 
     public RecordBatch(TopicPartition tp, MemoryRecords records, long now) {

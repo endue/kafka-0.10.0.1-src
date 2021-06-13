@@ -327,6 +327,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             // 拉取集群元数据
             // 其实并没有真正的去拉取集群元数据，而是对metadata中的一些属性做了初始化
             this.metadata.update(Cluster.bootstrap(addresses), time.milliseconds());
+            // 默认创建的为PlaintextChannelBuilder
             ChannelBuilder channelBuilder = ClientUtils.createChannelBuilder(config.values());
             // 网络通信组件
             NetworkClient client = new NetworkClient(

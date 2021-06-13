@@ -50,6 +50,7 @@ final class ClusterConnectionStates {
 
     /**
      * Return true if we are disconnected from the given node and can't re-establish a connection yet
+     * 如果与给定节点断开连接且还不能重新建立连接，则返回true
      * @param id The connection to check
      * @param now The current time in ms
      */

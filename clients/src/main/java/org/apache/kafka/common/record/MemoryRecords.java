@@ -100,29 +100,25 @@ public class MemoryRecords implements Records {
      * Append a new record and offset to the buffer
      * @return crc of the record
      */
-    // 追加
+    // 添加record
     public long append(long offset, long timestamp, byte[] key, byte[] value) {
         if (!writable)
             throw new IllegalStateException("Memory records is not writable");
-        // 计算消息大小
-        // SIZE_LENGTH(4Byte) + OFFSET_LENGTH(8Byte) +
-        // CRC_LENGTH(4Byte) + MAGIC_LENGTH(1Byte) +
-        // ATTRIBUTE_LENGTH(1Byte) + TIMESTAMP_LENGTH(8Byte) +
-        // KEY_SIZE_LENGTH(4Byte) + keySize(key长度发送方决定) + VALUE_SIZE_LENGTH(4Byte) + valueSize(value长度发送方决定)
+        // 1. 计算消息大小，公式如下
+        // CRC_LENGTH(4) + MAGIC_LENGTH(1) + ATTRIBUTE_LENGTH(1) + TIMESTAMP_LENGTH(8) + KEY_SIZE_LENGTH(4) + keySize + VALUE_SIZE_LENGTH(4) + valueSize
         int size = Record.recordSize(key, value);
-        // 保存消息
+        // 2. 保存消息,格式如下
         /**
          * |offset|
          * |消息大小|
          * |crc|
-         * |magic|
-         * |attributes|
-         * |timestamp|
+         * |magic|  值为1，{@link Record#CURRENT_MAGIC_VALUE}
+         * |attributes|  值为0
+         * |timestamp|   ProducerRecord在创建时指定的时间戳，如果用户未指定，则在调用doSend()方法时将被设置为当前时间
          * |key.length|
          * |key|
          * |valueSize|
          * |value|
-         * -------
          */
         compressor.putLong(offset);
         compressor.putInt(size);

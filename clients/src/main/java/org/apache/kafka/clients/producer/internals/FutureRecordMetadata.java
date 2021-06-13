@@ -17,6 +17,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
+import org.apache.kafka.clients.producer.Callback;
 import org.apache.kafka.clients.producer.RecordMetadata;
 
 /**
@@ -25,10 +26,18 @@ import org.apache.kafka.clients.producer.RecordMetadata;
 public final class FutureRecordMetadata implements Future<RecordMetadata> {
 
     private final ProduceRequestResult result;
+    /**
+     * 相对偏移量，没增加一条消息该值就加1
+     * 参考{@link org.apache.kafka.clients.producer.internals.RecordBatch#tryAppend(long, byte[], byte[], Callback, long)}
+     */
     private final long relativeOffset;
+    // ProducerRecord中的时间戳
     private final long timestamp;
+    // 消息记录的校验值
     private final long checksum;
+    // key的长度，没有则为-1
     private final int serializedKeySize;
+    // value的长度，没有则为-1
     private final int serializedValueSize;
 
     public FutureRecordMetadata(ProduceRequestResult result, long relativeOffset, long timestamp,
