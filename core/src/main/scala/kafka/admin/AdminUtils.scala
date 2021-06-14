@@ -452,8 +452,14 @@ object AdminUtils extends Logging {
   def topicExists(zkUtils: ZkUtils, topic: String): Boolean =
     zkUtils.zkClient.exists(getTopicPath(topic))
 
-  // 获取所有broker的元数据BrokerMetadata
-  // rackAwareMode默认为Enforced
+  /**
+    * 获取所有broker的元数据BrokerMetadata
+    * rackAwareMode默认为Enforced
+    * @param zkUtils
+    * @param rackAwareMode
+    * @param brokerList
+    * @return
+    */
   def getBrokerMetadatas(zkUtils: ZkUtils, rackAwareMode: RackAwareMode = RackAwareMode.Enforced,
                         brokerList: Option[Seq[Int]] = None): Seq[BrokerMetadata] = {
     // 获取所有的broker集合
@@ -482,7 +488,15 @@ object AdminUtils extends Logging {
     brokerMetadatas.sortBy(_.id)
   }
 
-  // 创建topic
+  /**
+    * 创建topic
+    * @param zkUtils
+    * @param topic
+    * @param partitions
+    * @param replicationFactor
+    * @param topicConfig
+    * @param rackAwareMode
+    */
   def createTopic(zkUtils: ZkUtils,
                   topic: String,// 创建的topic
                   partitions: Int,// 分区个数
@@ -490,6 +504,7 @@ object AdminUtils extends Logging {
                   topicConfig: Properties = new Properties,// topic的一些配置参数，如 config max.message.bytes=64000、config flush.messages=1
                   rackAwareMode: RackAwareMode = RackAwareMode.Enforced) {// 默认模式Enforced
     // 获取所有broker的元数据Seq[BrokerMetadata]
+    // BrokerMetadata包含(id: Int, rack: Option[String])
     val brokerMetadatas = getBrokerMetadatas(zkUtils, rackAwareMode)
     // 创建分区副本列表，返回类型为Map[Int, Seq[Int]]，key是分区编号，value是brokerId集合
     val replicaAssignment = AdminUtils.assignReplicasToBrokers(brokerMetadatas, partitions, replicationFactor)

@@ -681,7 +681,14 @@ class KafkaApis(val requestChannel: RequestChannel,
     ret.toSeq.sortBy(-_)
   }
 
-  // 创建topic
+  /**
+    * 创建topic
+    * @param topic topic名称
+    * @param numPartitions topic分区数
+    * @param replicationFactor topic副本数
+    * @param properties
+    * @return
+    */
   private def createTopic(topic: String,
                           numPartitions: Int,
                           replicationFactor: Int,
@@ -691,6 +698,7 @@ class KafkaApis(val requestChannel: RequestChannel,
       AdminUtils.createTopic(zkUtils, topic, numPartitions, replicationFactor, properties, RackAwareMode.Safe)
       info("Auto creation of topic %s with %d partitions and replication factor %d is successful"
         .format(topic, numPartitions, replicationFactor))
+      // 返回响应
       new MetadataResponse.TopicMetadata(Errors.LEADER_NOT_AVAILABLE, topic, common.Topic.isInternal(topic),
         java.util.Collections.emptyList())
     } catch {

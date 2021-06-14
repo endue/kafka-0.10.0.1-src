@@ -265,6 +265,7 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePr
             (protocol, endpoint)
         }
         // 启动健康检查，这里传入了config.rack为机架信息，在创建topic的时候会使用到
+        // 同时内部会在zk上的/brokers/ids/{id}下注册broker自己的相关信息
         kafkaHealthcheck = new KafkaHealthcheck(config.brokerId, listeners, zkUtils, config.rack,
           config.interBrokerProtocolVersion)// inter.broker.protocol.version
         kafkaHealthcheck.startup()
