@@ -34,7 +34,7 @@ import org.apache.kafka.common.security.JaasUtils
   * 如果现有的leader已经死亡，这个类将处理自动重选，如果成功，它将调用leader状态更改回调
  */
 class ZookeeperLeaderElector(controllerContext: ControllerContext,
-                             electionPath: String,// "/controller"
+                             electionPath: String,// kafkaController选举传递进来的zk路径"/controller"
                              onBecomingLeader: () => Unit,// 成为leader后的回调方法
                              onResigningAsLeader: () => Unit,// 退出leader后的回调方法
                              brokerId: Int)// brokerID
@@ -116,9 +116,11 @@ class ZookeeperLeaderElector(controllerContext: ControllerContext,
       // 执行回调
       onBecomingLeader()
     } catch {
+      // 进行这里说明写入失败
+      // 1. 节点已经存在
       case e: ZkNodeExistsException =>
         // If someone else has written the path, then
-        // 当controllerBroker已经确认
+        // 当controllerBroker已经存在
         leaderId = getControllerID 
 
         if (leaderId != -1)
@@ -164,7 +166,7 @@ class ZookeeperLeaderElector(controllerContext: ControllerContext,
   class LeaderChangeListener extends IZkDataListener with Logging {
     /**
      * Called when the leader information stored in zookeeper has changed. Record the new leader in memory
-      * 当“/controller”节点数据发生变化时调用
+      * 当“/controller”节点数据发生变化时调用，也就是有新的leader节点
      * @throws Exception On any error.
      */
     @throws(classOf[Exception])
@@ -172,7 +174,7 @@ class ZookeeperLeaderElector(controllerContext: ControllerContext,
       inLock(controllerContext.controllerLock) {
         // 记录自身之前是否是controller
         val amILeaderBeforeDataChange = amILeader
-        // 更新新的controller的id
+        // 解析新的controllerBroker的id
         leaderId = KafkaController.parseControllerId(data.toString)
         info("New leader is %d".format(leaderId))
         // The old leader needs to resign leadership if it is no longer the leader

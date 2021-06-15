@@ -55,11 +55,10 @@ class ControllerContext(val zkUtils: ZkUtils,
   // 记录关闭的brokerId集合
   var shuttingDownBrokerIds: mutable.Set[Int] = mutable.Set.empty
   val brokerShutdownLock: Object = new Object
-  // 当前epoch，默认0，KafkaController的年代信息，一般在leader变化后修改，
-  // 比如当前leader挂了，新的contorller leader被选举，那么这个值就会加1，
-  // 这样就能够判断哪些是旧的controller leader发送的请求
+  // 当前epoch，KafkaController的"代"，一般在leader变化后修改，首次创建为1
+  // 比如当前leader挂了，新的contorller leader被选举，那么这个值就会加1，这样就能够判断哪些是旧的controller leader发送的请求
   var epoch: Int = KafkaController.InitialControllerEpoch - 1
-  // 当前epoch zk版本，默认0
+  // 当前epoch zk上对应的版本，首次创建为1
   var epochZkVersion: Int = KafkaController.InitialControllerEpochZkVersion - 1
   // 存放集群中所有的topic
   var allTopics: Set[String] = Set.empty
@@ -193,8 +192,7 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
   val replicaStateMachine = new ReplicaStateMachine(this)
   // 初始化ZookeeperLeaderElector对象，负责kafkaController的leader选举和故障转移
   // 为ZookeeperLeaderElector设置两个回调方法，onControllerFailover和onControllerResignation
-  private val controllerElector = new ZookeeperLeaderElector(controllerContext, ZkUtils.ControllerPath, onControllerFailover,
-    onControllerResignation, config.brokerId)
+  private val controllerElector = new ZookeeperLeaderElector(controllerContext, ZkUtils.ControllerPath, onControllerFailover, onControllerResignation, config.brokerId)
   // have a separate scheduler for the controller to be able to start and stop independently of the
   // kafka server
   // 配置"auto.leader.rebalance.enable"为true
@@ -202,7 +200,7 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
   private val autoRebalanceScheduler = new KafkaScheduler(1)
   // topic删除管理器,kafkaController才会初始化
   var deleteTopicManager: TopicDeletionManager = null
-  // 分区副本中的leader选举
+  // 分区副本leader选举的选择器
   val offlinePartitionSelector = new OfflinePartitionLeaderSelector(controllerContext, config)
   private val reassignedPartitionLeaderSelector = new ReassignedPartitionLeaderSelector(controllerContext)
   private val preferredReplicaPartitionLeaderSelector = new PreferredReplicaPartitionLeaderSelector(controllerContext)
@@ -363,43 +361,93 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
     if(isRunning) {
       info("Broker %d starting become controller state transition".format(config.brokerId))
       //read controller epoch from zk
-      // 读取epoch相关信息并更新
+      /**
+        * 1. 读取zk上"/controller_epoch"节点记录的epoch和epochZkVersion信息
+        */
       readControllerEpochFromZookeeper()
+
       // increment the controller epoch
-      // 在zk"/controller_epoch"节点上记录epoch，如果不存在该节点，那么创建并初始化
+      /**
+        * 2. 递增zk上"/controller_epoch"节点记录的epoch并返回version
+        *   2.1 如果不存在，创建并初始化
+        *   2.2 如果已存在，epoch+1
+        * 最后更新epochZkVersion为对应的version
+        */
       incrementControllerEpoch(zkUtils.zkClient)
+
       // before reading source of truth from zookeeper, register the listeners to get broker/topic callbacks
-      // 在“/admin/reassign_partitions”节点注册partitionReassignedListener监听器
+      /**
+        * 3. 为"/admin/reassign_partitions"节点注册partitionReassignedListener监听器
+        */
       registerReassignedPartitionsListener()
-      // 在“/isr_change_notification”节点注册isrChangeNotificationListener监听器
+
+      /**
+        * 4. 为"/isr_change_notification"节点注册isrChangeNotificationListener监听器
+        */
       registerIsrChangeNotificationListener()
-      // 在“/admin/preferred_replica_election”节点注册preferredReplicaElectionListener监听器
+
+      /**
+        * 5. 为"/admin/preferred_replica_election"节点注册preferredReplicaElectionListener监听器
+        */
       registerPreferredReplicaElectionListener()
-      // 在“/brokers/topics”节点注册topicChangeListener监听器
-      // 同时如果配置“delete.topic.enable”为true，则在“/admin/delete_topics”节点注册deleteTopicsListener监听器
+
+      /**
+        * 6. 为"/brokers/topics"节点注册topicChangeListener监听器
+        *   如配置"delete.topic.enable"为true，则在“/admin/delete_topics”节点注册deleteTopicsListener监听器
+        */
       partitionStateMachine.registerListeners()
-      // 在“/brokers/ids”节点注册brokerChangeListener监听器
+
+      /**
+        * 7. 在"/brokers/ids"节点注册brokerChangeListener监听器
+        */
       replicaStateMachine.registerListeners()
-      // 初始化controllerContext
+
+      /**
+        * 8. 初始化controllerContext
+        */
       initializeControllerContext()
-      // 启动副本状态管理
+
+      /**
+        * 9. 启动副本状态管理
+        */
       replicaStateMachine.startup()
-      // 启动分区状态管理
+
+      /**
+        * 10. 启动分区状态管理
+        */
       partitionStateMachine.startup()
+
       // register the partition change listeners for all existing topics on failover
+      /**
+        * 11. 为所有的topic创建PartitionModificationsListener监听器
+        */
       controllerContext.allTopics.foreach(topic => partitionStateMachine.registerPartitionChangeListener(topic))
       info("Broker %d is ready to serve as the new controller with epoch %d".format(config.brokerId, epoch))
-      // 设置broker状态为RunningAsController
+
+      /**
+        * 12. 设置broker状态为RunningAsController
+        */
       brokerState.newState(RunningAsController)
-      // 为partitionsBeingReassigned集合中记录的Map[TopicAndPartition, ReassignedPartitionsContext]
-      // 进行分区重分配
+
+      /**
+        * 13. 为partitionsBeingReassigned集合中记录的Map[TopicAndPartition, ReassignedPartitionsContext]进行分区重分配
+        */
       maybeTriggerPartitionReassignment()
-      // 为partitionsUndergoingPreferredReplicaElection集合中记录的Set[TopicAndPartition]
-      // 进行leader选举
+
+      /**
+        * 14. 为partitionsUndergoingPreferredReplicaElection集合中记录的Set[TopicAndPartition]进行leader选举
+        */
       maybeTriggerPreferredReplicaElection()
+
       /* send partition leadership info to all live brokers */
+      /**
+        * 15. 发送UpdateMetadataRequest请求给集群中的其他broker
+        */
       sendUpdateMetadataRequest(controllerContext.liveOrShuttingDownBrokerIds.toSeq)
-      // 是否配置"auto.leader.rebalance.enable"为true
+
+      /**
+        * 16. 是否配置"auto.leader.rebalance.enable"为true
+        */
       if (config.autoLeaderRebalanceEnable) {
         info("starting the partition rebalance scheduler")
         // 启动autoRebalanceScheduler线程
