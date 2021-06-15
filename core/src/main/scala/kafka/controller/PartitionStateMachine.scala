@@ -56,7 +56,7 @@ class PartitionStateMachine(controller: KafkaController) extends Logging {
   private val partitionState: mutable.Map[TopicAndPartition, PartitionState] = mutable.Map.empty
   // 用于向指定的Broker批量发送请求
   private val brokerRequestBatch = new ControllerBrokerRequestBatch(controller)
-  // 当前kafkaController状态
+  // 当前PartitionStateMachine的状态
   private val hasStarted = new AtomicBoolean(false)
   // 默认的副本选举器，并没有真正进行副本选举，只是返回当前的Leader副本，ISR集合和AR集合
   private val noOpPartitionLeaderSelector = new NoOpLeaderSelector(controllerContext)
@@ -92,6 +92,10 @@ class PartitionStateMachine(controller: KafkaController) extends Logging {
   }
 
   // register topic and partition change listeners
+  /**
+    * 当前kafka服务启动选举成为broker leader后执行回调方法onControllerFailover()
+    * 调用partitionStateMachine.registerListeners()方法
+    */
   def registerListeners() {
     registerTopicChangeListener()
     // 是否配置“delete.topic.enable”为true
@@ -134,6 +138,7 @@ class PartitionStateMachine(controller: KafkaController) extends Logging {
    */
   def triggerOnlinePartitionStateChange() {
     try {
+      // 在发送请求前,检查是否有未发生的请求
       brokerRequestBatch.newBatch()
       // try to move all partitions in NewPartition or OfflinePartition state to OnlinePartition state except partitions
       // that belong to topics to be deleted
@@ -470,8 +475,11 @@ class PartitionStateMachine(controller: KafkaController) extends Logging {
     debug("After leader election, leader cache is updated to %s".format(controllerContext.partitionLeadershipInfo.map(l => (l._1, l._2))))
   }
 
-  // 当成为controller leader后执行
-  // 路径：/brokers/topics
+  /**
+    * 当前kafka服务启动选举成为broker leader后执行回调方法onControllerFailover()调用partitionStateMachine.registerListeners()方法
+    * 注册"/brokers/topics"节点下的topicChangeListener
+    * @return
+    */
   private def registerTopicChangeListener() = {
 
     zkUtils.zkClient.subscribeChildChanges(BrokerTopicsPath, topicChangeListener)
@@ -497,8 +505,11 @@ class PartitionStateMachine(controller: KafkaController) extends Logging {
     partitionModificationsListeners.remove(topic)
   }
 
-  // 当成为controller leader后执行
-  // 路径：/admin/delete_topics
+  /**
+    * 当前kafka服务启动选举成为broker leader后执行回调方法onControllerFailover()调用partitionStateMachine.registerListeners()方法
+    * 注册"/admin/delete_topics"节点下的deleteTopicsListener
+    * @return
+    */
   private def registerDeleteTopicListener() = {
     zkUtils.zkClient.subscribeChildChanges(DeleteTopicsPath, deleteTopicsListener)
   }
@@ -529,13 +540,13 @@ class PartitionStateMachine(controller: KafkaController) extends Logging {
 
     /**
       * @param parentPath 路径
-      * @param children 所有的主题
+      * @param children 所有的topic
       * @throws java.lang.Exception
       */
     @throws(classOf[Exception])
     def handleChildChange(parentPath : String, children : java.util.List[String]) {
       inLock(controllerContext.controllerLock) {
-        // 校验kafkaController状态是否还在运行
+        // 校验PartitionStateMachine的状态是否还在运行,从而能够判断当前broker是否为leader
         if (hasStarted.get) {
           try {
             // 获取/brokers/topics下的子节点集合
