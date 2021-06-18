@@ -639,29 +639,38 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
   }
 
   /**
+    * 当新的topic创建时被调用执行
+    * 参考 {@link kafka.controller.PartitionStateMachine.TopicChangeListener}
    * This callback is invoked by the partition state machine's topic change listener with the list of new topics
    * and partitions as input. It does the following -
    * 1. Registers partition change listener. This is not required until KAFKA-347
+    * 注册分区监听器
    * 2. Invokes the new partition callback
+    * 执行新分区的回调
    * 3. Send metadata request with the new topic to all brokers so they allow requests for that topic to be served
+    * 发送带有新topic的元数据请求给集群中其他的服务,以便他们能够提供对该topic请求的服务
+    * @param topics 新topic集合
+    * @param newPartitions 新topic-partition集合
    */
-  // 当新的topic创建时执行
   def onNewTopicCreation(topics: Set[String], newPartitions: Set[TopicAndPartition]) {
     info("New topic creation callback for %s".format(newPartitions.mkString(",")))
     // subscribe to partition changes
-    // 为新topic建立registerPartitionChangeListener监听器
+    // 为新topic注册registerPartitionChangeListener监听器
     topics.foreach(topic => partitionStateMachine.registerPartitionChangeListener(topic))
-    // 新的分区创建
+    // 新的topic分区创建
     onNewPartitionCreation(newPartitions)
   }
 
   /**
+    * 新的分区创建
    * This callback is invoked by the topic change callback with the list of failed brokers as input.
    * It does the following -
    * 1. Move the newly created partitions to the NewPartition state
+    * 将新创建的分区移动到NewPartition状态
    * 2. Move the newly created partitions from NewPartition->OnlinePartition state
+    * 将新创建的分区从NewPartition->OnlinePartition状态
+    * @param newPartitions 新topic-partition集合
    */
-  // 新的分区创建
   def onNewPartitionCreation(newPartitions: Set[TopicAndPartition]) {
     info("New partition creation callback for %s".format(newPartitions.mkString(",")))
     // 将新Partitions的状态转为NewPartition

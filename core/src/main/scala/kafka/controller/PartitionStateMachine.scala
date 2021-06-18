@@ -167,11 +167,13 @@ class PartitionStateMachine(controller: KafkaController) extends Logging {
   }
 
   /**
+    * 处理TopicAndPartition状态
    * This API is invoked by the partition change zookeeper listener
    * @param partitions   The list of partitions that need to be transitioned to the target state
+    *                     需要转换到目标状态的分区列表
    * @param targetState  The state that the partitions should be moved to
+    *                     分区应该移动到的状态
    */
-  // 处理TopicAndPartition状态
   def handleStateChanges(partitions: Set[TopicAndPartition], targetState: PartitionState,
                          leaderSelector: PartitionLeaderSelector = noOpPartitionLeaderSelector,
                          callbacks: Callbacks = (new CallbackBuilder).build) {
@@ -179,11 +181,11 @@ class PartitionStateMachine(controller: KafkaController) extends Logging {
     try {
       // 校验缓存中是否有未发生的消息
       brokerRequestBatch.newBatch()
-      // 遍历TopicAndPartition集合
+      // 遍历topicAndPartition集合
       partitions.foreach { topicAndPartition =>
         handleStateChange(topicAndPartition.topic, topicAndPartition.partition, targetState, leaderSelector, callbacks)
       }
-      // 发生请求
+      // 发生请求给集群中其他的broker节点
       brokerRequestBatch.sendRequestsToBrokers(controller.epoch)
     }catch {
       case e: Throwable => error("Error while moving some partitions to %s state".format(targetState), e)
@@ -491,8 +493,14 @@ class PartitionStateMachine(controller: KafkaController) extends Logging {
     zkUtils.zkClient.unsubscribeChildChanges(BrokerTopicsPath, topicChangeListener)
   }
 
-  // 当成为controller leader后执行
-  // 路径：/brokers/topics/{topic}
+  /**
+    * 1.当前kafka服务启动选举成为broker leader后执行回调方法onControllerFailover()调用
+    *   controllerContext.allTopics.foreach(topic => partitionStateMachine.registerPartitionChangeListener(topic))
+    * 2. 当新的topic创建后,调用该方法
+    *   kafka.controller.KafkaController#onNewTopicCreation(scala.collection.Set, scala.collection.Set)
+    * 注册"/brokers/topics/{topic}"节点下的PartitionModificationsListener
+    * @param topic
+    */
   def registerPartitionChangeListener(topic: String) = {
     partitionModificationsListeners.put(topic, new PartitionModificationsListener(topic))
     zkUtils.zkClient.subscribeDataChanges(getTopicPath(topic), partitionModificationsListeners(topic))
@@ -560,14 +568,14 @@ class PartitionStateMachine(controller: KafkaController) extends Logging {
             val newTopics = currentChildren -- controllerContext.allTopics
             // 过滤出已删除的topics
             val deletedTopics = controllerContext.allTopics -- currentChildren
-            // 更新缓存中记录的所有topic
+            // 更新上下文中记录的所有topic
             controllerContext.allTopics = currentChildren
-            // 获取新topics的分区分配结果
+            // 获取新topics的分区分配结果,返回类型Map[TopicAndPartition, Seq[Int]]
             // key是topic-partiton对象，value是副本id
             val addedPartitionReplicaAssignment = zkUtils.getReplicaAssignmentForTopics(newTopics.toSeq)
             // 从controllerContext.partitionReplicaAssignment中过滤掉deletedTopics队列里的topic
-            controllerContext.partitionReplicaAssignment = controllerContext.partitionReplicaAssignment.filter(p =>
-              !deletedTopics.contains(p._1.topic))
+            // 也就是更新上下文中topic的ar集合,有的topic已经被删除了,不需要在记录了
+            controllerContext.partitionReplicaAssignment = controllerContext.partitionReplicaAssignment.filter(p => !deletedTopics.contains(p._1.topic))
             // 将新的topics累加到controllerContext.partitionReplicaAssignment的ar副本集
             controllerContext.partitionReplicaAssignment.++=(addedPartitionReplicaAssignment)
             info("New topics: [%s], deleted topics: [%s], new partition replica assignment [%s]".format(newTopics,
