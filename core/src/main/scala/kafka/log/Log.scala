@@ -80,7 +80,7 @@ class Log(val dir: File,// 某个topic-partion对应的日志文件所在磁盘�
           @volatile var config: LogConfig,// 日志配置设置
           @volatile var recoveryPoint: Long = 0L,// Log对应已刷入磁盘的偏移量，默认0，当存在Log日志时会被初始化为最后刷入磁盘的位置(参考：kafka.log.LogManager.loadLogs())
           scheduler: Scheduler,// kafkaServer初始时的KafkaScheduler
-          time: Time = SystemTime) /* 当前时间戳 */ extends Logging with KafkaMetricsGroup {
+          time: Time = SystemTime) extends Logging with KafkaMetricsGroup { // 当前时间戳
 
   import kafka.log.Log._
 
@@ -101,7 +101,7 @@ class Log(val dir: File,// 某个topic-partion对应的日志文件所在磁盘�
   }
 
   /* the actual segments of the log */
-  // 记录所有的LogSegment是一个跳表，key是LogSegment的baseOffset
+  // 记录所有的LogSegment,是一个跳表，key是LogSegment的baseOffset
   private val segments: ConcurrentNavigableMap[java.lang.Long, LogSegment] = new ConcurrentSkipListMap[java.lang.Long, LogSegment]
   // 加载日志目录下的所有LogSegments
   loadSegments()
@@ -146,20 +146,26 @@ class Log(val dir: File,// 某个topic-partion对应的日志文件所在磁盘�
 
   /* Load the log segments from the log files on disk */
   /**
-    * 此方法只有在创建Log时会被调用
-    * 从磁盘加载LogSegments恢复日志
+    * 此方法只有在创建Log时会被调用,从磁盘加载LogSegments恢复日志
     */
   private def loadSegments() {
     // create the log directory if it doesn't exist
-    // 日志目录不存在则创建
+    // topic-partition对应的日志目录不存时则创建
     dir.mkdirs()
-    // 记录.swap结尾的日志文件
+    // 记录".swap"结尾的日志文件
     var swapFiles = Set[File]()
 
     // first do a pass through the files in the log directory and remove any temporary files
     // and find any interrupted swap operations
-    // 首先遍日志目录dir下的所有.swap结尾的.log文件记录到swapFiles中
-    // 删除所有临时文件以及.swap结尾的索引文件
+    /**
+      * 第一步: 遍历当前topic-partition的日志目录下的文件
+      * 1. 将.deleted和.cleaned结尾的file删除
+      * 2. 将.swap结尾的file的后缀.swap去掉
+      *   2.1 去掉后缀的file以.index结尾,删除
+      *   2.2 去掉后缀的file以.log结尾,查找对应的index文件(新建文件将.log替换为.index就是对应的索引文件),然后删除.
+      *   2.3 最后将file文件记录到swapFiles集合中
+      * 3. 上述并没有处理.log和.index结尾的日志文件
+      */
     for(file <- dir.listFiles if file.isFile) {
       // 不可读抛出异常
       if(!file.canRead)
@@ -193,24 +199,36 @@ class Log(val dir: File,// 某个topic-partion对应的日志文件所在磁盘�
     }
 
     // now do a second pass and load all the .log and .index files
-    // 其次再处理日志目录dir下的文件这次只处理.log和.index结尾的文件
+    /**
+      * 第二步: 遍历当前topic-partition的日志目录下的文件,处理.log和.index结尾的日志文件
+      * 1. file以.index结尾,获取对应的.log文件,判断.log文件不存在则删除.index文件
+      * 2. file以.log结尾,获取file文件记录的消息起始偏移量start,
+      *   2.1 基于start构建对应的indexFile
+      *   2.2 基于start构建对应的LogSegment
+      *   2.3 判断indexFile文件是否存在
+      *     2.3.1 已存在,校验.index文件数据是否正确
+      *       2.3.1.1 正确,不处理
+      *       2.3.1.2 错误,删除.idnex索引文件,调用上面2.2创建的LogSegment的recover(config.maxMessageSize)恢复
+      *     2.3.2 不存在,调用上面2.2创建的LogSegment的segment.recover(config.maxMessageSize)恢复
+      * 3. 最后将start和LogSegment记录到segments集合中
+      */
     for(file <- dir.listFiles if file.isFile) {
       val filename = file.getName
-      // .index结尾
+      // file以.index结尾
       if(filename.endsWith(IndexFileSuffix)) {
         // if it is an index file, make sure it has a corresponding .log file
-        // 获取.index文件对应的.log文件，如果.log文件不存在那么删除.index文件
+        // 创建一个新文件,步骤就是将file文件的.index替换为.log，如果.log文件不存在那么删除.index文件
         val logFile = new File(file.getAbsolutePath.replace(IndexFileSuffix, LogFileSuffix))
         if(!logFile.exists) {
           warn("Found an orphaned index file, %s, with no corresponding log file.".format(file.getAbsolutePath))
           file.delete()
         }
-        // .log结尾
+        // file以.log结尾
       } else if(filename.endsWith(LogFileSuffix)) {
         // if its a log file, load the corresponding log segment
-        // 去掉.log后缀
+        // 将file文件的.log后缀去掉,就是当前log日志记录的消息起始偏移量
         val start = filename.substring(0, filename.length - LogFileSuffix.length).toLong
-        // 获取.index文件
+        // 基于当前log日志的起始偏移量start,创建file文件对应的.index索引文件
         val indexFile = Log.indexFilename(dir, start)
         // 生成对应的LogSegment，调用重载的构造方法
         val segment = new LogSegment(dir = dir,
@@ -224,7 +242,7 @@ class Log(val dir: File,// 某个topic-partion对应的日志文件所在磁盘�
         // 如果索引文件存在
         if(indexFile.exists()) {
           try {
-            // 校验.index文件
+            // 校验.index文件数据是否正确
               segment.index.sanityCheck()
           } catch {
             // 有问题
@@ -250,17 +268,19 @@ class Log(val dir: File,// 某个topic-partion对应的日志文件所在磁盘�
     // Finally, complete any interrupted swap operations. To be crash-safe,
     // log files that are replaced by the swap segment should be renamed to .deleted
     // before the swap file is restored as the new segment file.
-    // 最后处理.swap文件
+    /**
+      * 第三步: 处理.swap文件
+      */
     for (swapFile <- swapFiles) {
-      // 截取掉.swap后缀
+      // 去掉swapFile文件的.swap后缀
       val logFile = new File(CoreUtils.replaceSuffix(swapFile.getPath, SwapFileSuffix, ""))
       // 获取文件名
       val fileName = logFile.getName
       // 获取.log文件的起始偏移量
       val startOffset = fileName.substring(0, fileName.length - LogFileSuffix.length).toLong
-      // 获取.log文件对应的.index文件并追加.swap后缀
+      // 获取.log文件对应的.swap结尾的.index索引文件indexFile
       val indexFile = new File(CoreUtils.replaceSuffix(logFile.getPath, LogFileSuffix, IndexFileSuffix) + SwapFileSuffix)
-      // 创建对应的OffsetIndex
+      // 基于indexFile创建对应的OffsetIndex
       val index =  new OffsetIndex(indexFile, baseOffset = startOffset, maxIndexSize = config.maxIndexSize)
       // 生成新的LogSegment，调用默认的构造方法
       val swapSegment = new LogSegment(new FileMessageSet(file = swapFile),
@@ -270,7 +290,7 @@ class Log(val dir: File,// 某个topic-partion对应的日志文件所在磁盘�
                                        rollJitterMs = config.randomSegmentJitter,
                                        time = time)
       info("Found log file %s from interrupted swap operation, repairing.".format(swapFile.getPath))
-      // 重新构建LogSegment的索引
+      // 重新构建LogSegment的索引文件
       swapSegment.recover(config.maxMessageSize)
       // 查找介于[baseOffset,nextOffset)之间的LogSegments
       val oldSegments = logSegments(swapSegment.baseOffset, swapSegment.nextOffset)
@@ -278,8 +298,7 @@ class Log(val dir: File,// 某个topic-partion对应的日志文件所在磁盘�
       replaceSegments(swapSegment, oldSegments.toSeq, isRecoveredSwapFile = true)
     }
 
-    // 如果跳表segments中没有LogSegment，说明上面三部曲鸡毛也没做
-    // 那么初始化一个LogSegment
+    // 如果跳表segments中没有LogSegment，说明上面三部曲鸡毛也没做.那么初始化一个LogSegment
     if(logSegments.size == 0) {
       // no existing segments, create a new mutable segment beginning at offset 0
       segments.put(0L, new LogSegment(dir = dir,
@@ -312,7 +331,7 @@ class Log(val dir: File,// 某个topic-partion对应的日志文件所在磁盘�
     * .kafka_cleanshutdown文件在kafka.log.LogManager#shutdown()方法调用时生成
     * 还有Log在每次flush的时候虽然消息刷盘了但是recoveryPoint还没有刷盘，
     * 其需要等待checkpointRecoveryPointOffsets定时任务来执行或正常关闭...
-    * 所以在异常关闭时会存在recoveryPoint < 刷盘消息offset的可能
+    * 所以在异常关闭时会存在recoveryPoint < 刷盘消息offset的可能.这时就会出现unflushed的文件,这些文件需要单独恢复一些
     */
   private def recoverLog() {
     // if we have the clean shutdown marker, skip recovery
@@ -325,15 +344,14 @@ class Log(val dir: File,// 某个topic-partion对应的日志文件所在磁盘�
 
     // okay we need to actually recovery this log
     // 异常关闭,需要借助recovery-point-offset-checkpoint文件来恢复Log
-    // 从当前Log的recoveryPoint开始读取LogSegments
-    // 返回的LogSegments就是要恢复的消息
-    val unflushed = logSegments(this.recoveryPoint, Long.MaxValue).iterator
+    // 从当前Log的recoveryPoint开始读取更大offset的LogSegments
+    val unflushed: Iterator[LogSegment] = logSegments(this.recoveryPoint, Long.MaxValue).iterator
     while(unflushed.hasNext) {
-      val curr = unflushed.next
+      val curr: LogSegment = unflushed.next
       info("Recovering unflushed segment %d in log %s.".format(curr.baseOffset, name))
       val truncatedBytes =
         try {
-          // 恢复curr
+          // 恢复索引文件
           curr.recover(config.maxMessageSize)
         } catch {
           case e: InvalidOffsetException =>
@@ -342,8 +360,7 @@ class Log(val dir: File,// 某个topic-partion对应的日志文件所在磁盘�
                  "creating an empty one with starting offset " + startOffset)
             curr.truncateTo(startOffset)
         }
-      // 如果存在截断操作，那么就删除所有的unflushed
-      // 这里为啥删除所有？
+      // 如果存在截断操作，那么就删除对应的unflushed
       if(truncatedBytes > 0) {
         // we had an invalid message, delete all remaining log
         warn("Corruption found in segment %d of log %s, truncating to offset %d.".format(curr.baseOffset, name, curr.nextOffset))
@@ -1135,9 +1152,12 @@ object Log {
   val CleanShutdownFile = ".kafka_cleanshutdown"
 
   /**
-   * Make log segment file name from offset bytes. All this does is pad out the offset number with zeros
-   * so that ls sorts the files numerically.
-   * @param offset The offset to use in the file name
+    * 根据传入的offset构造一个20位的字符串,不够补0
+    * 调用示例: val str = filenamePrefixFromOffset(109857)
+    * 返回结果: 00000000000000109857
+    * Make log segment file name from offset bytes. All this does is pad out the offset number with zeros
+    * so that ls sorts the files numerically.
+    * @param offset The offset to use in the file name
    * @return The filename
    */
   def filenamePrefixFromOffset(offset: Long): String = {
@@ -1157,6 +1177,7 @@ object Log {
     new File(dir, filenamePrefixFromOffset(offset) + LogFileSuffix)
 
   /**
+    * 使用给定的offset在给定的目录dir中构造一个索引文件名
    * Construct an index file name in the given dir using the given base offset
    * @param dir The directory in which the log will reside
    * @param offset The base offset of the log file
@@ -1167,7 +1188,8 @@ object Log {
 
   /**
    * Parse the topic and partition out of the directory name of a log
-    * 从日志的目录名解析主题和分区
+    * 从某个topic-partiton的日志目录名解析主题和分区,
+    * 日志目录名结构:test-topic-0,解析结果topic: test-topic, partition: 0
    */
   def parseTopicPartitionName(dir: File): TopicAndPartition = {
     val name: String = dir.getName

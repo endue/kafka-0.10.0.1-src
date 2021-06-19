@@ -207,9 +207,9 @@ class LogSegment(val log: FileMessageSet,// 存储消息集的FileMessageSet对�
    */
   @nonthreadsafe
   def recover(maxMessageSize: Int): Int = {
-    // 截断整个索引，删除所有条目，也就是清空了.index索引文件
+    // 清空.index索引文件
     index.truncate()
-    // 调整.index索引文件
+    // 调整.index索引文件大小
     index.resize(index.maxIndexSize)
     // 已验证消息的字节数
     var validBytes = 0
@@ -218,10 +218,10 @@ class LogSegment(val log: FileMessageSet,// 存储消息集的FileMessageSet对�
     // 构建一个迭代器
     val iter = log.iterator(maxMessageSize)
     try {
-      // 迭代FileMessageSet中一个个消息集
+      // 迭代FileMessageSet中一个个消息集,重新构建索引
       // 当遍历的消息超过maxMessageSize大小后，会抛出一个CorruptRecordException异常
       while(iter.hasNext) {
-        val entry = iter.next
+        val entry: MessageAndOffset = iter.next
         // 根据消息内容计算出来的crc和消息中存储的crc做比较，是否相等，不等抛出InvalidMessageException异常
         entry.message.ensureValid()
         // 当验证的消息字节数超过indexIntervalBytes时写一次索引

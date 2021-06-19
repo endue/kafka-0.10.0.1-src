@@ -57,27 +57,49 @@ object KafkaServer {
   // I'm listing out individual properties here since the names are slightly different in each Config class...
   private[kafka] def copyKafkaConfigToLog(kafkaConfig: KafkaConfig): java.util.Map[String, Object] = {
     val logProps = new util.HashMap[String, Object]()
+    // "segment.bytes" =  1 * 1024 * 1024 * 1024
     logProps.put(LogConfig.SegmentBytesProp, kafkaConfig.logSegmentBytes)
+    // "segment.ms" = 60 * 60 * 1000L * 24 * 7
     logProps.put(LogConfig.SegmentMsProp, kafkaConfig.logRollTimeMillis)
+    // "segment.jitter.ms"
     logProps.put(LogConfig.SegmentJitterMsProp, kafkaConfig.logRollTimeJitterMillis)
+    // "segment.index.bytes"
     logProps.put(LogConfig.SegmentIndexBytesProp, kafkaConfig.logIndexSizeMaxBytes)
+    // "flush.messages"
     logProps.put(LogConfig.FlushMessagesProp, kafkaConfig.logFlushIntervalMessages)
+    // "flush.ms"
     logProps.put(LogConfig.FlushMsProp, kafkaConfig.logFlushIntervalMs)
+    // "retention.bytes"
     logProps.put(LogConfig.RetentionBytesProp, kafkaConfig.logRetentionBytes)
+    // "retention.ms"
     logProps.put(LogConfig.RetentionMsProp, kafkaConfig.logRetentionTimeMillis: java.lang.Long)
+    // "max.message.bytes"
     logProps.put(LogConfig.MaxMessageBytesProp, kafkaConfig.messageMaxBytes)
+    // "index.interval.bytes"
     logProps.put(LogConfig.IndexIntervalBytesProp, kafkaConfig.logIndexIntervalBytes)
+    // "delete.retention.ms"
     logProps.put(LogConfig.DeleteRetentionMsProp, kafkaConfig.logCleanerDeleteRetentionMs)
+    // "file.delete.delay.ms"
     logProps.put(LogConfig.FileDeleteDelayMsProp, kafkaConfig.logDeleteDelayMs)
+    // "min.cleanable.dirty.ratio"
     logProps.put(LogConfig.MinCleanableDirtyRatioProp, kafkaConfig.logCleanerMinCleanRatio)
+    // "cleanup.policy"
     logProps.put(LogConfig.CleanupPolicyProp, kafkaConfig.logCleanupPolicy)
+    // "min.insync.replicas"
     logProps.put(LogConfig.MinInSyncReplicasProp, kafkaConfig.minInSyncReplicas)
+    //
     logProps.put(LogConfig.CompressionTypeProp, kafkaConfig.compressionType)
+    // "compression.type"
     logProps.put(LogConfig.UncleanLeaderElectionEnableProp, kafkaConfig.uncleanLeaderElectionEnable)
+    // "preallocate"
     logProps.put(LogConfig.PreAllocateEnableProp, kafkaConfig.logPreAllocateEnable)
+    // "message.format.version"
     logProps.put(LogConfig.MessageFormatVersionProp, kafkaConfig.logMessageFormatVersion.version)
+    // "message.timestamp.type"
     logProps.put(LogConfig.MessageTimestampTypeProp, kafkaConfig.logMessageTimestampType.name)
+    // message.timestamp.difference.max.ms"
     logProps.put(LogConfig.MessageTimestampDifferenceMaxMsProp, kafkaConfig.logMessageTimestampDifferenceMaxMs)
+
     logProps
   }
 }
@@ -191,7 +213,7 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePr
         zkUtils = initZk()
 
         /* start log manager */
-        // 创建LogManager
+        // 创建LogManager,此时brokerState暂时为Starting
         logManager = createLogManager(zkUtils.zkClient, brokerState)
         // 启动LogManager相关定时任务
         logManager.startup()
@@ -640,18 +662,24 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePr
 
   def boundPort(protocol: SecurityProtocol = SecurityProtocol.PLAINTEXT): Int = socketServer.boundPort(protocol)
 
-  // 创建logManager
+  /**
+    * 创建logManager
+    * @param zkClient zk客户端
+    * @param brokerState KafkaServer服务状态
+    * @return
+    */
   private def createLogManager(zkClient: ZkClient, brokerState: BrokerState): LogManager = {
-    // 加载kafkaConfig中对应LogConfig配置的配置属性值
+    // 加载kafkaConfig中对应Log相关的默认配置项
     val defaultProps = KafkaServer.copyKafkaConfigToLog(config)
-    // 生成LogConfig配置
+    // 创建LogConfig配置类
     val defaultLogConfig = LogConfig(defaultProps)
-    // 加载zk上的topic相关信息,路径：/brokers/topics
+    // 加载zk上各个topic相关信息,路径：/brokers/topics,然后整合topic的配置和defaultProps,
+    // 返回collection.Map[String, LogConfig]
     val configs = AdminUtils.fetchAllTopicConfigs(zkUtils).map { case (topic, configs) =>
       topic -> LogConfig.fromProps(defaultProps, configs)
     }
     // read the log configurations from zookeeper
-    // 加载日志清理工具的配置参数
+    // 加载日志清理工具CleanerConfig的配置参数
     val cleanerConfig = CleanerConfig(
         // log.cleaner.threads 默认1
         numThreads = config.logCleanerThreads,
@@ -670,10 +698,10 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePr
         // log.cleaner.enable 默认 true
         enableCleaner = config.logCleanerEnable)
     // 生成LogManager
-    new LogManager(logDirs = config.logDirs.map(new File(_)).toArray,// 日志目录列表，加载的是"log.dirs"为空则加载"log.dir"
-                   topicConfigs = configs,//
-                   defaultConfig = defaultLogConfig,
-                   cleanerConfig = cleanerConfig,
+    new LogManager(logDirs = config.logDirs.map(new File(_)).toArray,// 日志目录列表，加载的是"log.dirs"为空则加载"log.dir"同时这里创建了对应的日志文件目录
+                   topicConfigs = configs,// 当前已存在的topic的相关配置
+                   defaultConfig = defaultLogConfig, // 默认配置类
+                   cleanerConfig = cleanerConfig, // 清理日志配置类
                    ioThreads = config.numRecoveryThreadsPerDataDir,// 默认1
                    flushCheckMs = config.logFlushSchedulerIntervalMs,// Long.MaxValue
                    flushCheckpointMs = config.logFlushOffsetCheckpointIntervalMs,// 60000

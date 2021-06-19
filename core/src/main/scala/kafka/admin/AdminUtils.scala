@@ -646,9 +646,20 @@ object AdminUtils extends Logging {
   }
 
   /**
-   * Read the entity (topic or client) config (if any) from zk
-   */
+    * Read the entity (topic or client) config (if any) from zk
+    * 从zk读取实体(topic或client)配置(如果有的话)
+    *
+    * @param zkUtils
+    * @param entityType
+    *     object ConfigType {
+    *       val Topic = "topics"
+    *       val Client = "clients"
+    *     }
+    * @param entity
+    * @return
+    */
   def fetchEntityConfig(zkUtils: ZkUtils, entityType: String, entity: String): Properties = {
+    // 读取zk /config/{entityType}/{entity} 节点的数据
     val str: String = zkUtils.zkClient.readData(getEntityConfigPath(entityType, entity), true)
     val props = new Properties()
     if(str != null) {
@@ -675,6 +686,11 @@ object AdminUtils extends Logging {
     props
   }
 
+  /**
+    * 获取zk"/brokers/topics"节点下所有的topic的相关配置
+    * @param zkUtils
+    * @return
+    */
   def fetchAllTopicConfigs(zkUtils: ZkUtils): Map[String, Properties] =
     zkUtils.getAllTopics().map(topic => (topic, fetchEntityConfig(zkUtils, ConfigType.Topic, topic))).toMap
 

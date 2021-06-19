@@ -595,6 +595,11 @@ class ZkUtils(val zkClient: ZkClient,
     zkClient.getChildren(path)
   }
 
+  /**
+    * 读取path节点下的所有子节点
+    * @param path
+    * @return
+    */
   def getChildrenParentMayNotExist(path: String): Seq[String] = {
     import scala.collection.JavaConversions._
     // triggers implicit conversion from java list to scala Seq
@@ -869,7 +874,10 @@ class ZkUtils(val zkClient: ZkClient,
     }
   }
 
-  // 读取zk"/brokers/topics"路径下所有的topic
+  /**
+    * 读取zk"/brokers/topics"节点下所有的topic
+    * @return
+    */
   def getAllTopics(): Seq[String] = {
     val topics = getChildrenParentMayNotExist(BrokerTopicsPath)
     if(topics == null)
