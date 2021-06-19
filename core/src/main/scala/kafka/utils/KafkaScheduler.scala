@@ -77,6 +77,7 @@ class KafkaScheduler(val threads: Int,
     this synchronized {
       if(isStarted)
         throw new IllegalStateException("This scheduler has already been started!")
+      // 创建executor,默认大小为10
       executor = new ScheduledThreadPoolExecutor(threads)
       // 设置为false,表示调用ScheduledThreadPoolExecutor对象的shutdown()方法后
       // 周期性任务不在循环执行
@@ -84,6 +85,7 @@ class KafkaScheduler(val threads: Int,
       // 设置为false,表示调用ScheduledThreadPoolExecutor对象的shutdown()方法后
       // 延迟任务不在执行
       executor.setExecuteExistingDelayedTasksAfterShutdownPolicy(false)
+      // 设置线程工厂,线程的名字都是kafka-scheduler-{num}组成
       executor.setThreadFactory(new ThreadFactory() {
                                   def newThread(runnable: Runnable): Thread = 
                                     Utils.newThread(threadNamePrefix + schedulerThreadId.getAndIncrement(), runnable, daemon)
@@ -112,6 +114,7 @@ class KafkaScheduler(val threads: Int,
         .format(name, TimeUnit.MILLISECONDS.convert(delay, unit), TimeUnit.MILLISECONDS.convert(period, unit)))
     this synchronized {
       ensureRunning
+      // 构建一个Runnable
       val runnable = CoreUtils.runnable {
         try {
           trace("Beginning execution of scheduled task '%s'.".format(name))
