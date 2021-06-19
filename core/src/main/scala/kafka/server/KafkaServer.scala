@@ -307,22 +307,24 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePr
     // 获取根目录,默认""
     val chroot = {
       // 读取"zookeeper.connect"
-      // 这里可以看出在配置zookeeper.connect是如果设置为ip:port,ip:port/test
-      // 那么kafka后续集群相关信息都会记录到/test路径下
+      // 这里可以看出在配置zookeeper.connect是如果设置为hostname1:port1,hostname2:port2,hostname3:port3/chroot/path
+      // 那么kafka后续集群相关信息都会记录到/chroot/path路径下
+      // 文档地址:http://kafka.apache.org/0100/documentation.html#brokerconfigs
       if (config.zkConnect.indexOf("/") > 0)
         config.zkConnect.substring(config.zkConnect.indexOf("/"))
       else
         ""
     }
 
-    // 1.
+    // 1.todo 没看懂
     // 2. zookeeper.set.acl
     val secureAclsEnabled = JaasUtils.isZkSecurityEnabled() && config.zkEnableSecureAcls
 
     if(config.zkEnableSecureAcls && !secureAclsEnabled) {
       throw new java.lang.SecurityException("zkEnableSecureAcls is true, but the verification of the JAAS login file failed.")
     }
-    // 如果用户自定义了路径
+    // 如果用户自定义了路径,那么首先在zk上创建这个用户自定义的路径
+    // 反之接下来的操作出现NoNodeException
     if (chroot.length > 1) {
       val zkConnForChrootCreation = config.zkConnect.substring(0, config.zkConnect.indexOf("/"))
       // 初始化ZkUtils
@@ -330,7 +332,7 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePr
                                               config.zkSessionTimeoutMs,
                                               config.zkConnectionTimeoutMs,
                                               secureAclsEnabled)
-      // 创建持久的根路径chroot
+      // 创建持久的chroot路径
       zkClientForChrootCreation.makeSurePersistentPathExists(chroot)
       info("Created zookeeper path " + chroot)
       // 关闭ZkUtils

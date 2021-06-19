@@ -53,6 +53,14 @@ object ZkUtils {
   val EntityConfigPath = "/config"
   val EntityConfigChangesPath = "/config/changes"
 
+  /**
+    * 基于zkUrl路径创建ZkUtils
+    * @param zkUrl
+    * @param sessionTimeout
+    * @param connectionTimeout
+    * @param isZkSecurityEnabled
+    * @return
+    */
   def apply(zkUrl: String, sessionTimeout: Int, connectionTimeout: Int, isZkSecurityEnabled: Boolean): ZkUtils = {
     val (zkClient, zkConnection) = createZkClientAndConnection(zkUrl, sessionTimeout, connectionTimeout)
     new ZkUtils(zkClient, zkConnection, isZkSecurityEnabled)
@@ -127,6 +135,17 @@ class ZkUtils(val zkClient: ZkClient,
               val zkConnection: ZkConnection,
               val isSecure: Boolean) extends Logging {
   // These are persistent ZK paths that should exist on kafka broker startup.
+  /**
+    * "/consumers"
+    * "/brokers/ids"
+    * "/brokers/topics"
+    * "config/changes"
+    * "/config/topics"
+    * "/config/clients"
+    * "/admin/delete_topics"
+    * "/brokers/seqid"
+    * "/isr_change_notification"
+    */
   val persistentZkPaths = Seq(ConsumersPath,
                               BrokerIdsPath,
                               BrokerTopicsPath,
