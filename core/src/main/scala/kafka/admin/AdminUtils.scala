@@ -528,7 +528,7 @@ object AdminUtils extends Logging {
       // 新增topic判断是否已经存在
       if (zkUtils.zkClient.exists(topicPath))
         throw new TopicExistsException("Topic \"%s\" already exists.".format(topic))
-      // 新增topic判断是否存在冲突
+      // 如果新增topic包含'.' or '_' 判断是否存在冲突
       else if (Topic.hasCollisionChars(topic)) {
         val allTopics = zkUtils.getAllTopics()
         val collidingTopics = allTopics.filter(t => Topic.hasCollision(topic, t))

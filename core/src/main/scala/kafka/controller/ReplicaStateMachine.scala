@@ -122,11 +122,11 @@ class ReplicaStateMachine(controller: KafkaController) extends Logging {
   }
 
   /**
+    * 处理PartitionAndReplica状态
    * This API is invoked by the broker change controller callbacks and the startup API of the state machine
    * @param replicas     The list of replicas (brokers) that need to be transitioned to the target state
    * @param targetState  The state that the replicas should be moved to
    * The controller's allLeaders cache should have been updated before this
-    * 尝试转变副本状态
    */
   def handleStateChanges(replicas: Set[PartitionAndReplica], targetState: ReplicaState,
                          callbacks: Callbacks = (new CallbackBuilder).build) {
@@ -134,7 +134,7 @@ class ReplicaStateMachine(controller: KafkaController) extends Logging {
       info("Invoking state change to %s for replicas %s".format(targetState, replicas.mkString(",")))
       try {
         brokerRequestBatch.newBatch()
-        // 遍历副本转换状态
+        // 遍历所有副本进行状态转换
         replicas.foreach(r => handleStateChange(r, targetState, callbacks))
         // 向其他broker发送消息
         brokerRequestBatch.sendRequestsToBrokers(controller.epoch)

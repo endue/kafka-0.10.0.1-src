@@ -78,9 +78,8 @@ class PartitionStateMachine(controller: KafkaController) extends Logging {
     * 初始化所有分区的状态（从ZK获取）, 然后对于 New/Offline 触发选主（选主成功后, 变为 OnlinePartition）
    */
   def startup() {
-    // initialize partition state 初始化各个分区状态
-    // 如果没有对应的信息那么设置状态为NewPartition
-    // 如果leader所在的broker是存活的设置状态为OnlinePartition，否则为OfflinePartition
+    // initialize partition state
+    // 初始化各topic-partition的状态
     initializePartitionState()
     // set started flag 设置启动标识
     hasStarted.set(true)
@@ -133,7 +132,7 @@ class PartitionStateMachine(controller: KafkaController) extends Logging {
   /**
    * This API invokes the OnlinePartition state change on all partitions in either the NewPartition or OfflinePartition
    * state. This is called on a successful controller election and on broker changes
-    * 首先该方法在kafka controller被选举后调用，在broker发生变更后调用
+    * 首先该方法在kafka controller被选举后调用以及在broker发生变更后调用
     * 功能是将NewPartition 或 OfflinePartition状态的分区转换为OnlinePartition
    */
   def triggerOnlinePartitionStateChange() {
@@ -216,7 +215,6 @@ class PartitionStateMachine(controller: KafkaController) extends Logging {
    * @param partition   The partition for which the state transition is invoked
    * @param targetState The end state that the partition should be moved to
     * 分区状态机改变处理方法, 可以处理多个分区的状态转换, 这样就可以采用批量方式发送请求给多个Broker
-    * 用partitionLeaderElectionStrategyOpt指定的策略去选举Leader
    */
   private def handleStateChange(topic: String, partition: Int, targetState: PartitionState,
                                 leaderSelector: PartitionLeaderSelector,
@@ -302,7 +300,11 @@ class PartitionStateMachine(controller: KafkaController) extends Logging {
   /**
    * Invoked on startup of the partition's state machine to set the initial state for all existing partitions in
    * zookeeper
-    * 当state machine启动后，为zookeeper中所有存在的分区设置初始状态
+    * 当state machine启动后，为zookeeper中记录的所有存在的分区设置初始状态
+    * 1. topic-partition不存在对应的LeaderIsrAndControllerEpoch,则认为是NewPartition
+    * 2. topic-partition存在对应的LeaderIsrAndControllerEpoch
+    *     2.1 leader为live状态,则认为OnlinePartition
+    *     2.2 leader非live状态,则认为OfflinePartition
    */
   private def initializePartitionState() {
     // 遍历每一个topic-partiton
@@ -356,7 +358,7 @@ class PartitionStateMachine(controller: KafkaController) extends Logging {
   private def initializeLeaderAndIsrForPartition(topicAndPartition: TopicAndPartition) {
     // 获取当前主题分区的ar副本集合
     val replicaAssignment = controllerContext.partitionReplicaAssignment(topicAndPartition)
-    // 过滤出当前主题分区live的副本集合
+    // 过滤出ar副本集合中live的副本集合Seq[Int]
     val liveAssignedReplicas = replicaAssignment.filter(r => controllerContext.liveBrokerIds.contains(r))
     // 判断live副本的数量
     liveAssignedReplicas.size match {

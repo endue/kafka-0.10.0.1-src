@@ -657,7 +657,7 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
     // subscribe to partition changes
     // 为新topic注册registerPartitionChangeListener监听器
     topics.foreach(topic => partitionStateMachine.registerPartitionChangeListener(topic))
-    // 新的topic分区创建
+    // 处理新的topic对应的分区
     onNewPartitionCreation(newPartitions)
   }
 
@@ -673,13 +673,25 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
    */
   def onNewPartitionCreation(newPartitions: Set[TopicAndPartition]) {
     info("New partition creation callback for %s".format(newPartitions.mkString(",")))
-    // 将新Partitions的状态转为NewPartition
+
+    /**
+      * 1. 通过分区状态机将新Partitions的状态转为NewPartition
+      */
     partitionStateMachine.handleStateChanges(newPartitions, NewPartition)
-    // 将新Partitions的副本状态转为NewReplica
+
+    /**
+      * 2. 通过副本状态机将新Partitions的副本状态转为NewReplica
+      */
     replicaStateMachine.handleStateChanges(controllerContext.replicasForPartition(newPartitions), NewReplica)
-    // 将新Partitions的状态转为OnlinePartition
+
+    /**
+      * 3. 通过分区状态机将新Partitions的状态转为OnlinePartition
+      */
     partitionStateMachine.handleStateChanges(newPartitions, OnlinePartition, offlinePartitionSelector)
-    // 将新Partitions的副本状态转为OnlineReplica
+
+    /**
+      * 4. 通过副本状态机将新Partitions的副本状态转为OnlineReplica
+      */
     replicaStateMachine.handleStateChanges(controllerContext.replicasForPartition(newPartitions), OnlineReplica)
   }
 
