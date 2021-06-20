@@ -66,12 +66,14 @@ class FileMessageSet private[kafka](@volatile var file: File,// 指向底层日�
 
   /**
    * Create a file message set with no slicing.
+    * 创建一个没有切片的文件消息集
    */
   def this(file: File, channel: FileChannel) =
     this(file, channel, start = 0, end = Int.MaxValue, isSlice = false)
 
   /**
    * Create a file message set with no slicing
+    * 创建一个没有切片的文件消息集
    */
   def this(file: File) =
     this(file, FileMessageSet.openChannel(file, mutable = true))
@@ -81,6 +83,7 @@ class FileMessageSet private[kafka](@volatile var file: File,// 指向底层日�
    * For windows NTFS and some old LINUX file system, set preallocate to true and initFileSize
    * with one value (for example 512 * 1024 *1024 ) can improve the kafka produce performance.
    * If it's new file and preallocate is true, end will be set to 0.  Otherwise set to Int.MaxValue.
+    * 创建一个没有切片的文件消息集并制定文件大小和是否预分配
    */
   def this(file: File, fileAlreadyExists: Boolean, initFileSize: Int, preallocate: Boolean) =
       this(file,
@@ -130,11 +133,6 @@ class FileMessageSet private[kafka](@volatile var file: File,// 指向底层日�
    * @param targetOffset The offset to search for.
    * @param startingPosition The starting position in the file to begin searching from.
    */
-  // 从物理位置startingPosition开始查找，当找到targetOffset逻辑位置时，返回
-
-  // 这里就是从物理起始位置startingPosition开始查找目标逻辑结束位置targetOffset
-  // 找到第一个逻辑位置offset >= 逻辑结束位置targetOffset的物理位置position，然后返回，返回内容就是
-  // (物理结束位置position的逻辑位置offset，物理结束位置position)
   def searchFor(targetOffset: Long, startingPosition: Int): OffsetPosition = {
     // 记录要读取的物理起始位置
     var position = startingPosition
