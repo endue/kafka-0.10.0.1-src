@@ -47,7 +47,7 @@ import java.io.{IOException, File}
 class LogSegment(val log: FileMessageSet,// 存储消息集的FileMessageSet对象
                  val index: OffsetIndex,// 索引文件的OffsetIndex对象
                  val baseOffset: Long,// LogSegment第一个消息的offset
-                 val indexIntervalBytes: Int,// 隔多少字节写一次索引 默认10 * 1024 * 1024
+                 val indexIntervalBytes: Int,// 隔多少字节写一次索引 默认4096
                  val rollJitterMs: Long,
                  time: Time) extends Logging {
 

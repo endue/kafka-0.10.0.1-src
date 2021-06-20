@@ -109,7 +109,7 @@ class OffsetIndex(@volatile private[this] var _file: File, val baseOffset: Long,
   @volatile
   private[this] var _maxEntries = mmap.limit / 8
 
-  // 最后一条索引记录的逻辑偏移量offset
+  // 最后一条索引的相对偏移量
   @volatile
   private[this] var _lastOffset = readLastEntry.offset
   
@@ -121,7 +121,7 @@ class OffsetIndex(@volatile private[this] var _file: File, val baseOffset: Long,
   def maxEntries: Int = _maxEntries
 
   /** The last offset in the index */
-  // 最后一条索引的逻辑偏移量
+  // 最后一条索引的相对偏移量
   def lastOffset: Long = _lastOffset
 
   /** The index file */
@@ -130,14 +130,14 @@ class OffsetIndex(@volatile private[this] var _file: File, val baseOffset: Long,
 
   /**
    * The last entry in the index
-    * 读取最后一条索引记录的偏移量
+    * 读取最后一条索引位置(相对偏移量和物理地址)
    */
   def readLastEntry(): OffsetPosition = {
     inLock(lock) {
       _entries match {
-         // 没有存储索引，返回的就是当前索引文件的baseOffset，物理偏移量为0
+         // 没有存储索引，返回的就是当前索引文件的baseOffset，相对偏移量为baseOffset
         case 0 => OffsetPosition(baseOffset, 0)
-        // 有存储索引，返回的就是最后一条索引的逻辑偏移量和物理偏移量
+        // 有存储索引，返回的就是最后一条索引的位置
         case s => OffsetPosition(baseOffset + relativeOffset(mmap, s - 1), physical(mmap, s - 1))
       }
     }
@@ -152,19 +152,18 @@ class OffsetIndex(@volatile private[this] var _file: File, val baseOffset: Long,
    * @return The offset found and the corresponding file position for this offset. 
    * If the target offset is smaller than the least entry in the index (or the index is empty),
    * the pair (baseOffset, 0) is returned.
-    * 查找
-    * targetOffset为消息的逻辑偏移量offset
+    * 查找相对偏移量为targetOffset的索引位置(相对偏移量和物理地址)
    */
   def lookup(targetOffset: Long): OffsetPosition = {
     maybeLock(lock) {
       // 创建索引文件快照
       val idx = mmap.duplicate
-      // 二分查找逻辑偏移量targetOffset在索引文件中属于第几个条目
+      // 二分查找与给定相对偏移量targetOffset小于或等于的相对偏移量
       val slot = indexSlotFor(idx, targetOffset)
       if(slot == -1)
         OffsetPosition(baseOffset, 0)
       else
-        // 返回targetOffset对应消息的逻辑偏移量offset和物理偏移量
+        // 返回小于或等于给定相对偏移量targetOffset的索引位置
         OffsetPosition(baseOffset + relativeOffset(idx, slot), physical(idx, slot))
       }
   }
@@ -172,16 +171,15 @@ class OffsetIndex(@volatile private[this] var _file: File, val baseOffset: Long,
   /**
    * Find the slot in which the largest offset less than or equal to the given
    * target offset is stored.
-   * 
+   * 找到小于或等于给定相对偏移量的相对偏移量
    * @param idx The index buffer
    * @param targetOffset The offset to look for
    * 
    * @return The slot found or -1 if the least entry in the index is larger than the target offset or the index is empty
    */
-  // 基于索引文件来查找目标偏移量
   private def indexSlotFor(idx: ByteBuffer, targetOffset: Long): Int = {
     // we only store the difference from the base offset so calculate that
-    // 计算targetOffset相对索引文件baseOffset的实际偏移量
+    // 计算targetOffset相对索引文件baseOffset的相对偏移量
     val relOffset = targetOffset - baseOffset
     
     // check if the index is empty
@@ -190,7 +188,7 @@ class OffsetIndex(@volatile private[this] var _file: File, val baseOffset: Long,
       return -1
     
     // check if the target offset is smaller than the least offset
-    // 如果要查找的实际偏移量比当前索引的baseOffset还小，那也是不需要查找了，直接返回-1
+    // 如果当前索引文件第1个位置的所有的相对偏移量都大于relOffset,说明依旧不存在，直接返回-1
     if (relativeOffset(idx, 0) > relOffset)
       return -1
       
@@ -200,6 +198,7 @@ class OffsetIndex(@volatile private[this] var _file: File, val baseOffset: Long,
     var hi = _entries - 1// 最大(从0开始的，所以这里-1)
     while (lo < hi) {
       val mid = ceil(hi/2.0 + lo/2.0).toInt
+      // 计算第mid索引的相对偏移量
       val found = relativeOffset(idx, mid)
       if (found == relOffset)
         return mid
@@ -210,16 +209,29 @@ class OffsetIndex(@volatile private[this] var _file: File, val baseOffset: Long,
     }
     lo
   }
-  
-  /* return the nth offset relative to the base offset */
-  // 返回相对于base offset的第n个位置的逻辑偏移量offset
+
+  /**
+    * return the nth offset relative to the base offset
+    * 返回第n个索引的相对偏移量,一个索引包括相对偏移量和物理地址,共8个字节
+    * 但是如果n从1开始计算,这里返回的是第n+1个索引的相对偏移量,结合indexSlotFor()方法看就明白了
+    * @param buffer
+    * @param n
+    * @return
+    */
   private def relativeOffset(buffer: ByteBuffer, n: Int): Int = buffer.getInt(n * 8)
-  
-  /* return the nth physical position */
-  // 返回第n个位置的物理偏移量
+
+  /**
+    * return the nth physical position
+    * 返回第n个索引的物理地址,一个索引包括相对偏移量和物理地址,共8个字节
+    * 但是如果n从1开始计算,这里返回的是第n+1个索引的物理位置,结合indexSlotFor()方法看就明白了
+    * @param buffer 索引文件
+    * @param n 第n个索引
+    * @return
+    */
   private def physical(buffer: ByteBuffer, n: Int): Int = buffer.getInt(n * 8 + 4)
   
   /**
+    * 查询第n个索引的位置(相对偏移量和物理地址)
    * Get the nth offset mapping from the index
    * @param n The entry number in the index
    * @return The offset/position pair at that entry
@@ -244,9 +256,9 @@ class OffsetIndex(@volatile private[this] var _file: File, val baseOffset: Long,
       require(!isFull, "Attempt to append to a full index (size = " + _entries + ").")
       if (_entries == 0 || offset > _lastOffset) {
         debug("Adding index entry %d => %d to %s.".format(offset, position, _file.getName))
-        // 写入4个字节的基于baseOffset的偏移量(逻辑偏移量)
+        // 写入4个字节的基于baseOffset的相对偏移量
         mmap.putInt((offset - baseOffset).toInt)
-        // 写入4个字节的消息集大小(物理偏移量)
+        // 写入4个字节的消息集大小
         mmap.putInt(position)
         _entries += 1
         // 更新_lastOffset为最新加入消息的offset
@@ -272,7 +284,7 @@ class OffsetIndex(@volatile private[this] var _file: File, val baseOffset: Long,
   
   /**
    * Remove all entries from the index which have an offset greater than or equal to the given offset.
-    * 从索引中删除所有偏移量大于或等于给定偏移量的项
+    * 从索引中删除大于或等于相对偏移量的索引记录
    * Truncating to an offset larger than the largest in the index has no effect.
    */
   def truncateTo(offset: Long) {
