@@ -130,7 +130,7 @@ class OffsetIndex(@volatile private[this] var _file: File, val baseOffset: Long,
 
   /**
    * The last entry in the index
-    * 读取最后一条索引位置(相对偏移量和物理地址)
+    * 读取最后一条索引位置(相对偏移量和槽位)
    */
   def readLastEntry(): OffsetPosition = {
     inLock(lock) {
@@ -152,13 +152,13 @@ class OffsetIndex(@volatile private[this] var _file: File, val baseOffset: Long,
    * @return The offset found and the corresponding file position for this offset. 
    * If the target offset is smaller than the least entry in the index (or the index is empty),
    * the pair (baseOffset, 0) is returned.
-    * 查找相对偏移量为targetOffset的索引位置(相对偏移量和物理地址)
+    * 查找相对偏移量为targetOffset的索引位置(相对偏移量和槽位)
    */
   def lookup(targetOffset: Long): OffsetPosition = {
     maybeLock(lock) {
       // 创建索引文件快照
       val idx = mmap.duplicate
-      // 二分查找与给定相对偏移量targetOffset小于或等于的相对偏移量
+      // 二分查找比给定相对偏移量targetOffset小于或等于的槽位
       val slot = indexSlotFor(idx, targetOffset)
       if(slot == -1)
         OffsetPosition(baseOffset, 0)
@@ -171,7 +171,7 @@ class OffsetIndex(@volatile private[this] var _file: File, val baseOffset: Long,
   /**
    * Find the slot in which the largest offset less than or equal to the given
    * target offset is stored.
-   * 找到小于或等于给定相对偏移量的相对偏移量
+   * 找到小于或等于给定相对偏移量的槽位
    * @param idx The index buffer
    * @param targetOffset The offset to look for
    * 
@@ -198,7 +198,7 @@ class OffsetIndex(@volatile private[this] var _file: File, val baseOffset: Long,
     var hi = _entries - 1// 最大(从0开始的，所以这里-1)
     while (lo < hi) {
       val mid = ceil(hi/2.0 + lo/2.0).toInt
-      // 计算第mid索引的相对偏移量
+      // 计算第mid索引的槽位
       val found = relativeOffset(idx, mid)
       if (found == relOffset)
         return mid
@@ -258,7 +258,7 @@ class OffsetIndex(@volatile private[this] var _file: File, val baseOffset: Long,
         debug("Adding index entry %d => %d to %s.".format(offset, position, _file.getName))
         // 写入4个字节的基于baseOffset的相对偏移量
         mmap.putInt((offset - baseOffset).toInt)
-        // 写入4个字节的消息集大小
+        // 写入4个字节的消息槽位
         mmap.putInt(position)
         _entries += 1
         // 更新_lastOffset为最新加入消息的offset
@@ -316,9 +316,9 @@ class OffsetIndex(@volatile private[this] var _file: File, val baseOffset: Long,
     inLock(lock) {
       // 更新目前记录的索引条数
       _entries = entries
-      // 更新文件的写入文章
+      // 更新文件的写入索引数
       mmap.position(_entries * 8)
-      // 更新最后一条索引的逻辑偏移量
+      // 更新最后一条索引的相对偏移量
       _lastOffset = readLastEntry.offset
     }
   }
@@ -349,11 +349,11 @@ class OffsetIndex(@volatile private[this] var _file: File, val baseOffset: Long,
       val position = mmap.position
       
       /* Windows won't let us modify the file length while the file is mmapped :-( */
+      // 如果是winodws操作系统,要多一步释放MappedByteBuffer
       if (Os.isWindows)
-        // 强制释放MappedByteBuffer
         forceUnmap(mmap)
+      // 重新生成mmap并设置缓存区大小为roundedNewSize
       try {
-        // 重新生成mmap并设置缓存区大小为roundedNewSize
         raf.setLength(roundedNewSize)
         mmap = raf.getChannel().map(FileChannel.MapMode.READ_WRITE, 0, roundedNewSize)
         _maxEntries = mmap.limit / 8
