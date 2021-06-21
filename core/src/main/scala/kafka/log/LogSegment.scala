@@ -117,18 +117,14 @@ class LogSegment(val log: FileMessageSet,// 存储消息集的FileMessageSet对�
    * @return The position in the log storing the message with the least offset >= the requested offset or null if no message meets this criteria.
    */
   // 转换一下，参数如下：
-  // offset：消息的逻辑位置，也就是每条消息的offset
-  // startingFilePosition：消息的物理偏移量，也就是从FileMessageSet的第几个字节开始读取
-  // 转换逻辑就是：
-  //  1.查找逻辑结束位置offset的物理结束位置，返回一个元组
-  //  2.基于将逻辑结束偏移量offset转换为物理结束位置，将物理开始偏移量startingFilePosition转换为物理开始偏移量
+  // offset：消息集的相对偏移量
+  // startingFilePosition：开始查找消息集的指定槽位
   @threadsafe
   private[log] def translateOffset(offset: Long, startingFilePosition: Int = 0): OffsetPosition = {
-    // 基于消息的逻辑偏移量offset，查找它对于的物理偏移量或最接近它的物理偏移量
+    // 基于消息的相对偏移量offset，查找小于或等于offset的槽位
     val mapping = index.lookup(offset)
-    // 从log日志文件中查找
-    // offset为逻辑结束偏移量
-    // max(mapping.position, startingFilePosition)计算最大的物理逻辑开始偏移量
+    // 从log日志文件中查找第一个大于或等于offset的位置
+    // max(mapping.position, startingFilePosition)计算最大的槽位
     log.searchFor(offset, max(mapping.position, startingFilePosition))
   }
 
@@ -150,8 +146,8 @@ class LogSegment(val log: FileMessageSet,// 存储消息集的FileMessageSet对�
       throw new IllegalArgumentException("Invalid max size for log read (%d)".format(maxSize))
     // 当前FileMessageSet中存储的消息字节数
     val logSize = log.sizeInBytes // this may change, need to save a consistent copy
-    // 基于逻辑开始偏移量startOffset转换为其物理起始位置
-    val startPosition = translateOffset(startOffset)
+    // 基于起始相对偏移量startOffset转换为位置
+    val startPosition:OffsetPosition = translateOffset(startOffset)
 
     // if the start position is already off the end of the log, return null
     // 索引文件中没找到，返回null
@@ -171,9 +167,9 @@ class LogSegment(val log: FileMessageSet,// 存储消息集的FileMessageSet对�
         // maxOffset没传值，那么基于maxPosition和maxSize来计算
       case None =>
         // no max offset, just read until the max position
-        // 在要读取的最大物理偏移量 - 要读取的起始物理偏移量  和 maxSize 两者中取最小
+        // 在要读取的最大槽位 - 要读取的起始槽位  和 maxSize 两者中取最小
         min((maxPosition - startPosition.position).toInt, maxSize)
-        // maxOffset指定了值，那么就转换逻辑偏移量offset为物理偏移量
+        // maxOffset指定了值，那么就转换相对偏移量offset为槽位
       case Some(offset) =>
         // there is a max offset, translate it to a file position and use that to calculate the max read size;
         // when the leader of a partition changes, it's possible for the new leader's high watermark to be less than the
@@ -181,19 +177,16 @@ class LogSegment(val log: FileMessageSet,// 存储消息集的FileMessageSet对�
         // offset between new leader's high watermark and the log end offset, we want to return an empty response.
         if(offset < startOffset)
           return FetchDataInfo(offsetMetadata, MessageSet.Empty)
-        // 将逻辑结束偏移量offset转换为物理偏移量
-        val mapping = translateOffset(offset, startPosition.position)
+        // 将结束的相对偏移量offset转换为槽位
+        val mapping: OffsetPosition = translateOffset(offset, startPosition.position)
         val endPosition =
-          // 为空那就读取当前LogSegment中可读取的最大物理偏移量
           if(mapping == null)
             logSize // the max offset is off the end of the log, use the end of the file
           else
-          // 不为空就返回结束物理偏移量
             mapping.position
-        // 结束物理偏移量 - 开始物理偏移量就是可读取的最大字节数
         min(min(maxPosition, endPosition) - startPosition.position, maxSize).toInt
     }
-    // 返回数据，数据基于物理起始偏移量和可读取的最大字节数查找读取
+    // 返回数据，数据基于起始槽位和可读取的最大字节数查找读取
     FetchDataInfo(offsetMetadata, log.read(startPosition.position, length))
   }
 
