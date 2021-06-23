@@ -315,6 +315,11 @@ class ByteBufferMessageSet(val buffer: ByteBuffer) extends MessageSet with Loggi
     this(NoCompressionCodec, messages: _*)
   }
 
+  /**
+    * producer发送过来的消息
+    * {@link kafka.server.KafkaApis#handleProducerRequest(kafka.network.RequestChannel.Request)}
+    * @return
+    */
   def getBuffer = buffer
 
   private def shallowValidBytes: Int = {
@@ -379,7 +384,9 @@ class ByteBufferMessageSet(val buffer: ByteBuffer) extends MessageSet with Loggi
         // if there isn't at least an offset and size, we are done
         if (topIter.remaining < 12)
           return allDone()
+        // 获取Producer分配的offsetCounter,参考org.apache.kafka.clients.producer.internals.RecordBatch#tryAppend
         val offset = topIter.getLong()
+        // 获取消息大小
         val size = topIter.getInt()
         if(size < Message.MinMessageOverhead)
           throw new InvalidMessageException("Message found with corrupt size (" + size + ") in shallow iterator")
@@ -389,6 +396,7 @@ class ByteBufferMessageSet(val buffer: ByteBuffer) extends MessageSet with Loggi
           return allDone()
 
         // read the current message and check correctness
+        // 读取消息
         val message = topIter.slice()
         message.limit(size)
         topIter.position(topIter.position + size)
