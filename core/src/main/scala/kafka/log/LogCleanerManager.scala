@@ -92,11 +92,11 @@ private[log] class LogCleanerManager(val logDirs: Array[File], val logs: Pool[To
     */
   def grabFilthiestLog(): Option[LogToClean] = {
     inLock(lock) {
-      // 获取topic-partition的cleaner-offset-checkpoint,返回Map类型
-      val lastClean = allCleanerCheckpoints()
+      // 获取每个日志目录下记录的所有topic-partition的cleaner-offset-checkpoint,返回Map类型
+      val lastClean: Map[TopicAndPartition, Long] = allCleanerCheckpoints()
       // 遍历topic-partition对应的日志目录过滤掉一些数据，将符合的topic-partiton对应的log封装成一个LogToClean
       // 筛选要清理的log
-      val dirtyLogs = logs.filter {
+      val dirtyLogs: Iterable[LogToClean] = logs.filter {
         // 筛选类型为Compact
         case (topicAndPartition, log) => log.config.compact  // skip any logs marked for delete rather than dedupe
       }.filterNot {
@@ -107,11 +107,11 @@ private[log] class LogCleanerManager(val logDirs: Array[File], val logs: Pool[To
         case (topicAndPartition, log) => // create a LogToClean instance for each
           // if the log segments are abnormally truncated and hence the checkpointed offset
           // is no longer valid, reset to the log starting offset and log the error event
-          // 获取log中所有logSegment中的第一个的baseOffset
+          // 获取topic-partition对应的所有logSegment中第一个的baseOffset
           val logStartOffset = log.logSegments.head.baseOffset
           // 计算第一个需要压缩的位置firstDirtyOffset(也就是在firstDirtyOffset之前都是已经被压缩过的)
           val firstDirtyOffset = {
-            // 获取checkpoints中记录的对应topic-partition的offset，如果不存在则初始化为logStartOffset
+            // 获取checkpoints中记录的对应topic-partition的offset，如果不存在则初始化为刚刚计算的logStartOffset
             val offset = lastClean.getOrElse(topicAndPartition, logStartOffset)
             if (offset < logStartOffset) {
               error("Resetting first dirty offset to log start offset %d since the checkpointed offset %d is invalid."
@@ -123,20 +123,20 @@ private[log] class LogCleanerManager(val logDirs: Array[File], val logs: Pool[To
           }
           // 创建一个对应的LogToClean
           LogToClean(topicAndPartition, log, firstDirtyOffset)
-      }.filter(ltc => ltc.totalBytes > 0) // skip any empty logs 过滤出字节数 > 0的topic-partiton对应的log的LogToClean
+      }.filter(ltc => ltc.totalBytes > 0) // skip any empty logs 最后过滤出字节数 > 0的topic-partiton对应的log的LogToClean
 
-      // 计算最脏segment其脏数据的占比
+      // 计算最脏的LogToClean其脏数据的占比
       this.dirtiestLogCleanableRatio = if (!dirtyLogs.isEmpty) dirtyLogs.max.cleanableRatio else 0
       // and must meet the minimum threshold for dirty byte ratio
-      // "min.cleanable.dirty.ratio" 默认0.5，过滤脏数据占比超过50%的segment
-      val cleanableLogs = dirtyLogs.filter(ltc => ltc.cleanableRatio > ltc.log.config.minCleanableRatio)
+      // "min.cleanable.dirty.ratio" 默认0.5，过滤脏数据占比超过50%的LogToClean
+      val cleanableLogs: Iterable[LogToClean] = dirtyLogs.filter(ltc => ltc.cleanableRatio > ltc.log.config.minCleanableRatio)
       // 没有要清理的，返回Node
       if(cleanableLogs.isEmpty) {
         None
       // 如果有要清理的,获取脏数据占比最大的记录到inProgress然后返回
       } else {
-        // 记录要清理的日志，状态为LogCleaningInProgress
-        val filthiest = cleanableLogs.max
+        // 记录要清理日志的topic-partition，状态为LogCleaningInProgress
+        val filthiest: LogToClean = cleanableLogs.max
         inProgress.put(filthiest.topicPartition, LogCleaningInProgress)
         Some(filthiest)
       }
@@ -188,6 +188,7 @@ private[log] class LogCleanerManager(val logDirs: Array[File], val logs: Pool[To
 
   /**
    *  Resume the cleaning of a paused partition. This call blocks until the cleaning of a partition is resumed.
+    *  恢复对暂停的分区的清理。这个调用阻塞，直到恢复分区清理
    */
   def resumeCleaning(topicAndPartition: TopicAndPartition) {
     inLock(lock) {

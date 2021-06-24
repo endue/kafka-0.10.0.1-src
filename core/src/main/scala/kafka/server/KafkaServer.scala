@@ -673,9 +673,9 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePr
     val defaultProps = KafkaServer.copyKafkaConfigToLog(config)
     // 创建LogConfig配置类
     val defaultLogConfig = LogConfig(defaultProps)
-    // 加载zk上各个topic相关信息,路径：/brokers/topics,然后整合topic的配置和defaultProps,
+    // 加载zk上各个topic相关信息,路径：/brokers/topics,然后整合topic的配置和默认配置defaultProps,
     // 返回collection.Map[String, LogConfig]
-    val configs = AdminUtils.fetchAllTopicConfigs(zkUtils).map { case (topic, configs) =>
+    val configs: collection.Map[String, LogConfig] = AdminUtils.fetchAllTopicConfigs(zkUtils).map { case (topic, configs) =>
       topic -> LogConfig.fromProps(defaultProps, configs)
     }
     // read the log configurations from zookeeper

@@ -200,7 +200,7 @@ class LogCleaner(val config: CleanerConfig,
     extends ShutdownableThread(name = "kafka-log-cleaner-thread-" + threadId, isInterruptible = false) {
     
     override val loggerName = classOf[LogCleaner].getName
-    
+    // 每个清洁线程不能使用超过2G的清洁缓冲区空间，忽略多余的缓冲区空间
     if(config.dedupeBufferSize / config.numThreads > Int.MaxValue)
       warn("Cannot use more than 2G of cleaner buffer space per cleaner thread, ignoring excess buffer space...")
 
