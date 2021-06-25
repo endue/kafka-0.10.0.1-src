@@ -248,7 +248,7 @@ class LogCleaner(val config: CleanerConfig,
       * 如果有可用的脏日志，则清理日志，否则休眠一段时间
      */
     private def cleanOrSleep() {
-      // 选择要清理的topic-partiton对应的log，添加到inProgress集合状态为LogCleaningInProgress并返回
+      // 选择一个最需要清理的topic-partiton对应的log，添加到inProgress集合状态为LogCleaningInProgress并返回
       cleanerManager.grabFilthiestLog() match {
         // 没有要清理的
         case None =>
@@ -359,30 +359,30 @@ private[log] class Cleaner(val id: Int,
     stats.clear()
     info("Beginning cleaning of log %s.".format(cleanable.log.name))
     // 获取要清理的log
-    val log = cleanable.log
+    val log: Log = cleanable.log
 
     // build the offset map
     info("Building offset map for %s...".format(cleanable.log.name))
     // 获取topic-partiton对应的log中当前活跃的Segment的baseOffset
-    // 也就是清理操作只能清理到活跃Segment的上一个Segment
+    // 也就是清理操作清理的上限
     val upperBoundOffset = log.activeSegment.baseOffset
     // 开始清理日志,处理log目录下一个个的segment，endOffset为清理到的位置
     // 返回值为已处理到的offset
     val endOffset = buildOffsetMap(log, cleanable.firstDirtyOffset, upperBoundOffset, offsetMap) + 1
     stats.indexDone()
-    
+
     // figure out the timestamp below which it is safe to remove delete tombstones
     // this position is defined to be a configurable time beneath the last modified time of the last clean segment
     // 如果一条消息的key不为null，但是其value为null，那么此消息就是墓碑消息。
     // 日志清理线程发现墓碑消息时会先进行常规的清理，并保留墓碑消息一段时间。
     // 墓碑消息的保留条件是当前墓碑消息所在的日志分段的最近修改时间lastModifiedTime大于deleteHorizonMs，默认24 * 60 * 60 * 1000L
     // 这里引用场景在：kafka.log.Cleaner.shouldRetainMessage()
-    val deleteHorizonMs = 
+    val deleteHorizonMs =
       log.logSegments(0, cleanable.firstDirtyOffset).lastOption match {
         case None => 0L
         case Some(seg) => seg.lastModified - log.config.deleteRetentionMs
     }
-        
+
     // group the segments and clean the groups
     info("Cleaning log %s (discarding tombstones prior to %s)...".format(log.name, new Date(deleteHorizonMs)))
     // 分组需要清理的LogSegments
@@ -690,7 +690,7 @@ private[log] class Cleaner(val id: Int,
   private[log] def buildOffsetMap(log: Log, start: Long, end: Long, map: OffsetMap): Long = {
     map.clear()
     // 获取从start到end所有的LogSegment
-    val dirty = log.logSegments(start, end).toBuffer
+    val dirty: mutable.Buffer[LogSegment] = log.logSegments(start, end).toBuffer
     info("Building offset map for log %s for %d segments in offset range [%d, %d).".format(log.name, dirty.size, start, end))
     
     // Add all the dirty segments. We must take at least map.slots * load_factor,
@@ -698,6 +698,7 @@ private[log] class Cleaner(val id: Int,
     // 获取脏数据的起始偏移量
     var offset = dirty.head.baseOffset
     require(offset == start, "Last clean offset is %d but segment base offset is %d for log %s.".format(start, offset, log.name))
+    // 标记map是否已满
     var full = false
     // 遍历脏的segments
     for (segment <- dirty if !full) {
