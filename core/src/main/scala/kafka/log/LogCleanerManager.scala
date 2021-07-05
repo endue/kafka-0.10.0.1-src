@@ -112,7 +112,7 @@ private[log] class LogCleanerManager(val logDirs: Array[File], val logs: Pool[To
           val logStartOffset = log.logSegments.head.baseOffset
           // 计算第一个需要压缩的位置firstDirtyOffset(也就是在firstDirtyOffset之前都是已经被压缩过的)
           val firstDirtyOffset = {
-            // 获取checkpoints中记录的对应topic-partition的offset，如果不存在则初始化为刚刚计算的logStartOffset
+            // 获取已清理到的位置，也就是checkpoints中记录的对应topic-partition的offset，如果不存在则初始化为刚刚计算的logStartOffset
             val offset = lastClean.getOrElse(topicAndPartition, logStartOffset)
             if (offset < logStartOffset) {
               error("Resetting first dirty offset to log start offset %d since the checkpointed offset %d is invalid."

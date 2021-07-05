@@ -258,10 +258,10 @@ class LogCleaner(val config: CleanerConfig,
         // 有要清理的
         case Some(cleanable) =>
           // there's a log, clean it
-          // 获取清理的起始位置
+          // 获取当前已清理的位置
           var endOffset = cleanable.firstDirtyOffset
           try {
-            // 开始清理,返回已清理的位置
+            // 开始清理,返回清理结束后已清理的位置
             endOffset = cleaner.clean(cleanable)
             // 统计相关忽略
             recordStats(cleaner.id, cleanable.log.name, cleanable.firstDirtyOffset, endOffset, cleaner.stats)
@@ -366,7 +366,7 @@ private[log] class Cleaner(val id: Int,
     // 获取topic-partiton对应的log中当前活跃的Segment的baseOffset
     // 也就是清理操作清理的上限
     val upperBoundOffset = log.activeSegment.baseOffset
-    // 开始清理日志,处理log目录下一个个的segment，endOffset为清理到的位置
+    // 开始清理日志,遍历log目录下一个个的segment，将消息添加到offsetMap中，endOffset为清理到的位置
     // 返回值为已处理到的offset
     val endOffset = buildOffsetMap(log, cleanable.firstDirtyOffset, upperBoundOffset, offsetMap) + 1
     stats.indexDone()
@@ -679,7 +679,7 @@ private[log] class Cleaner(val id: Int,
 
   /**
    * Build a map of key_hash => offset for the keys in the dirty portion of the log to use in cleaning.
-   * @param log The log to use 要清理的log
+   * @param log The log to use 要清理的topic-partition的log
    * @param start The offset at which dirty messages begin 脏数据的起始偏移量
    * @param end The ending offset for the map that is being built 脏数据的结束偏移量
    * @param map The map in which to store the mappings 用来存储消息键和offset的map
@@ -690,6 +690,7 @@ private[log] class Cleaner(val id: Int,
   private[log] def buildOffsetMap(log: Log, start: Long, end: Long, map: OffsetMap): Long = {
     map.clear()
     // 获取从start到end所有的LogSegment
+    //val segments: Iterable[LogSegment] = log.logSegments(start, end)
     val dirty: mutable.Buffer[LogSegment] = log.logSegments(start, end).toBuffer
     info("Building offset map for log %s for %d segments in offset range [%d, %d).".format(log.name, dirty.size, start, end))
     
@@ -705,7 +706,7 @@ private[log] class Cleaner(val id: Int,
       // 检查topic-partiton的清理状态是否为LogCleaningAborted
       // 如果是则抛出异常
       checkDone(log.topicAndPartition)
-      // 开始清理单个segment，将消息的key和offset添加到map中
+      // 开始清理单个segment，将消息的key和offset添加到map中，最后返回已经处理到的位置
       val newOffset = buildOffsetMapForSegment(log.topicAndPartition, segment, map)
       // 如果不为-1说明处理完了这个segment,更新offset
       if (newOffset > -1L)
@@ -739,13 +740,13 @@ private[log] class Cleaner(val id: Int,
     var offset = segment.baseOffset
     // map预期大小，达到该值在增加值后就会扩容
     val maxDesiredMapSize = (map.slots * this.dupBufferLoadFactor).toInt
-    // 开始处理segment中的消息数据
+    // 开始处理Segment中的消息数据,返还Segment底层FileMessageSet的字节数
     while (position < segment.log.sizeInBytes) {
       // 再次验证topic-partition状态
       checkDone(topicAndPartition)
       // 清理readBuffer，为接下来的读segment做准备
       readBuffer.clear()
-      // 读取segment，从position位置开始读取
+      // 读取Segment，从position位置开始读取消息自己数到readBuffer中
       val messages = new ByteBufferMessageSet(segment.log.readInto(readBuffer, position))
       // 限制速率
       throttler.maybeThrottle(messages.sizeInBytes)
@@ -766,7 +767,7 @@ private[log] class Cleaner(val id: Int,
           }
         }
         // 1.message没有key
-        // 2.message有key && 已经放入了map中
+        // 2.message有key && 已经放入了map中，也就是已经处理完毕
         // 记录当前已处理消息的偏移量
         offset = entry.offset
         stats.indexMessagesRead(1)
