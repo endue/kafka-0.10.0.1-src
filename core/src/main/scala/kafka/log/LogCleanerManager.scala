@@ -88,14 +88,15 @@ private[log] class LogCleanerManager(val logDirs: Array[File], val logs: Pool[To
     * Choose the log to clean next and add it to the in-progress set. We recompute this
     * every time off the full set of logs to allow logs to be dynamically added to the pool of logs
     * the log manager maintains.
-     * 选择要清理的log，添加到inProgress集合中
+     * 过滤配置文件中配置的日志目录下所有的topic-partition对应的log，
+     * 找到脏数据最大的topic-partition,添加到inProgress集合中准备进行清理
     */
   def grabFilthiestLog(): Option[LogToClean] = {
     inLock(lock) {
       // 获取每个日志目录下记录的所有topic-partition的cleaner-offset-checkpoint,返回Map类型
       // 文件中起始记录的是下次清理的startOffset,上次清理完后的offset + 1
       val lastClean: Map[TopicAndPartition, Long] = allCleanerCheckpoints()
-      // 遍历topic-partition对应的日志目录过滤掉一些数据，将符合的topic-partiton对应的log封装成一个LogToClean
+      // 遍历日志目录过滤掉一些数据，将符合的topic-partiton对应的log封装成一个LogToClean
       // 筛选要清理的log
       val dirtyLogs: Iterable[LogToClean] = logs.filter {
         // 筛选类型为Compact
@@ -126,7 +127,7 @@ private[log] class LogCleanerManager(val logDirs: Array[File], val logs: Pool[To
           LogToClean(topicAndPartition, log, firstDirtyOffset)
       }.filter(ltc => ltc.totalBytes > 0) // skip any empty logs 最后过滤出字节数 > 0的topic-partiton对应的log的LogToClean
 
-      // 计算最脏的LogToClean其脏数据的占比
+      // 计算最脏topic-partition的log的LogToClean其脏数据的占比
       this.dirtiestLogCleanableRatio = if (!dirtyLogs.isEmpty) dirtyLogs.max.cleanableRatio else 0
       // and must meet the minimum threshold for dirty byte ratio
       // "min.cleanable.dirty.ratio" 默认0.5，过滤脏数据占比超过50%的LogToClean

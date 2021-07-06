@@ -205,7 +205,7 @@ class LogCleaner(val config: CleanerConfig,
       warn("Cannot use more than 2G of cleaner buffer space per cleaner thread, ignoring excess buffer space...")
 
     val cleaner = new Cleaner(id = threadId,// 线程ID，用于标识Cleaner
-                              // log.cleaner.dedupe.buffer.size默认128 * 1024 * 1024L、hashAlgorithm默认MD5
+                              // 4*1024*1024L、hashAlgorithm默认MD5
                               offsetMap = new SkimpyOffsetMap(memory = math.min(config.dedupeBufferSize / config.numThreads, Int.MaxValue).toInt, 
                                                               hashAlgorithm = config.hashAlgorithm),
                               // log.cleaner.io.buffer.size默认512 * 1024
@@ -258,7 +258,7 @@ class LogCleaner(val config: CleanerConfig,
         // 有要清理的
         case Some(cleanable) =>
           // there's a log, clean it
-          // 获取当前已清理的位置
+          // 获取topic-partiton上一次清理的位置
           var endOffset = cleanable.firstDirtyOffset
           try {
             // 开始清理,返回清理结束后已清理的位置
@@ -350,7 +350,7 @@ private[log] class Cleaner(val id: Int,
 
   /**
    * Clean the given log
-   *
+   * 开启清理某个topic-partiton下的日志，包含很多歌LogSegment和Index
    * @param cleanable The log to be cleaned
    *
    * @return The first offset not cleaned
