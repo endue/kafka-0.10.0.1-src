@@ -448,11 +448,11 @@ class Partition(val topic: String,// topic
       leaderReplicaIfLocal() match {
         // 是
         case Some(leaderReplica) =>
-          // 从ISR列表过滤滞后的replicas
-          val outOfSyncReplicas = getOutOfSyncReplicas(leaderReplica, replicaMaxLagTimeMs)
+          // 从ISR列表过滤滞后的replica集合
+          val outOfSyncReplicas: Set[Replica] = getOutOfSyncReplicas(leaderReplica, replicaMaxLagTimeMs)
           if(outOfSyncReplicas.size > 0) {
             // 计算新的ISR列表
-            val newInSyncReplicas = inSyncReplicas -- outOfSyncReplicas
+            val newInSyncReplicas: Set[Replica] = inSyncReplicas -- outOfSyncReplicas
             assert(newInSyncReplicas.size > 0)
             info("Shrinking ISR for partition [%s,%d] from %s to %s".format(topic, partitionId,
               inSyncReplicas.map(_.brokerId).mkString(","), newInSyncReplicas.map(_.brokerId).mkString(",")))
@@ -494,7 +494,7 @@ class Partition(val topic: String,// topic
       // 获取leader的LEO
     val leaderLogEndOffset = leaderReplica.logEndOffset
     // 获取ISR列表中除去leader副本之后的集合
-    val candidateReplicas = inSyncReplicas - leaderReplica
+    val candidateReplicas: Set[Replica] = inSyncReplicas - leaderReplica
     // 遍历candidateReplicas集合，通过条件：当前时间 - r.lastCaughtUpTimeMs > replicaMaxLagTimeMs
     // 过滤出滞后的replicas
     val laggingReplicas = candidateReplicas.filter(r => (time.milliseconds - r.lastCaughtUpTimeMs) > maxLagMs)

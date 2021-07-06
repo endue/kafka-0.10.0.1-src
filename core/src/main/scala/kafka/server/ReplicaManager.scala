@@ -100,7 +100,7 @@ object ReplicaManager {
   val IsrChangePropagationInterval = 60000L
 }
 
-// 复制管理当前broker上的所有副本
+// 负责管理当前broker上的所有副本
 // 处理：
 // LeaderAndIsr请求
 // StopReplica请求
@@ -146,10 +146,10 @@ class ReplicaManager(val config: KafkaConfig,
   private val lastIsrChangeMs = new AtomicLong(System.currentTimeMillis())
   // ISR列表最后发布时间戳
   private val lastIsrPropagationMs = new AtomicLong(System.currentTimeMillis())
-  // 延迟调度，封装了producer的回调
+  // 时间轮，封装了producer的回调
   val delayedProducePurgatory = DelayedOperationPurgatory[DelayedProduce](
     purgatoryName = "Produce", config.brokerId, config.producerPurgatoryPurgeIntervalRequests)
-  // 延时调度，封装了fetch请求
+  // 时间轮，封装了fetch请求
   val delayedFetchPurgatory = DelayedOperationPurgatory[DelayedFetch](
     purgatoryName = "Fetch", config.brokerId, config.fetchPurgatoryPurgeIntervalRequests)
   // 记录本地存储了多少leader
@@ -331,6 +331,17 @@ class ReplicaManager(val config: KafkaConfig,
     }
   }
 
+  /**
+    * 获取某个topic-partition的Partition信息,不存在时创建
+    * 创建的逻辑在初始化ReplicaManager的时候，如下代码
+    * private val allPartitions = new Pool[(String, Int), Partition](valueFactory = Some { case (t, p) =>
+    *   new Partition(t, p, time, this)
+    * })
+    *
+    * @param topic
+    * @param partitionId
+    * @return
+    */
   def getOrCreatePartition(topic: String, partitionId: Int): Partition = {
     allPartitions.getAndMaybePut((topic, partitionId))
   }
