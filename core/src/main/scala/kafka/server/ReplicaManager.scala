@@ -140,9 +140,9 @@ class ReplicaManager(val config: KafkaConfig,
   private var hwThreadInitialized = false
   this.logIdent = "[Replica Manager on Broker " + localBrokerId + "]: "
   val stateChangeLogger = KafkaController.stateChangeLogger
-  // ISR变更列表，记录某个isr发生变更的topic-partition
+  // ISR变更列表，记录isr集合发生变更的topic-partition
   private val isrChangeSet: mutable.Set[TopicAndPartition] = new mutable.HashSet[TopicAndPartition]()
-  // ISR列表最后变更时间戳
+  // ISR变更列表最后添加数据的时间戳(只有在kafka.server.ReplicaManager.recordIsrChange方法中被调用)
   private val lastIsrChangeMs = new AtomicLong(System.currentTimeMillis())
   // ISR列表最后发布时间戳
   private val lastIsrPropagationMs = new AtomicLong(System.currentTimeMillis())
@@ -203,6 +203,7 @@ class ReplicaManager(val config: KafkaConfig,
     }
   }
   /**
+    * 处理isrChangeSet集合
    * This function periodically runs to see if ISR needs to be propagated. It propagates ISR when:
    * 1. There is ISR change not propagated yet.
     *   ISR列表发生变更但还没有被广播出去

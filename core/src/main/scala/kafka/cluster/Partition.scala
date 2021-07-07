@@ -463,6 +463,7 @@ class Partition(val topic: String,// topic
               inSyncReplicas.map(_.brokerId).mkString(","), newInSyncReplicas.map(_.brokerId).mkString(",")))
             // update ISR in zk and in cache
             // 替换本地ISR列表并更新到zk：/brokers/topics/{topic}/partitions/{partitionId}/state路径下触发相关事件
+            // 触发kafka.controller.ReassignedPartitionsIsrChangeListener事件，执行分区重分配
             updateIsr(newInSyncReplicas)
             // we may need to increment high watermark since ISR could be down to 1
             replicaManager.isrShrinkRate.mark()

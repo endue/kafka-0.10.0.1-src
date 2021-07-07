@@ -29,6 +29,17 @@ object ReplicationUtils extends Logging {
 
   private val IsrChangeNotificationPrefix = "isr_change_"
 
+  /**
+    * 由定时任务maybeShrinkIsr，定时遍历当前broker上所有的topic-partition下的副本集合
+    * 如果当前broker是副本集合中的leader节点，那么查看ISR列表是否需要变更，当变更后调用该方法，将最新的ISR列表数据写入zk
+    * @param zkUtils
+    * @param topic
+    * @param partitionId
+    * @param newLeaderAndIsr
+    * @param controllerEpoch
+    * @param zkVersion
+    * @return
+    */
   def updateLeaderAndIsr(zkUtils: ZkUtils, topic: String, partitionId: Int, newLeaderAndIsr: LeaderAndIsr, controllerEpoch: Int,
     zkVersion: Int): (Boolean,Int) = {
     debug("Updated ISR for partition [%s,%d] to %s".format(topic, partitionId, newLeaderAndIsr.isr.mkString(",")))
@@ -43,7 +54,15 @@ object ReplicationUtils extends Logging {
     updatePersistentPath
   }
 
+  /**
+    * ISR列表发生变更后由定时任务maybePropagateIsrChanges，定时写入zk节点
+    * @param zkUtils
+    * @param isrChangeSet
+    */
   def propagateIsrChanges(zkUtils: ZkUtils, isrChangeSet: Set[TopicAndPartition]): Unit = {
+    // 构建并写入新的ISR列表数据
+    // val partitions = isrChanges.map(tp => Map("topic" -> tp.topic, "partition" -> tp.partition)).toArray
+    // Json.encode(Map("version" -> IsrChangeNotificationListener.version, "partitions" -> partitions))
     val isrChangeNotificationPath: String = zkUtils.createSequentialPersistentPath(
       // /isr_change_notification/isr_change_
       ZkUtils.IsrChangeNotificationPath + "/" + IsrChangeNotificationPrefix,
