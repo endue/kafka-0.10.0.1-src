@@ -1047,7 +1047,7 @@ class ReplicaManager(val config: KafkaConfig,
   // 评估分区的ISR列表，查看哪些副本可以从ISR列表中删除
   private def maybeShrinkIsr(): Unit = {
     trace("Evaluating ISR list of partitions to see which replicas can be removed from the ISR")
-    // 遍历所有的topic-partiton的replica
+    // 遍历获取当前broker上记录的所有topic-partiton的Partition
     allPartitions.values.foreach(partition => partition.maybeShrinkIsr(config.replicaLagTimeMaxMs))
   }
 

@@ -54,6 +54,7 @@ class Partition(val topic: String,// topic
   // 记录topic-partition里的副本集 key是副本ID，value是副本实例
   private val assignedReplicaMap = new Pool[Int, Replica]
   // The read lock is only required when multiple reads are executed and needs to be in a consistent manner
+  // 在处理当前分区的ISR列表时，需要加锁
   private val leaderIsrUpdateLock = new ReentrantReadWriteLock()
   // zk版本，每次ISR列表发生变更时会更新，默认0
   private var zkVersion: Int = LeaderAndIsr.initialZKVersion
@@ -138,7 +139,11 @@ class Partition(val topic: String,// topic
       Some(replica)
   }
 
-  // 如果当前broker是当前Partition对应的topic-partition的leader副本，那么就返回该leader对应的Replica实例
+  /**
+    * 如果当前broker是当前Partition对应的topic-partition的leader副本
+    * 那么就返回该leader对应的Replica实例，否则返回None
+    * @return
+    */
   def leaderReplicaIfLocal(): Option[Replica] = {
     leaderReplicaIdOpt match {
       case Some(leaderReplicaId) =>
@@ -448,7 +453,7 @@ class Partition(val topic: String,// topic
       leaderReplicaIfLocal() match {
         // 是
         case Some(leaderReplica) =>
-          // 从ISR列表过滤滞后的replica集合
+          // 从分区的ISR列表中过滤出滞后的replica集合
           val outOfSyncReplicas: Set[Replica] = getOutOfSyncReplicas(leaderReplica, replicaMaxLagTimeMs)
           if(outOfSyncReplicas.size > 0) {
             // 计算新的ISR列表
@@ -476,31 +481,37 @@ class Partition(val topic: String,// topic
       tryCompleteDelayedRequests()
   }
 
-  // 从ISR列表获取滞后的replicas
+  /**
+    * 从当前分区的ISR列表集合中获取滞后的副本实例集合
+    * @param leaderReplica 当前分区的leader副本实例
+    * @param maxLagMs 最大延迟时间，默认10000L
+    * @return
+    */
   def getOutOfSyncReplicas(leaderReplica: Replica, maxLagMs: Long): Set[Replica] = {
     /**
      * there are two cases that will be handled here -
+      * 只处理以下两种情况
      * 1. Stuck followers: If the leo of the replica hasn't been updated for maxLagMs ms,
      *                     the follower is stuck and should be removed from the ISR
-      *                     如果超过maxLagMs(10s)没有发起fetch请求，则认为follower卡主了
+      *                     如果超过maxLagMs(10s),副本的LEO还没有更新(还没有发起fetch请求),则认为follower卡主了
      * 2. Slow followers: If the replica has not read up to the leo within the last maxLagMs ms,
      *                    then the follower is lagging and should be removed from the ISR
-      *                     如果超过maxLagMs(10s)没有更新到最近的LEO，则认为follower太慢了
+      *                     如果超过maxLagMs(10s),副本没有更新到最新的LEO，则认为follower太慢了
      * Both these cases are handled by checking the lastCaughtUpTimeMs which represents
      * the last time when the replica was fully caught up. If either of the above conditions
      * is violated, that replica is considered to be out of sync
      *
      **/
-      // 获取leader的LEO
+    // 获取leader副本的LEO
     val leaderLogEndOffset = leaderReplica.logEndOffset
-    // 获取ISR列表中除去leader副本之后的集合
+    // 获取ISR列表中除去leader副本，返回候选副本集合candidateReplicas(不需要处理leader副本，它是参考对象)
     val candidateReplicas: Set[Replica] = inSyncReplicas - leaderReplica
-    // 遍历candidateReplicas集合，通过条件：当前时间 - r.lastCaughtUpTimeMs > replicaMaxLagTimeMs
-    // 过滤出滞后的replicas
-    val laggingReplicas = candidateReplicas.filter(r => (time.milliseconds - r.lastCaughtUpTimeMs) > maxLagMs)
+    // 遍历候选副本集合candidateReplicas
+    // 过滤出副本属性lastCaughtUpTimeMs距离当前时间已经超过maxLagMs的副本
+    val laggingReplicas: Set[Replica] = candidateReplicas.filter(r => (time.milliseconds - r.lastCaughtUpTimeMs) > maxLagMs)
     if(laggingReplicas.size > 0)
       debug("Lagging replicas for partition %s are %s".format(TopicAndPartition(topic, partitionId), laggingReplicas.map(_.brokerId).mkString(",")))
-    // 返回滞后的replicas
+    // 返回滞后的副本集合
     laggingReplicas
   }
 
@@ -555,20 +566,23 @@ class Partition(val topic: String,// topic
     info
   }
 
-  // 更新ISR列表
+  /**
+    * 更新当前分区的ISR列表集合
+    * @param newIsr
+    */
   private def updateIsr(newIsr: Set[Replica]) {
     val newLeaderAndIsr = new LeaderAndIsr(localBrokerId, leaderEpoch, newIsr.map(r => r.brokerId).toList, zkVersion)
     // 更新zk上的节点 ：/brokers/topics/{topic}/partitions/{partitionId}/state
     // 触发kafka.controller.ReassignedPartitionsIsrChangeListener事件，执行分区重分配
     val (updateSucceeded,newVersion) = ReplicationUtils.updateLeaderAndIsr(zkUtils, topic, partitionId,
       newLeaderAndIsr, controllerEpoch, zkVersion)
-
+    // 更新成功
     if(updateSucceeded) {
-      // 记录到ReplicaManager的isrChangeSet集合中
+      // 将变更了ISR的topic-partition记录到ReplicaManager的isrChangeSet集合中
       replicaManager.recordIsrChange(new TopicAndPartition(topic, partitionId))
-      // 更新ISR列表
+      // 更新当前分区ISR列表
       inSyncReplicas = newIsr
-      // 更新zkVersion
+      // 更新当前分区ISR列表数据在zk上的Version
       zkVersion = newVersion
       trace("ISR updated to [%s] and zkVersion updated to [%d]".format(newIsr.mkString(","), zkVersion))
     } else {
