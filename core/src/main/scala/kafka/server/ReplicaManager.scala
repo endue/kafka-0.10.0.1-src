@@ -850,7 +850,7 @@ class ReplicaManager(val config: KafkaConfig,
       stateChangeLogger.trace(("Broker %d handling LeaderAndIsr request correlationId %d from controller %d epoch %d " +
         "starting the become-leader transition for partition %s")
         .format(localBrokerId, correlationId, controllerId, epoch, TopicAndPartition(state._1.topic, state._1.partitionId))))
-    // 封装响应
+    // 预先封装好各个topic-partition的响应
     for (partition <- partitionState.keys)
       responseMap.put(new TopicPartition(partition.topic, partition.partitionId), Errors.NONE.code)
     // 记录leader副本发生变化的Partition
@@ -858,7 +858,6 @@ class ReplicaManager(val config: KafkaConfig,
 
     try {
       // First stop fetchers for all the partitions
-      // 遍历partitionState获取所有的topic-partition
       // 从当前broker的fetcherThreadMap中删除掉对应当前topic-partition的replicaFetcher线程
       // 因为当前broker是这个topic-partition的leader了，不再需要fetch
       replicaFetcherManager.removeFetcherForPartitions(partitionState.keySet.map(new TopicAndPartition(_)))
@@ -867,7 +866,7 @@ class ReplicaManager(val config: KafkaConfig,
       partitionState.foreach{ case (partition, partitionStateInfo) =>
         // 调用partition.makeLeader()
         // 将当前broker上对应topic-partition分区的Replica设置为leader副本
-        // 如果之前的leader不是当前broker那么返回true
+        // 如果之前的leader不是当前broker那么返回true将其加入到partitionsToMakeLeaders集合中
         if (partition.makeLeader(controllerId, partitionStateInfo, correlationId))
           partitionsToMakeLeaders += partition
         else

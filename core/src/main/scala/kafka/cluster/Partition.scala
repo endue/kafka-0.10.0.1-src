@@ -36,6 +36,8 @@ import scala.collection.JavaConverters._
 import com.yammer.metrics.core.Gauge
 import org.apache.kafka.common.requests.PartitionState
 
+import scala.collection.mutable
+
 /**
  * Data structure that represents a topic partition. The leader maintains the AR, ISR, CUR, RAR
   * 表示topic partition的结构，leader节点用来维护AR, ISR, CUR, RAR
@@ -98,29 +100,26 @@ class Partition(val topic: String,// topic
 
   // 获取或者创建Replica实例
   def getOrCreateReplica(replicaId: Int = localBrokerId): Replica = {
-    // 从assignedReplicaMap列表获取Replica
+    // 从assignedReplicaMap列表获取对应的Replica实例信息
     val replicaOpt = getReplica(replicaId)
     replicaOpt match {
         // 有就返回
       case Some(replica) => replica
       case None =>
-        // 如果参数replicaId记录的就是当前broker
-        // 也就是说当前broker是该topic-partition的一个Replica
+        // 如果参数replicaId等于当前brokerId并
         if (isReplicaLocal(replicaId)) {
-          // 读取replication-offset-checkpoint文件中记录的hw的值
-          val config = LogConfig.fromProps(logManager.defaultConfig.originals,
-                                           AdminUtils.fetchEntityConfig(zkUtils, ConfigType.Topic, topic))
+          // 获取replication-offset-checkpoint文件的OffsetCheckpoint实例信息
+          val config = LogConfig.fromProps(logManager.defaultConfig.originals, AdminUtils.fetchEntityConfig(zkUtils, ConfigType.Topic, topic))
           val log = logManager.createLog(TopicAndPartition(topic, partitionId), config)
-          val checkpoint = replicaManager.highWatermarkCheckpoints(log.dir.getParentFile.getAbsolutePath)
+          val checkpoint: OffsetCheckpoint = replicaManager.highWatermarkCheckpoints(log.dir.getParentFile.getAbsolutePath)
           val offsetMap = checkpoint.read
           if (!offsetMap.contains(TopicAndPartition(topic, partitionId)))
             info("No checkpointed highwatermark is found for partition [%s,%d]".format(topic, partitionId))
-          // 获取hw
+          // 获取当前broker上记录的该topic-partition的hw
           val offset = offsetMap.getOrElse(TopicAndPartition(topic, partitionId), 0L).min(log.logEndOffset)
           val localReplica = new Replica(replicaId, this, time, offset, Some(log))
           addReplicaIfNotExists(localReplica)
-          // 如果参数replicaId记录的不是当前broker
-          // 也就是说replicaId时远程的一个副本
+          // 如果参数replicaId记录的不是当前broker，也就是说replicaId是远程的一个副本
         } else {
           // 创建一个Replica并添加到assignedReplicaMap中，这里HW置为0，LEO置为-1
           val remoteReplica = new Replica(replicaId, this, time)
@@ -198,7 +197,7 @@ class Partition(val topic: String,// topic
   def makeLeader(controllerId: Int, partitionStateInfo: PartitionState, correlationId: Int): Boolean = {
     val (leaderHWIncremented, isNewLeader) = inWriteLock(leaderIsrUpdateLock) {
       // 获取topic-partition新的ar副本集合
-      val allReplicas = partitionStateInfo.replicas.asScala.map(_.toInt)
+      val allReplicas: mutable.Set[Int] = partitionStateInfo.replicas.asScala.map(_.toInt)
       // record the epoch of the controller that made the leadership decision. This is useful while updating the isr
       // to maintain the decision maker controller's epoch in the zookeeper path
       // 更新controller epoch
@@ -215,7 +214,7 @@ class Partition(val topic: String,// topic
       // 将当前AR列表中不在存在的副本删除
       // 如，旧AR{1,2,3},新AR{2,3,4}，那么这个操作就是剔除1
       (assignedReplicas().map(_.brokerId) -- allReplicas).foreach(removeReplica(_))
-      // 更新isr和leaderEpoch
+      // 更新isr和leaderEpoch和zkVersion
       inSyncReplicas = newInSyncReplicas
       leaderEpoch = partitionStateInfo.leaderEpoch
       zkVersion = partitionStateInfo.zkVersion
@@ -240,7 +239,7 @@ class Partition(val topic: String,// topic
         // 当本broker成为leader后，其记录的HW和LEO，可能只是70,80，这样就丢失了70--100的日志
         leaderReplica.convertHWToLocalOffsetMetadata()
         // reset log end offset for remote replicas
-        // 重置当前broker上记录的对应远程broekr的Replica的LEO，这里直接清空了远程的LEO
+        // 重置当前broker上记录的对应远程broker的Replica的LEO，这里直接清空了远程的LEO
         assignedReplicas.filter(_.brokerId != localBrokerId).foreach(_.updateLogReadResult(LogReadResult.UnknownLogReadResult))
       }
       // 尝试更新HW

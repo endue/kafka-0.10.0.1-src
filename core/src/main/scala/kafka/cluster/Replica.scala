@@ -30,9 +30,11 @@ class Replica(val brokerId: Int,
               initialHighWatermarkValue: Long = 0L,
               val log: Option[Log] = None) extends Logging {
   // the high watermark offset value, in non-leader replicas only its message offsets are kept
+  // 初始值(initialHighWatermarkValue,-1,-1)
   @volatile private[this] var highWatermarkMetadata: LogOffsetMetadata = new LogOffsetMetadata(initialHighWatermarkValue)
   // the log end offset value, kept in all replicas;
   // for local replica it is the log's end offset, for remote replicas its value is only updated by follower fetch
+  // 初始值(-1,0,0)
   @volatile private[this] var logEndOffsetMetadata: LogOffsetMetadata = LogOffsetMetadata.UnknownOffsetMetadata
 
   val topic: String = partition.topic
@@ -51,8 +53,19 @@ class Replica(val brokerId: Int,
 
   def lastCaughtUpTimeMs = lastCaughtUpTimeMsUnderlying.get()
 
+  /**
+    *kafka.cluster.Partition#makeLeader默认值为
+    * object LogReadResult {
+    * val UnknownLogReadResult = LogReadResult(FetchDataInfo(LogOffsetMetadata.UnknownOffsetMetadata,
+    *                                                          MessageSet.Empty),
+    *                                                          -1L,
+    *                                                          -1,
+    *                                                          false)
+    * }
+    * @param logReadResult
+    */
   def updateLogReadResult(logReadResult : LogReadResult) {
-    // 更新副本的leo
+    // 更新副本的leo,LogOffsetMetadata
     logEndOffset = logReadResult.info.fetchOffsetMetadata
 
     /* If the request read up to the log end offset snapshot when the read was initiated,
