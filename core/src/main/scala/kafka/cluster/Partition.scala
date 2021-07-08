@@ -108,15 +108,17 @@ class Partition(val topic: String,// topic
       case None =>
         // 如果参数replicaId等于当前brokerId并
         if (isReplicaLocal(replicaId)) {
-          // 获取replication-offset-checkpoint文件的OffsetCheckpoint实例信息
+          // 获取该topic-partition对应的Log目录
           val config = LogConfig.fromProps(logManager.defaultConfig.originals, AdminUtils.fetchEntityConfig(zkUtils, ConfigType.Topic, topic))
           val log = logManager.createLog(TopicAndPartition(topic, partitionId), config)
+          // 获取replication-offset-checkpoint文件的OffsetCheckpoint实例信息
           val checkpoint: OffsetCheckpoint = replicaManager.highWatermarkCheckpoints(log.dir.getParentFile.getAbsolutePath)
           val offsetMap = checkpoint.read
           if (!offsetMap.contains(TopicAndPartition(topic, partitionId)))
             info("No checkpointed highwatermark is found for partition [%s,%d]".format(topic, partitionId))
-          // 获取当前broker上记录的该topic-partition的hw
+          // 从replication-offset-checkpoint文件中获取当前broker上记录的该topic-partition的hw
           val offset = offsetMap.getOrElse(TopicAndPartition(topic, partitionId), 0L).min(log.logEndOffset)
+          // 构建Replica副本实例
           val localReplica = new Replica(replicaId, this, time, offset, Some(log))
           addReplicaIfNotExists(localReplica)
           // 如果参数replicaId记录的不是当前broker，也就是说replicaId是远程的一个副本

@@ -1083,16 +1083,16 @@ class ReplicaManager(val config: KafkaConfig,
   // Flushes the highwatermark value for all partitions to the highwatermark file
   // 将各个分区的hw写入replication-offset-checkpoint文件
   def checkpointHighWatermarks() {
-    // 获取所有在当前broker上的分区
-    val replicas = allPartitions.values.flatMap(_.getReplica(config.brokerId))
+    // 获取所有在当前broker上的副本
+    val replicas: Iterable[Replica] = allPartitions.values.flatMap(_.getReplica(config.brokerId))
     // 过滤出log对象不为空的副本，也就是leader，然后在根据Log目录进行分组
-    val replicasByDir = replicas.filter(_.log.isDefined).groupBy(_.log.get.dir.getParentFile.getAbsolutePath)
+    val replicasByDir: Predef.Map[String, Iterable[Replica]] = replicas.filter(_.log.isDefined).groupBy(_.log.get.dir.getParentFile.getAbsolutePath)
     // 遍历每一个路径
     for ((dir, reps) <- replicasByDir) {
       // hw
-      val hwms = reps.map(r => new TopicAndPartition(r) -> r.highWatermark.messageOffset).toMap
+      val hwms: Predef.Map[TopicAndPartition, Long] = reps.map(r => new TopicAndPartition(r) -> r.highWatermark.messageOffset).toMap
       try {
-        // 写入文件
+        // 写入"replication-offset-checkpoint"文件
         highWatermarkCheckpoints(dir).write(hwms)
       } catch {
         case e: IOException =>
