@@ -122,8 +122,8 @@ class KafkaApis(val requestChannel: RequestChannel,
     // ensureTopicExists is only for client facing requests
     // We can't have the ensureTopicExists check here since the controller sends it as an advisory to all brokers so they
     // stop serving data to clients for the topic being deleted
-    val correlationId = request.header.correlationId
-    val leaderAndIsrRequest = request.body.asInstanceOf[LeaderAndIsrRequest]
+    val correlationId: Int = request.header.correlationId
+    val leaderAndIsrRequest: LeaderAndIsrRequest = request.body.asInstanceOf[LeaderAndIsrRequest]
 
     try {
       // 回调方法

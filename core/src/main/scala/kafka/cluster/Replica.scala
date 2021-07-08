@@ -35,8 +35,8 @@ class Replica(val brokerId: Int,
   // for local replica it is the log's end offset, for remote replicas its value is only updated by follower fetch
   @volatile private[this] var logEndOffsetMetadata: LogOffsetMetadata = LogOffsetMetadata.UnknownOffsetMetadata
 
-  val topic = partition.topic
-  val partitionId = partition.partitionId
+  val topic: String = partition.topic
+  val partitionId: Int = partition.partitionId
 
   def isLocal: Boolean = {
     log match {

@@ -333,15 +333,23 @@ class ControllerBrokerRequestBatch(controller: KafkaController) extends  Logging
     updateMetadataRequestMap.clear()
   }
 
-  // 添加LeaderAndIsrRequest
+  /**
+    * 添加LeaderAndIsrRequest
+    * @param brokerIds 通常是副本id，这里也是要请求的目标broker
+    * @param topic topic
+    * @param partition 分区
+    * @param leaderIsrAndControllerEpoch 包含Leader ISR LeaderEpoch ControllerEpoch信息
+    * @param replicas 分区副本集合
+    * @param callback
+    */
   def addLeaderAndIsrRequestForBrokers(brokerIds: Seq[Int], topic: String, partition: Int,
                                        leaderIsrAndControllerEpoch: LeaderIsrAndControllerEpoch,
                                        replicas: Seq[Int], callback: AbstractRequestResponse => Unit = null) {
     val topicPartition = new TopicPartition(topic, partition)
-    // 遍历要接收请求的每一个broker
-    // 获取其对应的Map[TopicPartition, PartitionStateInfo]集合，然后封装一个PartitionStateInfo请求进入
+    // 获取要接收LeaderAndIsr请求的每一个broker的缓存集合
     brokerIds.filter(_ >= 0).foreach { brokerId =>
-      val result = leaderAndIsrRequestMap.getOrElseUpdate(brokerId, mutable.Map.empty)
+      val result: mutable.Map[TopicPartition, PartitionStateInfo] = leaderAndIsrRequestMap.getOrElseUpdate(brokerId, mutable.Map.empty)
+      // 将新的请求封装一个PartitionStateInfo添加到对应的集合中
       result.put(topicPartition, PartitionStateInfo(leaderIsrAndControllerEpoch, replicas.toSet))
     }
     // 添加UpdateMetadataRequest
@@ -438,13 +446,13 @@ class ControllerBrokerRequestBatch(controller: KafkaController) extends  Logging
                                                                    state.leaderIsrAndControllerEpoch, broker,
                                                                    topicPartition.topic, topicPartition.partition))
         }
-        // 获取leaderAndIsrRequestMap集合中所有topic-partition的leader集合
+        // 获取发送到当前broker的所有topic-partition对应的PartitionStateInfo实例中的leader副本ID集合
         val leaderIds = partitionStateInfos.map(_._2.leaderIsrAndControllerEpoch.leaderAndIsr.leader).toSet
 
         val leaders = controllerContext.liveOrShuttingDownBrokers.filter(b => leaderIds.contains(b.id)).map {
           _.getNode(controller.config.interBrokerSecurityProtocol)
         }
-        val partitionStates = partitionStateInfos.map { case (topicPartition, partitionStateInfo) =>
+        val partitionStates: mutable.Map[TopicPartition, requests.PartitionState] = partitionStateInfos.map { case (topicPartition, partitionStateInfo) =>
           val LeaderIsrAndControllerEpoch(leaderIsr, controllerEpoch) = partitionStateInfo.leaderIsrAndControllerEpoch
           val partitionState = new requests.PartitionState(controllerEpoch, leaderIsr.leader,
             leaderIsr.leaderEpoch, leaderIsr.isr.map(Integer.valueOf).asJava, leaderIsr.zkVersion,
