@@ -56,13 +56,13 @@ class Partition(val topic: String,// topic
   // The read lock is only required when multiple reads are executed and needs to be in a consistent manner
   // 在处理当前分区的ISR列表时，需要加锁
   private val leaderIsrUpdateLock = new ReentrantReadWriteLock()
-  // zk版本，每次ISR列表发生变更时会更新，默认0
+  // zk版本，每次ISR列表发生变更时会更新，默认0，在updateIsr()方法中被更新
   private var zkVersion: Int = LeaderAndIsr.initialZKVersion
   // topic-partition副本集中的leader副本的epoch，当leader发生变更后会更新，默认-1
   @volatile private var leaderEpoch: Int = LeaderAndIsr.initialLeaderEpoch - 1
   // 记录topic-partition的leader副本ID
   @volatile var leaderReplicaIdOpt: Option[Int] = None
-  // ISR列表(如果是follower该集合为空)
+  // ISR列表(如果是follower该集合为空)，在updateIsr()方法中被更新
   @volatile var inSyncReplicas: Set[Replica] = Set.empty[Replica]
 
   /* Epoch of the controller that last changed the leader. This needs to be initialized correctly upon broker startup.
@@ -140,7 +140,7 @@ class Partition(val topic: String,// topic
   }
 
   /**
-    * 如果当前broker是当前Partition对应的topic-partition的leader副本
+    * 如果当前broker是当前Partition对应的topic-partition副本集合的leader副本
     * 那么就返回该leader对应的Replica实例，否则返回None
     * @return
     */
@@ -420,10 +420,10 @@ class Partition(val topic: String,// topic
   private def maybeIncrementLeaderHW(leaderReplica: Replica): Boolean = {
     // 获取ISR列表中所有副本的LEO
     val allLogEndOffsets = inSyncReplicas.map(_.logEndOffset)
-    // 计算最小的LEO，就是新的HW
-    val newHighWatermark:LogOffsetMetadata = allLogEndOffsets.min(new LogOffsetMetadata.OffsetOrdering)
-    // 获取旧的HW
-    val oldHighWatermark:LogOffsetMetadata = leaderReplica.highWatermark
+    // 计算最小的LEO(可能会成为新的HW)
+    val newHighWatermark = allLogEndOffsets.min(new LogOffsetMetadata.OffsetOrdering)
+    // 获取leader副本上的HW(当前的HW)
+    val oldHighWatermark = leaderReplica.highWatermark
     // 判断然后更新leader副本的HW
     if (oldHighWatermark.messageOffset < newHighWatermark.messageOffset || oldHighWatermark.onOlderSegment(newHighWatermark)) {
       leaderReplica.highWatermark = newHighWatermark
