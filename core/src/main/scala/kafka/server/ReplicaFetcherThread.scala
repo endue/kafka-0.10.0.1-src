@@ -20,20 +20,20 @@ package kafka.server
 import java.net.SocketTimeoutException
 
 import kafka.admin.AdminUtils
-import kafka.cluster.BrokerEndPoint
+import kafka.cluster.{BrokerEndPoint, Replica}
 import kafka.log.LogConfig
 import kafka.message.ByteBufferMessageSet
 import kafka.api.{KAFKA_0_10_0_IV0, KAFKA_0_9_0}
 import kafka.common.{KafkaStorageException, TopicAndPartition}
 import ReplicaFetcherThread._
-import org.apache.kafka.clients.{ManualMetadataUpdater, NetworkClient, ClientRequest, ClientResponse}
-import org.apache.kafka.common.network.{LoginType, Selectable, ChannelBuilders, NetworkReceive, Selector, Mode}
-import org.apache.kafka.common.requests.{ListOffsetResponse, FetchResponse, RequestSend, AbstractRequest, ListOffsetRequest}
+import org.apache.kafka.clients.{ClientRequest, ClientResponse, ManualMetadataUpdater, NetworkClient}
+import org.apache.kafka.common.network.{ChannelBuilders, LoginType, Mode, NetworkReceive, Selectable, Selector}
+import org.apache.kafka.common.requests.{AbstractRequest, FetchResponse, ListOffsetRequest, ListOffsetResponse, RequestSend}
 import org.apache.kafka.common.requests.{FetchRequest => JFetchRequest}
 import org.apache.kafka.common.security.ssl.SslFactory
 import org.apache.kafka.common.{Node, TopicPartition}
 import org.apache.kafka.common.metrics.Metrics
-import org.apache.kafka.common.protocol.{Errors, ApiKeys}
+import org.apache.kafka.common.protocol.{ApiKeys, Errors}
 import org.apache.kafka.common.utils.Time
 
 import scala.collection.{JavaConverters, Map, mutable}
@@ -167,7 +167,7 @@ class ReplicaFetcherThread(name: String,
    */
   def handleOffsetOutOfRange(topicAndPartition: TopicAndPartition): Long = {
     // 获取对应topic-partition的副本
-    val replica = replicaMgr.getReplica(topicAndPartition.topic, topicAndPartition.partition).get
+    val replica: Replica = replicaMgr.getReplica(topicAndPartition.topic, topicAndPartition.partition).get
 
     /**
      * Unclean leader election: A follower goes down, in the meanwhile the leader keeps appending messages. The follower comes back up

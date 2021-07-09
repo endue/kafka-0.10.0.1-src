@@ -202,6 +202,8 @@ abstract class AbstractFetcherThread(name: String,
   def addPartitions(partitionAndOffsets: Map[TopicAndPartition, Long]) {
     partitionMapLock.lockInterruptibly()
     try {
+      // 记录从各个topic-partition拉取消息的位置到partitionMap中，如果offset < 0说明当前Broker之前不是该topic-partition的副本
+      // 现在才是，由于没有日志offset为-1，所以调用handleOffsetOutOfRange()方法从Leader副本拉取消息来判断需要从哪个offset拉取消息
       for ((topicAndPartition, offset) <- partitionAndOffsets) {
         // If the partitionMap already has the topic/partition, then do not update the map with the old offset
         if (!partitionMap.contains(topicAndPartition))

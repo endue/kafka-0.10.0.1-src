@@ -75,16 +75,11 @@ abstract class AbstractFetcherManager(protected val name: String, clientId: Stri
   // 创建分区的AbstractFetcherThread线程
   def addFetcherForPartitions(partitionAndOffsets: Map[TopicAndPartition, BrokerAndInitialOffset]) {
     mapLock synchronized {
-      // 按照topic-partition进行分组，创建对应的BrokerAndFetcherId
-      // 返回类型为[BrokerAndFetcherId,Map[TopicAndPartition, BrokerAndInitialOffset]]
-      val partitionsPerFetcher = partitionAndOffsets.groupBy{ case(topicAndPartition, brokerAndInitialOffset) =>
-        // 计算topic-partition的fetcherId
-        BrokerAndFetcherId(brokerAndInitialOffset.broker, getFetcherId(topicAndPartition.topic, topicAndPartition.partition))}
-      // 遍历partitionsPerFetcher
+      val partitionsPerFetcher: Predef.Map[BrokerAndFetcherId, Map[TopicAndPartition, BrokerAndInitialOffset]] =
+        partitionAndOffsets.groupBy{ case(topicAndPartition, brokerAndInitialOffset) => BrokerAndFetcherId(brokerAndInitialOffset.broker, getFetcherId(topicAndPartition.topic, topicAndPartition.partition))}
+      // 获取对应topic-partition的fetcherThread没有就创建并启动
       for ((brokerAndFetcherId, partitionAndOffsets) <- partitionsPerFetcher) {
         var fetcherThread: AbstractFetcherThread = null
-        // 创建对应topic-partition的AbstractFetcherThread并记录到fetcherThreadMap
-        // 同时启动该线程
         fetcherThreadMap.get(brokerAndFetcherId) match {
           case Some(f) => fetcherThread = f
           case None =>
@@ -92,7 +87,8 @@ abstract class AbstractFetcherManager(protected val name: String, clientId: Stri
             fetcherThreadMap.put(brokerAndFetcherId, fetcherThread)
             fetcherThread.start
         }
-        // 拿到对应topic-partition的AbstractFetcherThread，然后记录topic-partition的PartitionFetchState
+        // 获取对应topic-partition的fetcherThread，然后将该topic-partition的PartitionFetchState记录到fetcherThread中
+        // PartitionFetchState中记录了下一次fetch消息的起始位置
         fetcherThreadMap(brokerAndFetcherId).addPartitions(partitionAndOffsets.map { case (topicAndPartition, brokerAndInitOffset) =>
           topicAndPartition -> brokerAndInitOffset.initOffset
         })

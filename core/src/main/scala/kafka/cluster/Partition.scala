@@ -238,7 +238,7 @@ class Partition(val topic: String,// topic
         // 为新的leader replica构建high watermark metadata
         // 设置为当前broker上记录的对应topic-partition的Log日志的HW
         // 这里可能会造成日志丢失,如，之前的leader是其他broker并且上面的HW和LEO分别是80,100
-        // 当本broker成为leader后，其记录的HW和LEO，可能只是70,80，这样就丢失了70--100的日志
+        // 当本broker成为leader后，其记录的HW和LEO，可能只是70,80，这样就丢失了80-100的日志
         leaderReplica.convertHWToLocalOffsetMetadata()
         // reset log end offset for remote replicas
         // 重置当前broker上记录的对应远程broker的Replica的LEO，这里直接清空了远程的LEO
