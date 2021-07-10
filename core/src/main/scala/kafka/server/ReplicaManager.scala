@@ -1009,7 +1009,7 @@ class ReplicaManager(val config: KafkaConfig,
       else {
         // we do not need to check if the leader exists again since this has been done at the beginning of this process
         // 遍历Leader副本发生变更的topic-partition
-        val partitionsToMakeFollowerWithLeaderAndOffset = partitionsToMakeFollower.map(partition =>
+        val partitionsToMakeFollowerWithLeaderAndOffset: Predef.Map[TopicAndPartition, BrokerAndInitialOffset] = partitionsToMakeFollower.map(partition =>
           new TopicAndPartition(partition) -> BrokerAndInitialOffset(
             // 获取该topic-partition的Broker信息，封装为一个BrokerEndPoint
             metadataCache.getAliveBrokers.find(_.id == partition.leaderReplicaIdOpt.get).get.getBrokerEndPoint(config.interBrokerSecurityProtocol),

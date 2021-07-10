@@ -199,6 +199,11 @@ abstract class AbstractFetcherThread(name: String,
     }
   }
 
+  /**
+    * 添加对某些topic-partition的fetch操作
+    * 调用点{@link kafka.server.AbstractFetcherManager#addFetcherForPartitions(scala.collection.Map)}
+    * @param partitionAndOffsets
+    */
   def addPartitions(partitionAndOffsets: Map[TopicAndPartition, Long]) {
     partitionMapLock.lockInterruptibly()
     try {
@@ -231,6 +236,11 @@ abstract class AbstractFetcherThread(name: String,
     } finally partitionMapLock.unlock()
   }
 
+  /**
+    * 删除对某些topic-partition的fetch操作
+    * 调用点{@link kafka.server.AbstractFetcherManager#removeFetcherForPartitions(scala.collection.Set)}
+    * @param topicAndPartitions
+    */
   def removePartitions(topicAndPartitions: Set[TopicAndPartition]) {
     partitionMapLock.lockInterruptibly()
     try {
