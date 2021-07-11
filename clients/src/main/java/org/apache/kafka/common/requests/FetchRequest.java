@@ -43,7 +43,7 @@ public class FetchRequest extends AbstractRequest {
     private static final String PARTITION_KEY_NAME = "partition";
     private static final String FETCH_OFFSET_KEY_NAME = "fetch_offset";
     private static final String MAX_BYTES_KEY_NAME = "max_bytes";
-    // 拉取日志消息的副本所在brokerID
+    // 创建该FetchRequest的副本所在brokerId
     private final int replicaId;
     // 最大等待时间
     private final int maxWait;
