@@ -560,14 +560,17 @@ class KafkaApis(val requestChannel: RequestChannel,
         // 获取偏移量
         val offsets = {
           // 拉取偏移量
+          // 如果是follower副本发生过来的请求，参考kafka.server.ReplicaFetcherThread.handleOffsetOutOfRange
+          // partitionData.timestamp分为ListOffsetRequest.LATEST_TIMESTAMP和ListOffsetRequest.EARLIEST_TIMESTAMP
+          // partitionData.maxNumOffsets为1
           val allOffsets = fetchOffsets(replicaManager.logManager,
                                         topicPartition,
                                         partitionData.timestamp,
                                         partitionData.maxNumOffsets)// kafkaConusmer设置为1
-          // 如果不是kafkaConsumer，那么返回所有偏移量的数据
-          // kafkaConsumer在发送请求时replicaId写死为-1，参考org.apache.kafka.clients.consumer.internals.Fetcher.sendListOffsetRequest
+          // 从follower副本发送过来的请求
           if (offsetRequest.replicaId != ListOffsetRequest.CONSUMER_REPLICA_ID) {
             allOffsets
+          // kafkaConsumer在发送请求时replicaId写死为-1，参考org.apache.kafka.clients.consumer.internals.Fetcher.sendListOffsetRequest
           } else {
             // 获取HW
             val hw = localReplica.highWatermark.messageOffset
@@ -577,6 +580,7 @@ class KafkaApis(val requestChannel: RequestChannel,
               allOffsets
           }
         }
+        // 返回响应
         (topicPartition, new ListOffsetResponse.PartitionData(Errors.NONE.code, offsets.map(new JLong(_)).asJava))
       } catch {
         // NOTE: UnknownTopicOrPartitionException and NotLeaderForPartitionException are special cased since these error messages
@@ -612,13 +616,12 @@ class KafkaApis(val requestChannel: RequestChannel,
     * @return
     */
   def fetchOffsets(logManager: LogManager, topicPartition: TopicPartition, timestamp: Long, maxNumOffsets: Int): Seq[Long] = {
-    // 查找对应topic-partition的Log对象
+    // 查找对应topic-partition的Log对象(有了Log对象就有了该topic-partition写日志的文件)
     logManager.getLog(TopicAndPartition(topicPartition.topic, topicPartition.partition)) match {
       case Some(log) =>
-        // 如果存在，那么继续后续处理
         fetchOffsetsBefore(log, timestamp, maxNumOffsets)
       case None =>
-        // 如果不存在，判断timestamp的类型，如果是如下两种，那么返回0，否则返回Nil
+        // 如果不存在，根据timestamp的类型返回不同值
         if (timestamp == ListOffsetRequest.LATEST_TIMESTAMP || timestamp == ListOffsetRequest.EARLIEST_TIMESTAMP)
           Seq(0L)
         else
@@ -627,12 +630,11 @@ class KafkaApis(val requestChannel: RequestChannel,
   }
 
   private[server] def fetchOffsetsBefore(log: Log, timestamp: Long, maxNumOffsets: Int): Seq[Long] = {
-    // 获取所有的LogSegment
+    // 获取Log下所有LogSegment段
     val segsArray = log.logSegments.toArray
     // 初始化offsetTimeArray长度,用来记录LogSegment的baseOffset和lastModified
     var offsetTimeArray: Array[(Long, Long)] = null
-    // 最后一条LogSegment很可能此时是activeSegment
-    // 所以如果activeSegment有数据就包含在数组内，否则不处理
+    // 最新的LogSegment是否被写入了数据，
     val lastSegmentHasSize = segsArray.last.size > 0
     if (lastSegmentHasSize)
       offsetTimeArray = new Array[(Long, Long)](segsArray.length + 1)
@@ -646,16 +648,14 @@ class KafkaApis(val requestChannel: RequestChannel,
       offsetTimeArray(segsArray.length) = (log.logEndOffset, SystemTime.milliseconds)
 
     var startIndex = -1
-    // 判断请求的类型
     timestamp match {
       case ListOffsetRequest.LATEST_TIMESTAMP =>
-        // 返回最后一个LogSegment的数组下标
+        // 返回最后一个LogSegment的log.logEndOffset
         startIndex = offsetTimeArray.length - 1
       case ListOffsetRequest.EARLIEST_TIMESTAMP =>
-        // 返回第一个LogSegment的数组下标
+        // 返回第一个LogSegment的baseOffset
         startIndex = 0
-      // 如果没找到继续遍历，直到offsetTimeArray中存储的时间小于参数timestamp
-      // 注意查找的方式为倒叙
+      // 如果没找到从后向前遍历，直到offsetTimeArray中存储的时间小于等于参数timestamp
       case _ =>
         var isFound = false
         debug("Offset time array = " + offsetTimeArray.foreach(o => "%d, %d".format(o._1, o._2)))
@@ -667,11 +667,10 @@ class KafkaApis(val requestChannel: RequestChannel,
             startIndex -= 1
         }
     }
-    // 由于下标从0开始，所以在找到startIndex后
-    // 与maxNumOffsets比较大小的话，需要startIndex + 1
+    // 计算返回几个offset
     val retSize = maxNumOffsets.min(startIndex + 1)
     val ret = new Array[Long](retSize)
-    // 返回offsetTimeArray数组中下标从retSize-1到0的所有LogSegment的offset
+    // 返回startIndex以及之前的所有Segment的baseOffset或者
     for (j <- 0 until retSize) {
       ret(j) = offsetTimeArray(startIndex)._1
       startIndex -= 1

@@ -198,7 +198,7 @@ class ReplicaFetcherThread(name: String,
      * There is a potential for a mismatch between the logs of the two replicas here. We don't fix this mismatch as of now.
      * 由于某种原因导致ISR列表外的副本被选为了Leader，之后旧Leader的LEO会出现大于新Leader的LEO的情况
      */
-    // 获取Leader的LEO
+    // 获取Leader副本上该topic-partition日志目录下最后一个LogSegment(如果存在activeSegment那么就是它的LEO，否则就是最后一个LogSegment的base Offset)的LEO
     val leaderEndOffset: Long = earliestOrLatestOffset(topicAndPartition, ListOffsetRequest.LATEST_TIMESTAMP,
       brokerConfig.brokerId)
     // Leader的LEO小于当前follower副本的LEO
@@ -251,7 +251,7 @@ class ReplicaFetcherThread(name: String,
        * and the current leader's log start offset.
        *
        */
-        //获取Leader的start offset
+        //获取Leader副本上该topic-partition日志目录下第一个LogSegment的base offset
       val leaderStartOffset: Long = earliestOrLatestOffset(topicAndPartition, ListOffsetRequest.EARLIEST_TIMESTAMP,
         brokerConfig.brokerId)
       warn("Replica %d for partition %s reset its fetch offset from %d to current leader %d's start offset %d"
