@@ -625,9 +625,9 @@ class Log(val dir: File,// 某个topic-partion对应的日志文件所在磁盘�
   /**
    * Read messages from the log.
    *
-   * @param startOffset The offset to begin reading at
-   * @param maxLength The maximum number of bytes to read
-   * @param maxOffset The offset to read up to, exclusive. (i.e. this offset NOT included in the resulting message set)
+   * @param startOffset The offset to begin reading at 起始offset
+   * @param maxLength The maximum number of bytes to read 读取最大字节数
+   * @param maxOffset The offset to read up to, exclusive. (i.e. this offset NOT included in the resulting message set) 读取最大offset
    *
    * @throws OffsetOutOfRangeException If startOffset is beyond the log end offset or before the base offset of the first segment.
    * @return The fetch data information including fetch starting offset metadata and messages read.
@@ -638,28 +638,26 @@ class Log(val dir: File,// 某个topic-partion对应的日志文件所在磁盘�
 
     // Because we don't use lock for reading, the synchronization is a little bit tricky.
     // We create the local variables to avoid race conditions with updates to the log.
-    // 获取当前LogOffsetMetadata对象
+    // 获取Log的LEO，也就是下一条消息的offset
     val currentNextOffsetMetadata: LogOffsetMetadata = nextOffsetMetadata
-    // 获取当前的LEO
     val next = currentNextOffsetMetadata.messageOffset
-    // 要读的startOffset = next(LEO)，无数据可读
+    // 要读的位置startOffset = LEO无数据可读，返回空
     if(startOffset == next)
       return FetchDataInfo(currentNextOffsetMetadata, MessageSet.Empty)
-    // 根据startOffset定位LogSegment，segments是一个跳表
-    // 返回一个小于等于(最接近)startOffset的Entry对象,没有则返回null
+
+    // 返回一个小于或等于(最接近)startOffset的Entry对象,没有则返回null
     var entry: Map.Entry[lang.Long, LogSegment] = segments.floorEntry(startOffset)
 
     // attempt to read beyond the log end offset is an error
-    // startOffset > next(LEO) 或者 定位的LogSegment为null，抛出异常
+    // startOffset > LEO 或者 没有小于或等于(最接近)startOffset的Entry对象
+    // 抛出OffsetOutOfRangeException，如果是follower拉取消息会针对这种情况再处理 参考：kafka.server.ReplicaFetcherThread.handleOffsetOutOfRange
     if(startOffset > next || entry == null)
       throw new OffsetOutOfRangeException("Request for offset %d but we only have log segments in the range %d to %d.".format(startOffset, segments.firstKey, next))
 
     // Do the read on the segment with a base offset less than the target offset
     // but if that segment doesn't contain any messages with an offset greater than that
     // continue to read from successive segments until we get some messages or we reach the end of the log
-    // 从base offset 小于startOffset的最近的一个segment开始读取消息
-    // 如果读取的segment不包含任何message的offset > startOffset
-    // 继续读取后续segemnt直到读取到消息或者读取到log文件的末尾
+    // 从小于或等于(最接近)startOffset的Entry对象开始处理
     while(entry != null) {
       // If the fetch occurs on the active segment, there might be a race condition where two fetch requests occur after
       // the message is appended but before the nextOffsetMetadata is updated. In that case the second fetch may
@@ -668,26 +666,26 @@ class Log(val dir: File,// 某个topic-partion对应的日志文件所在磁盘�
       // 如果fetch发生在活动段上，可能会有一个竞争条件，即两个fetch请求发生在消息追加之后，但在nextffsetmetadata更新之前。
       // 在这种情况下，第二次取回可能会导致OffsetOutOfRangeException异常。为了解决这个问题，我们将读取限制在暴露的位置，而不是活动段的日志端。
 
-      // 计算当前segment可读取的位置
-      val maxPosition = {
-        // 如果读取的是活跃segment
+      // 计算当前可读取消息的总字节数
+      val maxPosition: Long = {
+        // 如果小于或等于(最接近)startOffset的Entry对象是正在活跃的LogSegment
         if (entry == segments.lastEntry) {
           // 防止OffsetOutOfRangeException，先获取当前活跃segment已记录的消息大小
           val exposedPos = nextOffsetMetadata.relativePositionInSegment.toLong
           // Check the segment again in case a new segment has just rolled out.
           // 再次判断，如果活跃segment已经发生变更不在是最新活跃的segment
-          // 那么更新可读取的位置
+          // 那么更新可读取的位置为当前LogSegment的整体大小
           if (entry != segments.lastEntry)
             // New log segment has rolled out, we can read up to the file end.
             entry.getValue.size
           else
             exposedPos
+        // 如果小于或等于(最接近)startOffset的Entry对象不是正在活跃的LogSegment,那么直接获取该LogSegment的整体大小即可
         } else {
           entry.getValue.size
         }
       }
-      // 读取消息
-      // entry.getValue获取LogSegment
+      // 读取消息(起始offset,最大offset,最大字节数,允许的最大字节数)
       val fetchInfo: FetchDataInfo = entry.getValue.read(startOffset, maxOffset, maxLength, maxPosition)
       // 消息为空查找下一个segment
       if(fetchInfo == null) {

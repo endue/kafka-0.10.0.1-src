@@ -541,41 +541,41 @@ class ReplicaManager(val config: KafkaConfig,
   }
 
   /**
+    * 处理ApiKeys.FETCH请求
    * Fetch messages from the leader replica, and wait until enough data can be fetched and return;
     * 从leader replica中获取消息，并等待足够的数据被获取并返回
    * the callback function will be triggered either when timeout or required fetch info is satisfied
     * 回调函数将在超时或所需的获取信息满足时被触发
    */
-  // 处理ApiKeys.FETCH请求
+  //
   // 从 leader 拉取数据,等待拉取到足够的数据或者达到 timeout 时间后返回拉取的结果
-  def fetchMessages(timeout: Long,// 超时时间
-                    replicaId: Int,// 副本ID
-                    fetchMinBytes: Int,// 拉取的最小字节数
-                    fetchInfo: immutable.Map[TopicAndPartition, PartitionFetchInfo],// 拉取的一些信息
+  def fetchMessages(timeout: Long,// Fetch请求超时时间
+                    replicaId: Int,// 构建Fetch请求的副本ID，如果来自follower为其所在BrokerId,如果来自consumer则为-1
+                    fetchMinBytes: Int,// Fetch请求拉取的最小字节数
+                    fetchInfo: immutable.Map[TopicAndPartition, PartitionFetchInfo],// Fetch请求中记录的topic-partition和其拉取的起始offset以及最大字节数fetchSize
                     responseCallback: Map[TopicAndPartition, FetchResponsePartitionData] => Unit) {// 回调
-    // 判断请求是来自follower副本还是consumer(-1)
-    // 只有follower副本才有replicaId
+    // Fetch请求是否来自follower副本(consumer为-1)
     val isFromFollower = replicaId >= 0
     // 是否从leader副本拉取消息
     val fetchOnlyFromLeader: Boolean = replicaId != Request.DebuggingConsumerId
-    // 是否只拉取committed的消息
-    // 如果拉取请求来自 consumer（true）,只拉取 HW 以内的数据,如果是来自follower副本同步请求,则没有该限制（false）
+    // 验证replicaId >= 0
+    // 如果fetch请求来自consumer返回true,只拉取HW以内的数据,如果是来自follower,则没有该限制返回false
     val fetchOnlyCommitted: Boolean = ! Request.isValidBrokerId(replicaId)
 
     // read from local logs
-    // 从副本拉取消息日志返回给follower
-    val logReadResults = readFromLocalLog(fetchOnlyFromLeader, fetchOnlyCommitted, fetchInfo)
+    // 从本地日志目录拉取消息
+    val logReadResults: Map[TopicAndPartition, LogReadResult] = readFromLocalLog(fetchOnlyFromLeader, fetchOnlyCommitted, fetchInfo)
 
     // if the fetch comes from the follower,
     // update its corresponding log end offset
-    // 如果请求是从follow发出的，则更新本地记录的follower副本的LEO，并推进HW
+    // 如果请求是从follow发出的，则更新本地记录的follower副本的LEO并修改Leader的HW
     if(Request.isValidBrokerId(replicaId))
-      // 这里也是重点
       updateFollowerLogReadResults(replicaId, logReadResults)
 
     // check if this fetch request can be satisfied right away
-    // 获取读取的字节数
+    // 获取总的读取的字节数
     val bytesReadable = logReadResults.values.map(_.info.messageSet.sizeInBytes).sum
+    // 读取数据是否出现异常
     val errorReadingData = logReadResults.values.foldLeft(false) ((errorIncurred, readResult) =>
       errorIncurred || (readResult.errorCode != Errors.NONE.code))
 
@@ -583,15 +583,15 @@ class ReplicaManager(val config: KafkaConfig,
     //                        2) fetch request does not require any data fetch请求不需要任何数据，拉取结果为空
     //                        3) has enough data to respond 拉取到足够的数据
     //                        4) some error happens while reading data 读取消息遇到异常
-    // 超时 || 拉取消息为空 || 拉取到足够的数据 || 读取消息异常
+    // Fetch请求超时时间已到 || 没有要拉取消息的topic-partition || 已拉取消息的字节数>=  Fetch请求拉取的最小字节数 || 读取消息有异常
     if(timeout <= 0 || fetchInfo.size <= 0 || bytesReadable >= fetchMinBytes || errorReadingData) {
       // 构建返回的数据
       val fetchPartitionData = logReadResults.mapValues(result =>
-        // 返回数据中记录当前副本的HW
+        // 返回数据(异常信息，被拉取消息副本的HW， 消息结果集)
         FetchResponsePartitionData(result.errorCode, result.hw, result.info.messageSet))
       // 执行回调方法并将数据返回
       responseCallback(fetchPartitionData)
-    // 没有数据，等待
+    // 没有数据将请求放入时间轮中等待
     } else {
       // construct the fetch results from the read results
       // 其他情况，构建延迟发送结果
@@ -618,9 +618,9 @@ class ReplicaManager(val config: KafkaConfig,
    */
   // 从副本拉取消息
   def readFromLocalLog(fetchOnlyFromLeader: Boolean,// 是否只从leader拉取
-                       readOnlyCommitted: Boolean,// 是否只拉取HW之前的数据
-                       readPartitionInfo: Map[TopicAndPartition, PartitionFetchInfo]): Map[TopicAndPartition, LogReadResult] = {
-    // 遍历所有需要拉取消息的topic-partition和其对应的PartitionFetchInfo
+                       readOnlyCommitted: Boolean,// 是否只拉取HW之前的数据(consumer和follower前者true后者false)
+                       readPartitionInfo: Map[TopicAndPartition, PartitionFetchInfo]): Map[TopicAndPartition, LogReadResult] = {// Fetch请求中记录的topic-partition和其拉取的起始offset以及最大字节数fetchSize
+
     readPartitionInfo.map { case (TopicAndPartition(topic, partition), PartitionFetchInfo(offset, fetchSize)) =>
       BrokerTopicStats.getBrokerTopicStats(topic).totalFetchRequestRate.mark()
       BrokerTopicStats.getBrokerAllTopicsStats().totalFetchRequestRate.mark()
@@ -630,17 +630,17 @@ class ReplicaManager(val config: KafkaConfig,
           trace("Fetching log segment for topic %s, partition %d, offset %d, size %d".format(topic, partition, offset, fetchSize))
 
           // decide whether to only fetch from leader
-          // 是否只从leader拉取消息并返回对应被拉取消息的Replica
+          // 获取topic-partition在当前Broker上的Replica副本实例
           val localReplica = if (fetchOnlyFromLeader)
-            // 获取leader副本的Replica
+            // 获取topic-partition在当前broker上的Leader副本实例
             getLeaderReplicaIfLocal(topic, partition)
           else
-            // 获取本机副本的Replica
+          // 获取topic-partition在当前broker上的副本实例
             getReplicaOrException(topic, partition)
 
           // decide whether to only fetch committed data (i.e. messages below high watermark)
-          // 获取要拉取消息的最大偏移量并决定是否只获取已提交的数据
-          // 如果是consumer拉取消息那就是HW，如果是其他副本那就没有限制
+          // 获取要拉取消息的最大偏移量
+          // 如果是consumer拉取消息则是HW，如果是follower那就没有限制
           val maxOffsetOpt = if (readOnlyCommitted)
             Some(localReplica.highWatermark.messageOffset)
           else
@@ -652,19 +652,19 @@ class ReplicaManager(val config: KafkaConfig,
            * where data gets appended to the log immediately after the replica has consumed from it
            * This can cause a replica to always be out of sync.
            */
-          // 获取被拉取消息副本的logEndOffsetMetadata，里面记录了LEO
+          // 获取被拉取消息副本的LEO
           val initialLogEndOffset = localReplica.logEndOffset
-          // 读取消息
-          val logReadInfo = localReplica.log match {
+          // 开始读取消息
+          val logReadInfo: FetchDataInfo = localReplica.log match {
             case Some(log) =>
               log.read(offset, fetchSize, maxOffsetOpt)
             case None =>
               error("Leader for partition [%s,%d] does not have a local log".format(topic, partition))
               FetchDataInfo(LogOffsetMetadata.UnknownOffsetMetadata, MessageSet.Empty)
           }
-          // 被拉取消息副本的LEO - 被拉取消息的startOffset <= 0 如果成立，那么说明已经没有消息可拉取了
+          // 消息副本的LEO - 拉取消息的Log当前的LEO <= 0，说明被拉取消息的Log已经没有消息可读了
           val readToEndOfLog = initialLogEndOffset.messageOffset - logReadInfo.fetchOffsetMetadata.messageOffset <= 0
-          // 封装一个LogReadResult返回，包含了当前被拉取消息副本的HW
+          // 封装一个LogReadResult返回，包含了当前被拉取消息副本(Leader)的HW，拉取消息的最大大小，是否已读取到Log的LEO
           LogReadResult(logReadInfo, localReplica.highWatermark.messageOffset, fetchSize, readToEndOfLog, None)
         } catch {
           // NOTE: Failed fetch requests metric is not incremented for known exceptions since it
@@ -1053,8 +1053,8 @@ class ReplicaManager(val config: KafkaConfig,
 
   /**
     * 更新本地follower副本的LEO和推动HW
-    * @param replicaId 副本ID
-    * @param readResults 要返回给副本的日志列表
+    * @param replicaId 构建Fetch请求的副本ID
+    * @param readResults 要返回给副本的结果
     */
   private def updateFollowerLogReadResults(replicaId: Int, readResults: Map[TopicAndPartition, LogReadResult]) {
     debug("Recording follower broker %d log read results: %s ".format(replicaId, readResults))

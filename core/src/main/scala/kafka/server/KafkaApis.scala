@@ -441,9 +441,9 @@ class KafkaApis(val requestChannel: RequestChannel,
     * leader处理fetch请求
    */
   def handleFetchRequest(request: RequestChannel.Request) {
-    val fetchRequest = request.requestObj.asInstanceOf[FetchRequest]
+    val fetchRequest: FetchRequest = request.requestObj.asInstanceOf[FetchRequest]
 
-    val (authorizedRequestInfo, unauthorizedRequestInfo) = fetchRequest.requestInfo.partition {
+    val (authorizedRequestInfo, unauthorizedRequestInfo): (Predef.Map[TopicAndPartition, PartitionFetchInfo], Predef.Map[TopicAndPartition, PartitionFetchInfo]) = fetchRequest.requestInfo.partition {
       case (topicAndPartition, _) => authorize(request.session, Read, new Resource(Topic, topicAndPartition.topic))
     }
 
