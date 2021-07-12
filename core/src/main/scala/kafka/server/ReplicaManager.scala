@@ -652,9 +652,8 @@ class ReplicaManager(val config: KafkaConfig,
            * where data gets appended to the log immediately after the replica has consumed from it
            * This can cause a replica to always be out of sync.
            */
-          // 获取被拉取消息副本的LEO
           val initialLogEndOffset = localReplica.logEndOffset
-          // 开始读取消息
+          // 获取被读取消息的LogSegment的信息(读取消息的起始offset,LogSegment的起始offset,以及读取消息的起始物理位置))
           val logReadInfo: FetchDataInfo = localReplica.log match {
             case Some(log) =>
               log.read(offset, fetchSize, maxOffsetOpt)
@@ -662,7 +661,7 @@ class ReplicaManager(val config: KafkaConfig,
               error("Leader for partition [%s,%d] does not have a local log".format(topic, partition))
               FetchDataInfo(LogOffsetMetadata.UnknownOffsetMetadata, MessageSet.Empty)
           }
-          // 消息副本的LEO - 拉取消息的Log当前的LEO <= 0，说明被拉取消息的Log已经没有消息可读了
+          // 消息副本的LEO - startOffset <= 0，说明被拉取消息的Log已经没有消息可读了
           val readToEndOfLog = initialLogEndOffset.messageOffset - logReadInfo.fetchOffsetMetadata.messageOffset <= 0
           // 封装一个LogReadResult返回，包含了当前被拉取消息副本(Leader)的HW，拉取消息的最大大小，是否已读取到Log的LEO
           LogReadResult(logReadInfo, localReplica.highWatermark.messageOffset, fetchSize, readToEndOfLog, None)

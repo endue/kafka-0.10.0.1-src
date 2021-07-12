@@ -130,8 +130,8 @@ class FileMessageSet private[kafka](@volatile var file: File,// 指向底层日�
   /**
    * Search forward for the file position of the last offset that is greater than or equal to the target offset
    * and return its physical position. If no such offsets are found, return null.
-   * @param targetOffset The offset to search for. 消息的相对偏移量
-   * @param startingPosition The starting position in the file to begin searching from.
+   * @param targetOffset The offset to search for. 消息的offset
+   * @param startingPosition The starting position in the file to begin searching from. 消息的物理位置
    */
   def searchFor(targetOffset: Long, startingPosition: Int): OffsetPosition = {
     // 记录要读取的物理起始位置
