@@ -129,10 +129,10 @@ class LogSegment(val log: FileMessageSet,// 存储消息集的FileMessageSet对�
    * Read a message set from this segment beginning with the first offset >= startOffset. The message set will include
    * no more than maxSize bytes and will end before maxOffset if a maxOffset is specified.
    *
-   * @param startOffset A lower bound on the first offset to include in the message set we read 消息读取的起始offset
-   * @param maxSize The maximum number of bytes to include in the message set we read 期望读取的最大字节数
-   * @param maxOffset An optional maximum offset for the message set we read 消息可读取的最大offset(HW或者LEO)
-   * @param maxPosition The maximum position in the log segment that should be exposed for read  允许读取的最大字节数(当前LogSegment中已写入消息的字节数)
+   * @param startOffset A lower bound on the first offset to include in the message set we read 客户端读取消息的起始offset
+   * @param maxSize The maximum number of bytes to include in the message set we read 客户端期望读取的最大字节数
+   * @param maxOffset An optional maximum offset for the message set we read 服务端可读取消息的最大offset(HW或者LEO)
+   * @param maxPosition The maximum position in the log segment that should be exposed for read  服务端允许读取的最大字节数(当前LogSegment中已写入消息的字节数)
    *
    * @return The fetched data and the offset metadata of the first message whose offset is >= startOffset,
    *         or null if the startOffset is larger than the largest offset in this log
@@ -143,7 +143,7 @@ class LogSegment(val log: FileMessageSet,// 存储消息集的FileMessageSet对�
       throw new IllegalArgumentException("Invalid max size for log read (%d)".format(maxSize))
     // 重新获取当前LogSegment中已存储的消息字节数
     val logSize = log.sizeInBytes // this may change, need to save a consistent copy
-    // 将读取消息的startOffset
+    // 基于startOffset计算消息读取的起始startOffset和startPosition
     val startPosition:OffsetPosition = translateOffset(startOffset)
 
     // if the start position is already off the end of the log, return null
@@ -164,7 +164,7 @@ class LogSegment(val log: FileMessageSet,// 存储消息集的FileMessageSet对�
         // maxOffset未指定
       case None =>
         // no max offset, just read until the max position
-        // 允许读取的最大字节数位置 - startOffset对应的字节数位置 和 要读取消息的最大字节数，两种之间取最小
+        // 允许读取的最大字节数位置 - 通过startOffset计算出来的字节数起始位置 和 要读取消息的最大字节数，两种之间取最小
         min((maxPosition - startPosition.position).toInt, maxSize)
         // maxOffset被指定
       case Some(offset) =>
@@ -175,7 +175,7 @@ class LogSegment(val log: FileMessageSet,// 存储消息集的FileMessageSet对�
         // 消息读取的起始offset > 消息可读取的最大offset
         if(offset < startOffset)
           return FetchDataInfo(offsetMetadata, MessageSet.Empty)
-        // 计算消息可读取的最大字节数
+        // 基于maxOffset计算消息可读取的最大maxOffset和maxPosition
         val mapping: OffsetPosition = translateOffset(offset, startPosition.position)
         val endPosition: Long =
           if(mapping == null)
@@ -184,7 +184,7 @@ class LogSegment(val log: FileMessageSet,// 存储消息集的FileMessageSet对�
             mapping.position
         min(min(maxPosition, endPosition) - startPosition.position, maxSize).toInt
     }
-    // 读取数据并返回，起始字节位置，以及长度
+    // 读取数据并返回，(读取消息的起始物理地址，读取消息的字节数)
     FetchDataInfo(offsetMetadata, log.read(startPosition.position, length))
   }
 
