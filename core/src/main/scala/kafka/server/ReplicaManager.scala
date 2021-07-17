@@ -413,7 +413,7 @@ class ReplicaManager(val config: KafkaConfig,
       val localProduceResults: Map[TopicPartition, LogAppendResult] = appendToLocalLog(internalTopicsAllowed, messagesPerPartition, requiredAcks)
       debug("Produce to local log in %d ms".format(SystemTime.milliseconds - sTime))
 
-      val produceStatus = localProduceResults.map { case (topicPartition, result) =>
+      val produceStatus: Map[TopicPartition, ProducePartitionStatus] = localProduceResults.map { case (topicPartition, result) =>
         topicPartition ->
                 ProducePartitionStatus(
                   result.info.lastOffset + 1, // required offset  将LEO返回给客户端
