@@ -102,6 +102,7 @@ public class Sender implements Runnable {
     private String clientId;
 
     /* the max time to wait for the server to respond to the request*/
+    // 等待服务器响应请求的最大时间
     private final int requestTimeout;
 
     public Sender(KafkaClient client,

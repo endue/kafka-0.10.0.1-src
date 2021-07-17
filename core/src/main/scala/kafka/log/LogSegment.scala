@@ -48,7 +48,7 @@ class LogSegment(val log: FileMessageSet,// 存储消息集的FileMessageSet对�
                  val index: OffsetIndex,// 索引文件的OffsetIndex对象
                  val baseOffset: Long,// LogSegment第一个消息的offset
                  val indexIntervalBytes: Int,// 隔多少字节写一次索引 默认4096
-                 val rollJitterMs: Long,
+                 val rollJitterMs: Long,// 新增日志段的扰动值，该值创建参考kafka.log.LogConfig.randomSegmentJitter，该值作用参考kafka.log.Log.maybeRoll
                  time: Time) extends Logging {
 
    // LogSegment创建时间
@@ -97,10 +97,10 @@ class LogSegment(val log: FileMessageSet,// 存储消息集的FileMessageSet对�
         // 重置累加消息字节数
         this.bytesSinceLastIndexEntry = 0
       }
-      // 拼接消息集
+      // 将消息写入channel
       // append the messages
       log.append(messages)
-      // 更新bytesSinceLastIndexEntry一遍判断后续是否需要写索引
+      // 更新bytesSinceLastIndexEntry用于判断后续是否需要写索引
       this.bytesSinceLastIndexEntry += messages.sizeInBytes
     }
   }

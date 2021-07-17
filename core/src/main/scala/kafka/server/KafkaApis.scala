@@ -343,7 +343,7 @@ class KafkaApis(val requestChannel: RequestChannel,
     val produceRequest = request.body.asInstanceOf[ProduceRequest]
     val numBytesAppended = request.header.sizeOf + produceRequest.sizeOf
 
-    val (authorizedRequestInfo, unauthorizedRequestInfo) = produceRequest.partitionRecords.asScala.partition {
+    val (authorizedRequestInfo, unauthorizedRequestInfo): (mutable.Map[TopicPartition, ByteBuffer], mutable.Map[TopicPartition, ByteBuffer]) = produceRequest.partitionRecords.asScala.partition {
       case (topicPartition, _) => authorize(request.session, Write, new Resource(Topic, topicPartition.topic))
     }
 
@@ -416,12 +416,13 @@ class KafkaApis(val requestChannel: RequestChannel,
       val internalTopicsAllowed = request.header.clientId == AdminUtils.AdminClientId
 
       // Convert ByteBuffer to ByteBufferMessageSet
-      val authorizedMessagesPerPartition = authorizedRequestInfo.map {
+      // 转换各个topic-partition的消息集合ByteBuffer为ByteBufferMessageSet
+      val authorizedMessagesPerPartition: mutable.Map[TopicPartition, ByteBufferMessageSet]  = authorizedRequestInfo.map {
         case (topicPartition, buffer) => (topicPartition, new ByteBufferMessageSet(buffer))
       }
 
       // call the replica manager to append messages to the replicas
-      // 调用replicaManager组件添加消息数据
+      // 调用replicaManager组件处理消息
       replicaManager.appendMessages(
         produceRequest.timeout.toLong,
         produceRequest.acks,

@@ -451,11 +451,11 @@ class ByteBufferMessageSet(val buffer: ByteBuffer) extends MessageSet with Loggi
    *
    * Returns the message set and a boolean indicating whether the message sizes may have changed.
    */
-  private[kafka] def validateMessagesAndAssignOffsets(offsetCounter: LongRef,
-                                                      now: Long,
-                                                      sourceCodec: CompressionCodec,
-                                                      targetCodec: CompressionCodec,
-                                                      compactedTopic: Boolean = false,
+  private[kafka] def validateMessagesAndAssignOffsets(offsetCounter: LongRef,// offset地址的计数器
+                                                      now: Long,// 当前时间戳
+                                                      sourceCodec: CompressionCodec,// 消息集中的消息压缩类型
+                                                      targetCodec: CompressionCodec,// 服务端的消息压缩类型
+                                                      compactedTopic: Boolean = false,//
                                                       messageFormatVersion: Byte = Message.CurrentMagicValue,
                                                       messageTimestampType: TimestampType,
                                                       messageTimestampDiffMaxMs: Long): (ByteBufferMessageSet, Boolean) = {

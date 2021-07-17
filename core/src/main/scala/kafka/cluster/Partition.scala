@@ -21,7 +21,7 @@ import kafka.utils._
 import kafka.utils.CoreUtils.{inReadLock, inWriteLock}
 import kafka.admin.AdminUtils
 import kafka.api.LeaderAndIsr
-import kafka.log.LogConfig
+import kafka.log.{LogAppendInfo, LogConfig}
 import kafka.server._
 import kafka.metrics.KafkaMetricsGroup
 import kafka.controller.KafkaController
@@ -518,42 +518,41 @@ class Partition(val topic: String,// topic
   }
 
   /**
-    * 拼接消息
-    * @param messages
-    * @param requiredAcks
+    * 追加消息
+    * @param messages 消息集合
+    * @param requiredAcks acks
     * @return
     */
   def appendMessagesToLeader(messages: ByteBufferMessageSet, requiredAcks: Int = 0) = {
     val (info, leaderHWIncremented) = inReadLock(leaderIsrUpdateLock) {
-      // 如果当前broker是topic-partition的leader副本就返回
-      // 否则返回None
+      // 获取当前broker上对应topic-partition的leader副本
       val leaderReplicaOpt = leaderReplicaIfLocal()
       leaderReplicaOpt match {
         case Some(leaderReplica) =>
-          // 获取leader副本对应的Log对象
+          // 获取leader副本的Log对象
           val log = leaderReplica.log.get
-          // 配置min.insync.replicas，默认1
+          // 获取配置min.insync.replicas，默认1以及当前的ISR列表数量
           val minIsr = log.config.minInSyncReplicas
-          // ISR列表数量
           val inSyncSize = inSyncReplicas.size
 
           // Avoid writing to leader if there are not enough insync replicas to make it safe
-          // 如果ISR列表数量不满足minIsr 并且写入消息的acks配置为-1(all)时，抛出异常
+          // 如果ISR列表数量不满足minIsr配置并且写入消息的acks配置为-1(all)时，抛出异常
           if (inSyncSize < minIsr && requiredAcks == -1) {
             throw new NotEnoughReplicasException("Number of insync replicas for partition [%s,%d] is [%d], below required minimum [%d]"
               .format(topic, partitionId, inSyncSize, minIsr))
           }
 
-          // 写入消息到Log
-          val info = log.append(messages, assignOffsets = true)
+          // 写入消息到Log(注意这里分配offset为true)
+          // 返回info(消息集合中第一条消息的offset, 消息集合中最后一条消息的offset，消息集合中消息压缩类型，服务端消息压缩类型，验证通过的消息总数，验证通过的消息总字节数，消息集合中消息是否单调递增)
+          val info: LogAppendInfo = log.append(messages, assignOffsets = true)
           // probably unblock some follower fetch requests since log end offset has been updated
           // 可能解除一些追随者获取请求，因为日志结束偏移量已经更新
           // 唤醒在时间轮中等待某个分区数据的fetch任务
           replicaManager.tryCompleteDelayedFetch(new TopicPartitionOperationKey(this.topic, this.partitionId))
           // we may need to increment high watermark since ISR could be down to 1
-          // 尝试更新HW
+          // 返回拼接日志的结果以及是否更新了HW
           (info, maybeIncrementLeaderHW(leaderReplica))
-
+        // 不存Log则抛出异常
         case None =>
           throw new NotLeaderForPartitionException("Leader not local for partition [%s,%d] on broker %d"
             .format(topic, partitionId, localBrokerId))
@@ -561,7 +560,7 @@ class Partition(val topic: String,// topic
     }
 
     // some delayed operations may be unblocked after HW changed
-    // 尝试更新HW
+    // 如果更新了Leader副本的HW，那么去唤醒时间轮中的一些等待请求
     if (leaderHWIncremented)
       tryCompleteDelayedRequests()
 

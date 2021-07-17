@@ -397,35 +397,37 @@ class ReplicaManager(val config: KafkaConfig,
     * 当超时或所需的acks得到满足时，将触发回调函数
    * Append messages to leader replicas of the partition, and wait for them to be replicated to other replicas;
    * the callback function will be triggered either when timeout or the required acks are satisfied
+    * 被调用点一：{@link kafka.server.KafkaApis#handleProducerRequest(kafka.network.RequestChannel.Request)}
    */
   // 处理ApiKeys.PRODUCE请求
   // 处理的是Producer发送过来的消息集
-  def appendMessages(timeout: Long,// 超时时间
-                     requiredAcks: Short,// acks类型
+  def appendMessages(timeout: Long,// Producer端等待响应的超时时间
+                     requiredAcks: Short,// Producer端发送消息的acks类型
                      internalTopicsAllowed: Boolean,// 是否允许操作kafka内部topic
-                     messagesPerPartition: Map[TopicPartition, MessageSet],// 消息集和对应的topic-partition
+                     messagesPerPartition: Map[TopicPartition, MessageSet],// topic-partition和对应的消息集合，
                      responseCallback: Map[TopicPartition, PartitionResponse] => Unit) {// 回调
     // 验证acks是否有效
     if (isValidRequiredAcks(requiredAcks)) {
       val sTime = SystemTime.milliseconds
       // 添加消息到本地日志文件
-      val localProduceResults = appendToLocalLog(internalTopicsAllowed, messagesPerPartition, requiredAcks)
+      val localProduceResults: Map[TopicPartition, LogAppendResult] = appendToLocalLog(internalTopicsAllowed, messagesPerPartition, requiredAcks)
       debug("Produce to local log in %d ms".format(SystemTime.milliseconds - sTime))
 
       val produceStatus = localProduceResults.map { case (topicPartition, result) =>
         topicPartition ->
                 ProducePartitionStatus(
-                  result.info.lastOffset + 1, // required offset
-                  new PartitionResponse(result.errorCode, result.info.firstOffset, result.info.timestamp)) // response status
+                  result.info.lastOffset + 1, // required offset  将LEO返回给客户端
+                  new PartitionResponse(result.errorCode, result.info.firstOffset, result.info.timestamp)) // response status // 将消息集合中第一条消息的offset以及消息的时间戳
       }
-
+      // 根据acks判断是否需要等待其他副本同步完当前消息后才返回响应
       if (delayedRequestRequired(requiredAcks, messagesPerPartition, localProduceResults)) {
         // create delayed produce operation
         val produceMetadata = ProduceMetadata(requiredAcks, produceStatus)
+        // 注意这里的timeout为Producer端等待响应的超时时间，到期后如果副本并没有同步完也会执行
         val delayedProduce = new DelayedProduce(timeout, produceMetadata, this, responseCallback)
 
         // create a list of (topic, partition) pairs to use as keys for this delayed produce operation
-        val producerRequestKeys = messagesPerPartition.keys.map(new TopicPartitionOperationKey(_)).toSeq
+        val producerRequestKeys: Seq[TopicPartitionOperationKey]  = messagesPerPartition.keys.map(new TopicPartitionOperationKey(_)).toSeq
 
         // try to complete the request immediately, otherwise put it into the purgatory
         // this is because while the delayed produce operation is being created, new
@@ -442,7 +444,7 @@ class ReplicaManager(val config: KafkaConfig,
       // If required.acks is outside accepted range, something is wrong with the client
       // Just return an error and don't handle the request at all
       // 如果acks配置错误返回一个错误，不处理任何请求
-      val responseStatus = messagesPerPartition.map {
+      val responseStatus: Map[TopicPartition, PartitionResponse] = messagesPerPartition.map {
         case (topicAndPartition, messageSet) =>
           (topicAndPartition -> new PartitionResponse(Errors.INVALID_REQUIRED_ACKS.code,
                                                       LogAppendInfo.UnknownLogAppendInfo.firstOffset,
@@ -453,6 +455,7 @@ class ReplicaManager(val config: KafkaConfig,
     }
   }
 
+  // 如果以下所有条件都为真， 那么需要放置一个延迟的产生请求，等待复制完成
   // If all the following conditions are true, we need to put a delayed produce request and wait for replication to complete
   //
   // 1. required acks = -1
@@ -474,32 +477,33 @@ class ReplicaManager(val config: KafkaConfig,
     * 将消息追加到本地副本日志文件
    */
   private def appendToLocalLog(internalTopicsAllowed: Boolean,// 是否允许操作kafka内部topic
-                               messagesPerPartition: Map[TopicPartition, MessageSet],
-                               requiredAcks: Short): Map[TopicPartition, LogAppendResult] = {
+                               messagesPerPartition: Map[TopicPartition, MessageSet],// topic-partition和对应的消息集合
+                               requiredAcks: Short): Map[TopicPartition, LogAppendResult] = {// acks配置
     trace("Append [%s] to local log ".format(messagesPerPartition))
-    // 遍历所有要写入消息的topic-partition
+    // 遍历所有要topic-partition的消息集合,返回类型Map[TopicPartition, LogAppendResult]
     messagesPerPartition.map { case (topicPartition, messages) =>
+      // 统计相关
       BrokerTopicStats.getBrokerTopicStats(topicPartition.topic).totalProduceRequestRate.mark()
       BrokerTopicStats.getBrokerAllTopicsStats().totalProduceRequestRate.mark()
 
       // reject appending to internal topics if it is not allowed
-      // 如果是将消息添加到kafka内部队列并且不是"__admin_client"中存储的节点ID，那么抛出异常
       if (Topic.isInternal(topicPartition.topic) && !internalTopicsAllowed) {
         (topicPartition, LogAppendResult(
           LogAppendInfo.UnknownLogAppendInfo,
           Some(new InvalidTopicException("Cannot append to internal topic %s".format(topicPartition.topic)))))
       } else {
         try {
-          // 获取对应主题和分区号下的Partition
+          // 获取对应topic-partition的Partition实例信息并追加消息
           val partitionOpt = getPartition(topicPartition.topic, topicPartition.partition)
-          val info = partitionOpt match {
+          // 返回结果info(消息集合中第一条消息的offset, 消息集合中最后一条消息的offset，消息集合中消息压缩类型，服务端消息压缩类型，验证通过的消息总数，验证通过的消息总字节数，消息集合中消息是否单调递增)
+          val info: LogAppendInfo = partitionOpt match {
             case Some(partition) =>
-              // 拼接消息
+              // 追加消息
               partition.appendMessagesToLeader(messages.asInstanceOf[ByteBufferMessageSet], requiredAcks)
             case None => throw new UnknownTopicOrPartitionException("Partition %s doesn't exist on %d"
               .format(topicPartition, localBrokerId))
           }
-
+          // 计算写入消息的数量
           val numAppendedMessages =
             if (info.firstOffset == -1L || info.lastOffset == -1L)
               0
@@ -507,6 +511,7 @@ class ReplicaManager(val config: KafkaConfig,
               info.lastOffset - info.firstOffset + 1
 
           // update stats for successfully appended bytes and messages as bytesInRate and messageInRate
+          // 统计相关
           BrokerTopicStats.getBrokerTopicStats(topicPartition.topic).bytesInRate.mark(messages.sizeInBytes)
           BrokerTopicStats.getBrokerAllTopicsStats.bytesInRate.mark(messages.sizeInBytes)
           BrokerTopicStats.getBrokerTopicStats(topicPartition.topic).messagesInRate.mark(numAppendedMessages)
