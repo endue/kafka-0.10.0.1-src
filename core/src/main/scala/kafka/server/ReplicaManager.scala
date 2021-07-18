@@ -266,13 +266,14 @@ class ReplicaManager(val config: KafkaConfig,
     stateChangeLogger.trace("Broker %d handling stop replica (delete=%s) for partition [%s,%d]".format(localBrokerId,
       deletePartition.toString, topic, partitionId))
     val errorCode = Errors.NONE.code
-    // 从allPartitions获取对应的topic-partition
+    // 从获取对应topic-partition在当前Broekr上的分区实例
     getPartition(topic, partitionId) match {
       case Some(partition) =>
-        // 判断是否需要删除
+        // 如果是删除分区操作
         if(deletePartition) {
-          // 从allPartitions去掉topic-partition的Partition
+          // 从allPartitions集合中删除对应topic-partition的分区实例
           val removedPartition = allPartitions.remove((topic, partitionId))
+          // 分区存在，删除对应的日志
           if (removedPartition != null) {
             removedPartition.delete() // this will delete the local log
             val topicHasPartitions = allPartitions.keys.exists { case (t, _) => topic == t }
@@ -280,12 +281,14 @@ class ReplicaManager(val config: KafkaConfig,
                 BrokerTopicStats.removeMetrics(topic)
           }
         }
+        // else 不删除分区，什么也不做
+
       case None =>
         // Delete log and corresponding folders in case replica manager doesn't hold them anymore.
         // This could happen when topic is being deleted while broker is down and recovers.
         if(deletePartition) {
           val topicAndPartition = TopicAndPartition(topic, partitionId)
-          // 删除本地记录的日志
+          // 没有找到分区，只删除对应的日志
           if(logManager.getLog(topicAndPartition).isDefined) {
               logManager.deleteLog(topicAndPartition)
           }
@@ -304,23 +307,24 @@ class ReplicaManager(val config: KafkaConfig,
   // 在依旧stopReplicaRequest.deletePartitions判断是否需要删除本地Log日志
   def stopReplicas(stopReplicaRequest: StopReplicaRequest): (mutable.Map[TopicPartition, Short], Short) = {
     replicaStateChangeLock synchronized {
+      // 响应
       val responseMap = new collection.mutable.HashMap[TopicPartition, Short]
-      // 判断controller的epoch
+      // 判断controller的epoch小于当前Broker上的epoch不处理该请求返回错误
       if(stopReplicaRequest.controllerEpoch() < controllerEpoch) {
         stateChangeLogger.warn("Broker %d received stop replica request from an old controller epoch %d. Latest known controller epoch is %d"
           .format(localBrokerId, stopReplicaRequest.controllerEpoch, controllerEpoch))
         (responseMap, Errors.STALE_CONTROLLER_EPOCH.code)
       } else {
-        // 获取要停止的partitions
-        val partitions = stopReplicaRequest.partitions.asScala
+        // 获取要停止的topic-partition
+        val partitions: mutable.Set[TopicPartition] = stopReplicaRequest.partitions.asScala
         // 更新controller epoch
         controllerEpoch = stopReplicaRequest.controllerEpoch
         // First stop fetchers for all partitions, then stop the corresponding replicas
-        // 删除掉要暂停partitions的replicaFetcher请求
+        // 从当前broker上删除对某些topic-partition的replicaFetcher请求
         replicaFetcherManager.removeFetcherForPartitions(partitions.map(r => TopicAndPartition(r.topic, r.partition)))
-        // 遍历当前broker上所有分区的副本，然后执行stopReplica对副本进行处理
+        // 变量要处理的topic-partition
         for(topicPartition <- partitions){
-          // 停止
+          // 停止或者删除对应topic-partition在当前broker上的Replica
           val errorCode = stopReplica(topicPartition.topic, topicPartition.partition, stopReplicaRequest.deletePartitions)
           responseMap.put(topicPartition, errorCode)
         }

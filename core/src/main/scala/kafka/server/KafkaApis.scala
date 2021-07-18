@@ -166,6 +166,10 @@ class KafkaApis(val requestChannel: RequestChannel,
   }
 
 
+  /**
+    * 处理STOP_REPLICA请求
+    * @param request
+    */
   def handleStopReplicaRequest(request: RequestChannel.Request) {
     // ensureTopicExists is only for client facing requests
     // We can't have the ensureTopicExists check here since the controller sends it as an advisory to all brokers so they
@@ -173,7 +177,7 @@ class KafkaApis(val requestChannel: RequestChannel,
     val stopReplicaRequest = request.body.asInstanceOf[StopReplicaRequest]
 
     val responseHeader = new ResponseHeader(request.header.correlationId)
-    val response =
+    val response: StopReplicaResponse =
       if (authorize(request.session, ClusterAction, Resource.ClusterResource)) {
         val (result, error) = replicaManager.stopReplicas(stopReplicaRequest)
         new StopReplicaResponse(error, result.asInstanceOf[Map[TopicPartition, JShort]].asJava)
