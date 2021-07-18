@@ -359,9 +359,11 @@ class ControllerBrokerRequestBatch(controller: KafkaController) extends  Logging
   // 添加StopReplicaRequest
   def addStopReplicaRequestForBrokers(brokerIds: Seq[Int], topic: String, partition: Int, deletePartition: Boolean,
                                       callback: (AbstractRequestResponse, Int) => Unit = null) {
+    // 遍历所有接收请求的brokerId然后从其对应的stopReplicaRequestMap中获取对应的缓存集合没有则创建，集合类型为mutable.Map[TopicPartition, PartitionStateInfo]
     brokerIds.filter(b => b >= 0).foreach { brokerId =>
       stopReplicaRequestMap.getOrElseUpdate(brokerId, Seq.empty[StopReplicaRequestInfo])
       val v = stopReplicaRequestMap(brokerId)
+      // 构建对应的StopReplicaRequestInfo请求添加到对应的缓存集合中
       if(callback != null)
         stopReplicaRequestMap(brokerId) = v :+ StopReplicaRequestInfo(PartitionAndReplica(topic, partition, brokerId),
           deletePartition, (r: AbstractRequestResponse) => callback(r, brokerId))
@@ -513,7 +515,9 @@ class ControllerBrokerRequestBatch(controller: KafkaController) extends  Logging
       // 获取stopReplicaRequestMap中的STOP_REPLICA请求
       // key是brokerId,value是Map[TopicPartition, PartitionStateInfo]
       stopReplicaRequestMap.foreach { case (broker, replicaInfoList) =>
-        val stopReplicaWithDelete = replicaInfoList.filter(_.deletePartition).map(_.replica).toSet
+        // 过滤出需要被删除的分区副本
+        val stopReplicaWithDelete: Predef.Set[PartitionAndReplica] = replicaInfoList.filter(_.deletePartition).map(_.replica).toSet
+        // 过滤出不需要被删除的分区副本
         val stopReplicaWithoutDelete = replicaInfoList.filterNot(_.deletePartition).map(_.replica).toSet
         debug("The stop replica request (delete = true) sent to broker %d is %s"
           .format(broker, stopReplicaWithDelete.mkString(",")))
