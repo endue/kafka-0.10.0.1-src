@@ -378,7 +378,7 @@ class ControllerBrokerRequestBatch(controller: KafkaController) extends  Logging
                                          callback: AbstractRequestResponse => Unit = null) {
     // 回调函数
     def updateMetadataRequestMapFor(partition: TopicAndPartition, beingDeleted: Boolean) {
-      // 获取分区的LeaderIsrAndControllerEpoch
+      // 获取分区的LeaderIsrAndControllerEpoch信息
       val leaderIsrAndControllerEpochOpt = controllerContext.partitionLeadershipInfo.get(partition)
       leaderIsrAndControllerEpochOpt match {
           // 如果存在
@@ -488,7 +488,7 @@ class ControllerBrokerRequestBatch(controller: KafkaController) extends  Logging
                       else if (controller.config.interBrokerProtocolVersion >= KAFKA_0_9_0) 1: Short
                       else 0: Short
         // 构建UpdateMetadataRequest请求
-        val updateMetadataRequest =
+        val updateMetadataRequest: UpdateMetadataRequest =
           if (version == 0) {
             val liveBrokers = controllerContext.liveOrShuttingDownBrokers.map(_.getNode(SecurityProtocol.PLAINTEXT))
             new UpdateMetadataRequest(controllerId, controllerEpoch, liveBrokers.asJava, partitionStates.asJava)

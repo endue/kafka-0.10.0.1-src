@@ -1315,7 +1315,7 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
   /**
    * Send the leader information for selected partitions to selected brokers so that they can correctly respond to
    * metadata requests
-   * @param brokers The brokers that the update metadata request should be sent to
+   * @param brokers The brokers that the update metadata request should be sent to 接收请求的BrokerId列表
    */
   def sendUpdateMetadataRequest(brokers: Seq[Int], partitions: Set[TopicAndPartition] = Set.empty[TopicAndPartition]) {
     try {

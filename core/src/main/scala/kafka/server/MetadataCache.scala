@@ -42,9 +42,9 @@ private[server] class MetadataCache(brokerId: Int) extends Logging {
   private val cache = mutable.Map[String, mutable.Map[Int, PartitionStateInfo]]()
   // 记录controllerId
   private var controllerId: Option[Int] = None
-  // 记录活跃的broker，key是brokerId
+  // 记录活跃的broker，key是brokerId,value是Broker相关信息
   private val aliveBrokers = mutable.Map[Int, Broker]()
-  // 记录活跃的Node，key是brokerId
+  // 记录当前key的节点
   private val aliveNodes = mutable.Map[Int, collection.Map[SecurityProtocol, Node]]()
   private val partitionMetadataLock = new ReentrantReadWriteLock()
 
