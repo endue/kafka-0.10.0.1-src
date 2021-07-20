@@ -28,6 +28,8 @@ import org.apache.kafka.common.utils.CollectionUtils;
 
 public class FetchRequest extends AbstractRequest {
 
+    // 如果是来自副本的Fetch请求该值为副本所在BrokerId
+    // 如果来自consumer的Fetch请求该值为-1
     public static final int CONSUMER_REPLICA_ID = -1;
     private static final Schema CURRENT_SCHEMA = ProtoUtils.currentRequestSchema(ApiKeys.FETCH.id);
     private static final String REPLICA_ID_KEY_NAME = "replica_id";
@@ -43,7 +45,7 @@ public class FetchRequest extends AbstractRequest {
     private static final String PARTITION_KEY_NAME = "partition";
     private static final String FETCH_OFFSET_KEY_NAME = "fetch_offset";
     private static final String MAX_BYTES_KEY_NAME = "max_bytes";
-    // 拉取日志消息的副本所在brokerID
+    // 创建该FetchRequest的副本所在brokerId
     private final int replicaId;
     // 最大等待时间
     private final int maxWait;

@@ -47,9 +47,11 @@ abstract class AbstractFetcherThread(name: String,
 
   type REQ <: FetchRequest
   type PD <: PartitionData
-  // 记录topic-partition对应的PartitionFetchState，里面记录了下次拉取消息的offset
+  // 记录topic-partition和对应的PartitionFetchState(里面记录了下次拉取消息的offset)
   private val partitionMap = new mutable.HashMap[TopicAndPartition, PartitionFetchState] // a (topic, partition) -> partitionFetchState map
+  // 锁
   private val partitionMapLock = new ReentrantLock
+  // 锁等待队列
   private val partitionMapCond = partitionMapLock.newCondition()
 
   private val metricId = new ClientIdAndBroker(clientId, sourceBroker.host, sourceBroker.port)
@@ -59,16 +61,41 @@ abstract class AbstractFetcherThread(name: String,
   /* callbacks to be defined in subclass */
 
   // process fetched data
+  /**
+    * 处理Fetch到的数据
+    * @param topicAndPartition
+    * @param fetchOffset Fetch请求的起始offset
+    * @param partitionData Fetch到的数据
+    */
   def processPartitionData(topicAndPartition: TopicAndPartition, fetchOffset: Long, partitionData: PD)
 
   // handle a partition whose offset is out of range and return a new fetch offset
+  /**
+    * 处理Fetch偏移量超出范围的分区并返回一个新的读取偏移量
+    * @param topicAndPartition
+    * @return
+    */
   def handleOffsetOutOfRange(topicAndPartition: TopicAndPartition): Long
 
   // deal with partitions with errors, potentially due to leadership changes
+  /**
+    * 处理Fetch出现错误的topic-partition
+    * @param partitions
+    */
   def handlePartitionsWithErrors(partitions: Iterable[TopicAndPartition])
 
+  /**
+    * 构建Fetch请求
+    * @param partitionMap
+    * @return
+    */
   protected def buildFetchRequest(partitionMap: Map[TopicAndPartition, PartitionFetchState]): REQ
 
+  /**
+    * 发送Fetch请求
+    * @param fetchRequest
+    * @return
+    */
   protected def fetch(fetchRequest: REQ): Map[TopicAndPartition, PD]
 
   override def shutdown(){
@@ -83,6 +110,9 @@ abstract class AbstractFetcherThread(name: String,
     fetcherLagStats.unregister()
   }
 
+  /**
+    * 启动入口
+    */
   override def doWork() {
     // 构建fetchRequest
     val fetchRequest = inLock(partitionMapLock) {
@@ -102,12 +132,15 @@ abstract class AbstractFetcherThread(name: String,
       processFetchRequest(fetchRequest)
   }
 
-  // 处理发送fetchRequest
+  /**
+    * 处理发送fetch请求
+    * @param fetchRequest
+    */
   private def processFetchRequest(fetchRequest: REQ) {
-    // 记录拉取失败的topic-partition
+    // 用于记录拉取异常的topic-partition
     val partitionsWithError = new mutable.HashSet[TopicAndPartition]
     var responseData: Map[TopicAndPartition, PD] = Map.empty
-
+    /*-------------步骤一 构建fetch请求并等待响应-------------*/
     try {
       trace("Issuing to broker %d of fetch request %s".format(sourceBroker.id, fetchRequest))
       // 发送并等待响应
@@ -124,11 +157,10 @@ abstract class AbstractFetcherThread(name: String,
         }
     }
     fetcherStats.requestRate.mark()
-    // 响应记录不为空
+    /*-------------步骤二 处理响应-------------*/
     if (responseData.nonEmpty) {
       // process fetched data
       inLock(partitionMapLock) {
-        // 处理响应记录
         // 遍历响应获取每个topic-partition的响应数据PartitionData
         responseData.foreach { case (topicAndPartition, partitionData) =>
           val TopicAndPartition(topic, partitionId) = topicAndPartition
@@ -138,18 +170,18 @@ abstract class AbstractFetcherThread(name: String,
             // 如果对应topic-partition的fetchRequest中的起始offset和PartitionFetchState中记录的offset一致，那么才继续处理响应
             if (fetchRequest.offset(topicAndPartition) == currentPartitionFetchState.offset) {
               Errors.forCode(partitionData.errorCode) match {
-                  // 正常情况下
+                // 处理无异常的响应数据
                 case Errors.NONE =>
                   try {
                     // 从响应数据PartitionData中获取消息日志
-                    val messages = partitionData.toByteBufferMessageSet
-                    val validBytes = messages.validBytes
-                    // 获取下次fetch的offset
+                    val messages: ByteBufferMessageSet = partitionData.toByteBufferMessageSet
+                    val validBytes: Int = messages.validBytes
+                    // 获取消息集合中最后一条消息的offset + 1(用于生产下次fetch的offset)
                     val newOffset = messages.shallowIterator.toSeq.lastOption match {
                       case Some(m: MessageAndOffset) => m.nextOffset
                       case None => currentPartitionFetchState.offset
                     }
-                    // 创建新的PartitionFetchState，替换旧的，也就是更新下次fetch的起始offset(follower的LEO)
+                    // 更新下次fetch的起始offset
                     partitionMap.put(topicAndPartition, new PartitionFetchState(newOffset))
                     fetcherLagStats.getAndMaybePut(topic, partitionId).lag = Math.max(0L, partitionData.highWatermark - newOffset)
                     fetcherStats.byteRate.mark(validBytes)
@@ -167,7 +199,7 @@ abstract class AbstractFetcherThread(name: String,
                       throw new KafkaException("error processing data for partition [%s,%d] offset %d"
                         .format(topic, partitionId, currentPartitionFetchState.offset), e)
                   }
-                  // 请求的偏移量超过了leader存储的偏移量
+                // 处理Errors.OFFSET_OUT_OF_RANGE 异常的响应数据
                 case Errors.OFFSET_OUT_OF_RANGE =>
                   try {
                     // 计算fetch的起始offset，这里分为两种情况
@@ -181,6 +213,7 @@ abstract class AbstractFetcherThread(name: String,
                       error("Error getting offset for partition [%s,%d] to broker %d".format(topic, partitionId, sourceBroker.id), e)
                       partitionsWithError += topicAndPartition
                   }
+                // 处理其他异常
                 case _ =>
                   if (isRunning.get) {
                     error("Error for partition [%s,%d] to broker %d:%s".format(topic, partitionId, sourceBroker.id,
@@ -192,16 +225,23 @@ abstract class AbstractFetcherThread(name: String,
         }
       }
     }
-
+    /*-------------步骤二 处理拉取消息出现异常的topic-partition-------------*/
     if (partitionsWithError.nonEmpty) {
       debug("handling partitions with error for %s".format(partitionsWithError))
       handlePartitionsWithErrors(partitionsWithError)
     }
   }
 
+  /**
+    * 添加对某些topic-partition的fetch操作
+    * 调用点{@link kafka.server.AbstractFetcherManager#addFetcherForPartitions(scala.collection.Map)}
+    * @param partitionAndOffsets
+    */
   def addPartitions(partitionAndOffsets: Map[TopicAndPartition, Long]) {
     partitionMapLock.lockInterruptibly()
     try {
+      // 记录从各个topic-partition拉取消息的位置到partitionMap中，如果offset < 0说明当前Broker之前不是该topic-partition的副本
+      // 现在才是，由于没有日志offset为-1，所以调用handleOffsetOutOfRange()方法从Leader副本拉取消息来判断需要从哪个offset拉取消息
       for ((topicAndPartition, offset) <- partitionAndOffsets) {
         // If the partitionMap already has the topic/partition, then do not update the map with the old offset
         if (!partitionMap.contains(topicAndPartition))
@@ -229,6 +269,11 @@ abstract class AbstractFetcherThread(name: String,
     } finally partitionMapLock.unlock()
   }
 
+  /**
+    * 删除对某些topic-partition的fetch操作
+    * 调用点{@link kafka.server.AbstractFetcherManager#removeFetcherForPartitions(scala.collection.Set)}
+    * @param topicAndPartitions
+    */
   def removePartitions(topicAndPartitions: Set[TopicAndPartition]) {
     partitionMapLock.lockInterruptibly()
     try {

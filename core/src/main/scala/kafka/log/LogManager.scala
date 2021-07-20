@@ -474,18 +474,24 @@ class LogManager(val logDirs: Array[File],// 日志目录列表，加载的是"l
 
   /**
    *  Delete a log.
+    *  删除日志
    */
   def deleteLog(topicAndPartition: TopicAndPartition) {
     var removedLog: Log = null
     logCreationOrDeletionLock synchronized {
+      // 从logs集合中删除对应topic-partition的Log实例
       removedLog = logs.remove(topicAndPartition)
     }
     if (removedLog != null) {
       //We need to wait until there is no more cleaning task on the log to be deleted before actually deleting it.
+      // 如果开启了日志清理线程
       if (cleaner != null) {
+        // 中断当前线程的清理
         cleaner.abortCleaning(topicAndPartition)
+        // 更新cleaner-offset-checkpoint文件
         cleaner.updateCheckpoints(removedLog.dir.getParentFile)
       }
+      // 删除该topic-partition日志目录下的.log和.index文件，最后在删除该日志目录
       removedLog.delete()
       info("Deleted log for partition [%s,%d] in %s."
            .format(topicAndPartition.topic,

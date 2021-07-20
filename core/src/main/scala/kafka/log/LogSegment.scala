@@ -48,7 +48,7 @@ class LogSegment(val log: FileMessageSet,// 存储消息集的FileMessageSet对�
                  val index: OffsetIndex,// 索引文件的OffsetIndex对象
                  val baseOffset: Long,// LogSegment第一个消息的offset
                  val indexIntervalBytes: Int,// 隔多少字节写一次索引 默认4096
-                 val rollJitterMs: Long,
+                 val rollJitterMs: Long,// 新增日志段的扰动值，该值创建参考kafka.log.LogConfig.randomSegmentJitter，该值作用参考kafka.log.Log.maybeRoll
                  time: Time) extends Logging {
 
    // LogSegment创建时间
@@ -97,10 +97,10 @@ class LogSegment(val log: FileMessageSet,// 存储消息集的FileMessageSet对�
         // 重置累加消息字节数
         this.bytesSinceLastIndexEntry = 0
       }
-      // 拼接消息集
+      // 将消息写入channel
       // append the messages
       log.append(messages)
-      // 更新bytesSinceLastIndexEntry一遍判断后续是否需要写索引
+      // 更新bytesSinceLastIndexEntry用于判断后续是否需要写索引
       this.bytesSinceLastIndexEntry += messages.sizeInBytes
     }
   }
@@ -116,15 +116,12 @@ class LogSegment(val log: FileMessageSet,// 存储消息集的FileMessageSet对�
    *
    * @return The position in the log storing the message with the least offset >= the requested offset or null if no message meets this criteria.
    */
-  // 转换一下，参数如下：
-  // offset：消息集的相对偏移量
-  // startingFilePosition：开始查找消息集的指定槽位
+  // 转换一下
   @threadsafe
   private[log] def translateOffset(offset: Long, startingFilePosition: Int = 0): OffsetPosition = {
-    // 基于消息的相对偏移量offset，查找小于或等于offset的槽位
-    val mapping = index.lookup(offset)
-    // 从log日志文件中查找第一个大于或等于offset的位置
-    // max(mapping.position, startingFilePosition)计算最大的槽位
+    // 基于消息的offset，查找小于或等于offset的物理位置
+    val mapping: OffsetPosition = index.lookup(offset)
+    // 从FileMessageSet中查找第一个大于或等于offset的位置
     log.searchFor(offset, max(mapping.position, startingFilePosition))
   }
 
@@ -132,10 +129,10 @@ class LogSegment(val log: FileMessageSet,// 存储消息集的FileMessageSet对�
    * Read a message set from this segment beginning with the first offset >= startOffset. The message set will include
    * no more than maxSize bytes and will end before maxOffset if a maxOffset is specified.
    *
-   * @param startOffset A lower bound on the first offset to include in the message set we read 消息读取逻辑起始偏移量
-   * @param maxSize The maximum number of bytes to include in the message set we read 消息读取最大字节数
-   * @param maxOffset An optional maximum offset for the message set we read 消息读取逻辑最大偏移量
-   * @param maxPosition The maximum position in the log segment that should be exposed for read  LongSegment中可读取的最大物理偏移量
+   * @param startOffset A lower bound on the first offset to include in the message set we read 客户端读取消息的起始offset
+   * @param maxSize The maximum number of bytes to include in the message set we read 客户端期望读取的最大字节数
+   * @param maxOffset An optional maximum offset for the message set we read 服务端可读取消息的最大offset(HW或者LEO)
+   * @param maxPosition The maximum position in the log segment that should be exposed for read  服务端允许读取的最大字节数(当前LogSegment中已写入消息的字节数)
    *
    * @return The fetched data and the offset metadata of the first message whose offset is >= startOffset,
    *         or null if the startOffset is larger than the largest offset in this log
@@ -144,49 +141,50 @@ class LogSegment(val log: FileMessageSet,// 存储消息集的FileMessageSet对�
   def read(startOffset: Long, maxOffset: Option[Long], maxSize: Int, maxPosition: Long = size): FetchDataInfo = {
     if(maxSize < 0)
       throw new IllegalArgumentException("Invalid max size for log read (%d)".format(maxSize))
-    // 当前FileMessageSet中存储的消息字节数
+    // 重新获取当前LogSegment中已存储的消息字节数
     val logSize = log.sizeInBytes // this may change, need to save a consistent copy
-    // 基于起始相对偏移量startOffset转换为位置
+    // 基于startOffset计算消息读取的起始startOffset和startPosition
     val startPosition:OffsetPosition = translateOffset(startOffset)
 
     // if the start position is already off the end of the log, return null
-    // 索引文件中没找到，返回null
+    // 没找到，返回null
     if(startPosition == null)
       return null
-    // 封装一个LogOffsetMetadata
+    // 封装一个LogOffsetMetadata(读取消息的起始offset,当前LogSegment的起始offset,以及读取消息的起始物理位置)
     val offsetMetadata = new LogOffsetMetadata(startOffset, this.baseOffset, startPosition.position)
 
     // if the size is zero, still return a log segment but with zero size
-    // 如果大小为0，一条消息不读，返回一个空
+    // 如果读取字节数为0，一条消息不读，返回一个空
     if(maxSize == 0)
       return FetchDataInfo(offsetMetadata, MessageSet.Empty)
 
     // calculate the length of the message set to read based on whether or not they gave us a maxOffset
-    // 计算可读取的最大字节数
+    // 重新计算可读取的字节数
     val length = maxOffset match {
-        // maxOffset没传值，那么基于maxPosition和maxSize来计算
+        // maxOffset未指定
       case None =>
         // no max offset, just read until the max position
-        // 在要读取的最大槽位 - 要读取的起始槽位  和 maxSize 两者中取最小
+        // 允许读取的最大字节数位置 - 通过startOffset计算出来的字节数起始位置 和 要读取消息的最大字节数，两种之间取最小
         min((maxPosition - startPosition.position).toInt, maxSize)
-        // maxOffset指定了值，那么就转换相对偏移量offset为槽位
+        // maxOffset被指定
       case Some(offset) =>
         // there is a max offset, translate it to a file position and use that to calculate the max read size;
         // when the leader of a partition changes, it's possible for the new leader's high watermark to be less than the
         // true high watermark in the previous leader for a short window. In this window, if a consumer fetches on an
         // offset between new leader's high watermark and the log end offset, we want to return an empty response.
+        // 消息读取的起始offset > 消息可读取的最大offset
         if(offset < startOffset)
           return FetchDataInfo(offsetMetadata, MessageSet.Empty)
-        // 将结束的相对偏移量offset转换为槽位
+        // 基于maxOffset计算消息可读取的最大maxOffset和maxPosition
         val mapping: OffsetPosition = translateOffset(offset, startPosition.position)
-        val endPosition =
+        val endPosition: Long =
           if(mapping == null)
             logSize // the max offset is off the end of the log, use the end of the file
           else
             mapping.position
         min(min(maxPosition, endPosition) - startPosition.position, maxSize).toInt
     }
-    // 返回数据，数据基于起始槽位和可读取的最大字节数查找读取
+    // 读取数据并返回，(读取消息的起始物理地址，读取消息的字节数)
     FetchDataInfo(offsetMetadata, log.read(startPosition.position, length))
   }
 

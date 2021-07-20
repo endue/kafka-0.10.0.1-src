@@ -38,10 +38,13 @@ public class StopReplicaRequest extends AbstractRequest {
 
     private static final String TOPIC_KEY_NAME = "topic";
     private static final String PARTITION_KEY_NAME = "partition";
-
+    // 发送请求的controllerId也就是brokerId
     private final int controllerId;
+    // 发送请求的controllerEpoch
     private final int controllerEpoch;
+    // 是否删除分区
     private final boolean deletePartitions;
+    // 发送副本变化的topic-partition
     private final Set<TopicPartition> partitions;
 
     public StopReplicaRequest(int controllerId, int controllerEpoch, boolean deletePartitions, Set<TopicPartition> partitions) {

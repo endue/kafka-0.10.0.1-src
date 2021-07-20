@@ -386,7 +386,7 @@ class GroupMetadataManager(val brokerId: Int,
   def loadGroupsForPartition(offsetsPartition: Int,
                              onGroupLoaded: GroupMetadata => Unit) {
     // 将Partition封装为一个topic-partition
-    val topicPartition = TopicAndPartition(TopicConstants.GROUP_METADATA_TOPIC_NAME, offsetsPartition)
+    val topicPartition: TopicAndPartition = TopicAndPartition(TopicConstants.GROUP_METADATA_TOPIC_NAME, offsetsPartition)
     // 封装一个任务
     scheduler.schedule(topicPartition.toString, loadGroupsAndOffsets)
     // loadGroupsAndOffsets为具体执行的任务

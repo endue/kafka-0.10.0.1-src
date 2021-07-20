@@ -42,9 +42,11 @@ public class ProduceRequest extends AbstractRequest {
     // partition level field names
     private static final String PARTITION_KEY_NAME = "partition";
     private static final String RECORD_SET_KEY_NAME = "record_set";
-
+    // 客户端发送消息的acks
     private final short acks;
+    // 客户端发送消息最大等待响应的超时时间
     private final int timeout;
+    // 客户端发送的各个topic-partition的消息
     private final Map<TopicPartition, ByteBuffer> partitionRecords;
 
     public ProduceRequest(short acks, int timeout, Map<TopicPartition, ByteBuffer> partitionRecords) {

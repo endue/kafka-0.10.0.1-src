@@ -411,7 +411,8 @@ class Log(val dir: File,// 某个topic-partion对应的日志文件所在磁盘�
   // 添加消息集合到日志有效的segment,如有必要，滚动到另一个段，主要负责给消息分配offsets，
   // 但是如果assignOffsets=false，我们只是检查存在的offsets是否有效
   def append(messages: ByteBufferMessageSet, assignOffsets: Boolean = true): LogAppendInfo = {
-    // 解析消息为一个LogAppendInfo
+    // 验证消息集合中的消息
+    // 生成一个LogAppendInfo(消息集合中第一条消息的offset, 消息集合中最后一条消息的offset，消息集合中消息压缩类型，服务端消息压缩类型，验证通过的消息总数，验证通过的消息总字节数，消息集合中消息是否单调递增)
     val appendInfo: LogAppendInfo = analyzeAndValidateMessageSet(messages)
 
     // if we have any valid messages, append them to the log
@@ -420,7 +421,7 @@ class Log(val dir: File,// 某个topic-partion对应的日志文件所在磁盘�
       return appendInfo
 
     // trim any invalid bytes or partial messages before appending it to the on-disk log
-    // 清理未通过验证的消息(如果存在)，返回一个新的ByteBufferMessageSet记录已包含验证通过的消息或者直接返回messages
+    // 截取出消息集合messages中有效的消息
     var validMessages: ByteBufferMessageSet = trimInvalidBytes(messages, appendInfo)
 
     try {
@@ -429,13 +430,12 @@ class Log(val dir: File,// 某个topic-partion对应的日志文件所在磁盘�
         // 判断是否需要为当前消息集分配offset，默认true
         if (assignOffsets) {
           // assign offsets to the message set
-          // 基于nextOffsetMetadata.messageOffset生成一个LongRef,messageOffset就是下一条消息的Offset
-          // 然后在validateMessagesAndAssignOffsets()方法中递增该值来分配给每一条消息offset
+          // 先获取当前的nextOffsetMetadata
           val offset = new LongRef(nextOffsetMetadata.messageOffset)
-          // 更新appendInfo中firstOffset,也就是第一条消息的offset,不采用Producer分配的值
+          // 更新appendInfo中第一条消息的offset,不采用Producer分配的值
           appendInfo.firstOffset = offset.value
           val now = time.milliseconds
-          // 再次验证
+          // 再次验证并返回新的消息集合以及消息集合大小是否发生变更
           val (validatedMessages, messageSizesMaybeChanged) = try {
             // 验证并分配消息offset，内部会递增LongRef，返回一个元组
             // 此时并没有将 nextOffsetMetadata.messageOffset 逐步递增
@@ -460,7 +460,7 @@ class Log(val dir: File,// 某个topic-partion对应的日志文件所在磁盘�
 
           // re-validate message sizes if there's a possibility that they have changed (due to re-compression or message
           // format conversion)
-          // 如果消息大小有可能发生更改，则重新验证消息大小
+          // 如果消息大小有可能发生更改，则重新验证消息集合中每个消息大小是否超过允许的单个消息大小
           if (messageSizesMaybeChanged) {
             for (messageAndOffset <- validMessages.shallowIterator) {
               if (MessageSet.entrySize(messageAndOffset.message) > config.maxMessageSize) {
@@ -473,33 +473,32 @@ class Log(val dir: File,// 某个topic-partion对应的日志文件所在磁盘�
               }
             }
           }
-
+        // 用producer端给定的offset
         } else {
           // we are taking the offsets we are given
-          // 用producer端给定的offset
-          // 如果消息集中消息的offset非递增 或者 producer端给定的offset < LEO那么抛出异常
-          // 所以这里可以看出如果Producer分配offset,需要递增并且要 >= nextOffsetMetadata.messageOffset
+          // 如果消息集中消息的offset非递增 或者 消息集合中第一条消息的offset < LEO那么抛出异常
+          // 所以这里可以看出如果Producer分配offset,需要递增并且要从≥ nextOffsetMetadata.messageOffset位置开始分配
           if (!appendInfo.offsetsMonotonic || appendInfo.firstOffset < nextOffsetMetadata.messageOffset)
             throw new IllegalArgumentException("Out of order offsets found in " + messages)
         }
 
         // check messages set size may be exceed config.segmentSize
-        // 验证消息大小是否超过segmentSize(默认1 * 1024 * 1024 * 1024)
+        // 验证消息大小是否超过segmentSize(默认1 * 1024 * 1024 * 1024=1G)
         if (validMessages.sizeInBytes > config.segmentSize) {
           throw new RecordBatchTooLargeException("Message set size is %d bytes which exceeds the maximum configured segment size of %d."
             .format(validMessages.sizeInBytes, config.segmentSize))
         }
 
         // maybe roll the log if this segment is full
-        // 如果当前segment无法放置当前消息，则新建
+        // 判断当前的LogSegment是否无法放下当前的消息集，如果是则新建一个LogSegment
         val segment = maybeRoll(validMessages.sizeInBytes)
 
         // now append to the log
-        // 将消息添加到对应的segment
+        // 将消息添加到LogSegment
         segment.append(appendInfo.firstOffset, validMessages)
 
         // increment the log end offset
-        // 重新生成LogOffsetMetadata，更新LEO和已记录消息大小
+        // 重新生成LogOffsetMetadata
         updateLogEndOffset(appendInfo.lastOffset + 1)
 
         trace("Appended message set to log %s with first offset: %d, next offset: %d, and messages: %s"
@@ -546,7 +545,7 @@ class Log(val dir: File,// 某个topic-partion对应的日志文件所在磁盘�
     var sourceCodec: CompressionCodec = NoCompressionCodec
     // 消息集合是否单独递增
     var monotonic = true
-    // 遍历消息集合
+    // 遍历消息集合进行检查
     for(messageAndOffset <- messages.shallowIterator) {
       // update the first offset if on the first message
       // 更新第一条消息的offset，此时的offset还是生产者分配的offset
@@ -593,29 +592,29 @@ class Log(val dir: File,// 某个topic-partion对应的日志文件所在磁盘�
     // Apply broker-side compression if any
     // 获取服务端采用的压缩方式
     val targetCodec = BrokerCompressionCodec.getTargetCompressionCodec(config.compressionType, sourceCodec)
-    // 生成一个LogAppendInfo,firstOffset, lastOffset都是Producer分配的offset
+    // 生成一个LogAppendInfo(消息集合中第一条消息的offset, 消息集合中最后一条消息的offset，消息集合中消息压缩类型，服务端消息压缩类型，验证通过的消息总数，验证通过的消息总字节数，消息集合中消息是否单调递增)
     LogAppendInfo(firstOffset, lastOffset, Message.NoTimestamp, sourceCodec, targetCodec, shallowMessageCount, validBytesCount, monotonic)
   }
 
   /**
    * Trim any invalid bytes from the end of this message set (if there are any)
     * 修剪此消息集末尾的任何无效字节(如果有的话)
-   * @param messages The message set to trim
+   * @param messages The message set to trim 消息集合
    * @param info The general information of the message set
    * @return A trimmed message set. This may be the same as what was passed in or it may not.
    */
   private def trimInvalidBytes(messages: ByteBufferMessageSet, info: LogAppendInfo): ByteBufferMessageSet = {
-    // 获取验证的字节数
+    // 获取消息集合中通过验证的字节数
     val messageSetValidBytes = info.validBytes
     if(messageSetValidBytes < 0)
       throw new CorruptRecordException("Illegal length of message set " + messageSetValidBytes + " Message set cannot be appended to log. Possible causes are corrupted produce requests")
-    // 验证的字节数 == 消息集合大小，返回消息集合即可
+    // 通过验证的字节数 == 消息集合大小，返回消息集合即可
     if(messageSetValidBytes == messages.sizeInBytes) {
       messages
+    // 不相等，截取消息集合messages
     } else {
       // trim invalid bytes
-      // 不相等，截取messages
-      // 截取就是通过修改ByteBuffer的limit，最后返回一个新的ByteBufferMessageSet
+      // 截取就是通过修改ByteBuffer的limit，截止到上面计算出的已通过的消息字节数，最后返回一个新的ByteBufferMessageSet
       val validByteBuffer = messages.buffer.duplicate()
       validByteBuffer.limit(messageSetValidBytes)
       new ByteBufferMessageSet(validByteBuffer)
@@ -625,9 +624,9 @@ class Log(val dir: File,// 某个topic-partion对应的日志文件所在磁盘�
   /**
    * Read messages from the log.
    *
-   * @param startOffset The offset to begin reading at
-   * @param maxLength The maximum number of bytes to read
-   * @param maxOffset The offset to read up to, exclusive. (i.e. this offset NOT included in the resulting message set)
+   * @param startOffset The offset to begin reading at 起始offset
+   * @param maxLength The maximum number of bytes to read 读取最大字节数
+   * @param maxOffset The offset to read up to, exclusive. (i.e. this offset NOT included in the resulting message set) 读取最大offset,可能不存在
    *
    * @throws OffsetOutOfRangeException If startOffset is beyond the log end offset or before the base offset of the first segment.
    * @return The fetch data information including fetch starting offset metadata and messages read.
@@ -638,28 +637,26 @@ class Log(val dir: File,// 某个topic-partion对应的日志文件所在磁盘�
 
     // Because we don't use lock for reading, the synchronization is a little bit tricky.
     // We create the local variables to avoid race conditions with updates to the log.
-    // 获取当前LogOffsetMetadata对象
+    // 获取该topic-partition当前activeSegment的LEO,baseOffset以及已写入字节数
     val currentNextOffsetMetadata: LogOffsetMetadata = nextOffsetMetadata
-    // 获取当前的LEO
-    val next = currentNextOffsetMetadata.messageOffset
-    // 要读的startOffset = next(LEO)，无数据可读
+    val next: Long = currentNextOffsetMetadata.messageOffset
+    // 读取的offset == LEO,无消息可读,返回空消息集和nextOffsetMetadata信息
     if(startOffset == next)
       return FetchDataInfo(currentNextOffsetMetadata, MessageSet.Empty)
-    // 根据startOffset定位LogSegment，segments是一个跳表
-    // 返回一个小于等于(最接近)startOffset的Entry对象,没有则返回null
+
+    // 返回≤startOffset(最接近)的Entry对象,没有则返回null
     var entry: Map.Entry[lang.Long, LogSegment] = segments.floorEntry(startOffset)
 
     // attempt to read beyond the log end offset is an error
-    // startOffset > next(LEO) 或者 定位的LogSegment为null，抛出异常
+    // 1.startOffset > LEO
+    // 2.Entry对象为null(说明startOffset查找的消息已经被过期定时任务删除了)
+    // 抛出OffsetOutOfRangeException，如果是follower拉取消息会针对这种情况再处理 参考：kafka.server.ReplicaFetcherThread.handleOffsetOutOfRange
     if(startOffset > next || entry == null)
       throw new OffsetOutOfRangeException("Request for offset %d but we only have log segments in the range %d to %d.".format(startOffset, segments.firstKey, next))
 
     // Do the read on the segment with a base offset less than the target offset
     // but if that segment doesn't contain any messages with an offset greater than that
     // continue to read from successive segments until we get some messages or we reach the end of the log
-    // 从base offset 小于startOffset的最近的一个segment开始读取消息
-    // 如果读取的segment不包含任何message的offset > startOffset
-    // 继续读取后续segemnt直到读取到消息或者读取到log文件的末尾
     while(entry != null) {
       // If the fetch occurs on the active segment, there might be a race condition where two fetch requests occur after
       // the message is appended but before the nextOffsetMetadata is updated. In that case the second fetch may
@@ -668,28 +665,27 @@ class Log(val dir: File,// 某个topic-partion对应的日志文件所在磁盘�
       // 如果fetch发生在活动段上，可能会有一个竞争条件，即两个fetch请求发生在消息追加之后，但在nextffsetmetadata更新之前。
       // 在这种情况下，第二次取回可能会导致OffsetOutOfRangeException异常。为了解决这个问题，我们将读取限制在暴露的位置，而不是活动段的日志端。
 
-      // 计算当前segment可读取的位置
-      val maxPosition = {
-        // 如果读取的是活跃segment
+      // 计算当前可读取的最大字节数
+      val maxPosition: Long = {
+        // entry是lastEntry(active segment),此时可能lastEntry正在不断被写入数据
         if (entry == segments.lastEntry) {
-          // 防止OffsetOutOfRangeException，先获取当前活跃segment已记录的消息大小
+          // 防止OffsetOutOfRangeException，先获取当前lastEntry已写入的字节数
           val exposedPos = nextOffsetMetadata.relativePositionInSegment.toLong
           // Check the segment again in case a new segment has just rolled out.
-          // 再次判断，如果活跃segment已经发生变更不在是最新活跃的segment
-          // 那么更新可读取的位置
+          // 再次判断，如果lastEntry已经发生变更,重新获取entry已写入的字节数
           if (entry != segments.lastEntry)
             // New log segment has rolled out, we can read up to the file end.
             entry.getValue.size
           else
             exposedPos
+        // 如果≤startOffset(最接近)的entry对象不是lastEntry,那么直接获取该LogSegment中的字节数接口
         } else {
           entry.getValue.size
         }
       }
-      // 读取消息
-      // entry.getValue获取LogSegment
+      // 获取entry中的LogSegment,读取里面的消息(起始offset,最大offset,期望读取的最大字节数,允许读取的最大字节数)
       val fetchInfo: FetchDataInfo = entry.getValue.read(startOffset, maxOffset, maxLength, maxPosition)
-      // 消息为空查找下一个segment
+      // 消息为空查找entry中LogSegment的下一个LogSegment
       if(fetchInfo == null) {
         entry = segments.higherEntry(entry.getKey)
       } else {
@@ -786,7 +782,7 @@ class Log(val dir: File,// 某个topic-partion对应的日志文件所在磁盘�
   /**
    * Roll the log over to a new empty log segment if necessary.
    *
-   * @param messagesSize The messages set size in bytes
+   * @param messagesSize The messages set size in bytes 消息集合保存消息的字节数
    * logSegment will be rolled if one of the following conditions met
    * <ol>
    * <li> The logSegment is full
@@ -796,9 +792,12 @@ class Log(val dir: File,// 某个topic-partion对应的日志文件所在磁盘�
    * @return The currently active segment after (perhaps) rolling to a new segment
    */
   private def maybeRoll(messagesSize: Int): LogSegment = {
+    // 获取当前Log中活跃的日志段activeSegment
     val segment = activeSegment
-    // segment.size返回当前LogSegment中已被占用的字节数
+
     if (segment.size > config.segmentSize - messagesSize || // 当前活跃segment空间不够
+        // 这里看一下创建LogSegment还多了一个扰动值，当前LogSegment已写入消息并且从创建到现在过去的时间已经超过了config.segmentMs - segment.rollJitterMs那么也需要创建新的LogSegment
+       // 也就是说LogSegment创建包含两中：大小维度，默认1G，时间维度
         segment.size > 0 && time.milliseconds - segment.created > config.segmentMs - segment.rollJitterMs ||
         segment.index.isFull) { // 索引文件满了
       debug("Rolling new log segment in %s (log_size = %d/%d, index_size = %d/%d, age_ms = %d/%d)."
@@ -811,6 +810,7 @@ class Log(val dir: File,// 某个topic-partion对应的日志文件所在磁盘�
                     config.segmentMs - segment.rollJitterMs))
       // 新建segment
       roll()
+    // 否则返回当前活跃的日志段即可
     } else {
       segment
     }

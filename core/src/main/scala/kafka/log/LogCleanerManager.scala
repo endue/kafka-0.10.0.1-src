@@ -243,7 +243,7 @@ private[log] class LogCleanerManager(val logDirs: Array[File], val logs: Pool[To
     */
   def updateCheckpoints(dataDir: File, update: Option[(TopicAndPartition,Long)]) {
     inLock(lock) {
-      val checkpoint = checkpoints(dataDir)
+      val checkpoint: OffsetCheckpoint = checkpoints(dataDir)
       val existing = checkpoint.read().filterKeys(logs.keys) ++ update
       checkpoint.write(existing)
     }
