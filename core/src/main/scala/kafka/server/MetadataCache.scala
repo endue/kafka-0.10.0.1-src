@@ -35,16 +35,20 @@ import org.apache.kafka.common.requests.{MetadataResponse, PartitionState, Updat
 /**
  *  A cache for the state (e.g., current leader) of each partition. This cache is updated through
  *  UpdateMetadataRequest from the controller. Every broker maintains the same cache, asynchronously.
+ * MetadataCache指Broker上的元数据缓存，这些数据是Controller通过UpdateMetadataRequest请求发送给Broker的.
+ * 为什么每台Broker上都要保存这份相同的数据呢？
+ * 1.Broker就可以及时响应客户端发送的元数据请求。不需要所有的请求都发送给Controller节点，可以有效均衡Controller节点的负载。
+ * 2.Kafka的一些重要组件会用到这部分数据。比如副本管理器会使用它来获取Broker的节点信息
  */
 private[server] class MetadataCache(brokerId: Int) extends Logging {
   private val stateChangeLogger = KafkaController.stateChangeLogger
-  // key是topic，value中的key是partitionId
+  // 记录topic和对应的分区信息，key是topicId
   private val cache = mutable.Map[String, mutable.Map[Int, PartitionStateInfo]]()
-  // 记录controllerId
+  // 记录当前controllerId
   private var controllerId: Option[Int] = None
-  // 记录活跃的broker，key是brokerId,value是Broker相关信息
+  // 记录活跃的Broker，key是BrokerId,value是Broker相关信息
   private val aliveBrokers = mutable.Map[Int, Broker]()
-  // 记录当前key的节点
+  // 记录当前活跃的Node，一个Broker可以包含多个Node
   private val aliveNodes = mutable.Map[Int, collection.Map[SecurityProtocol, Node]]()
   private val partitionMetadataLock = new ReentrantReadWriteLock()
 
@@ -178,7 +182,11 @@ private[server] class MetadataCache(brokerId: Int) extends Logging {
 
   def getControllerId: Option[Int] = controllerId
 
-  // 更新缓存
+  /**
+    * 处理UpdateMetadataRequest请求
+    * @param correlationId
+    * @param updateMetadataRequest
+    */
   def updateCache(correlationId: Int, updateMetadataRequest: UpdateMetadataRequest) {
     inWriteLock(partitionMetadataLock) {
       controllerId = updateMetadataRequest.controllerId match {
@@ -188,11 +196,11 @@ private[server] class MetadataCache(brokerId: Int) extends Logging {
       // 清空缓存中的aliveNodes和aliveBrokers,准备更新为最新的记录
       aliveNodes.clear()
       aliveBrokers.clear()
-      // 更新lieveBrokers
+      // 遍历请求中的liveBrokers集合，获取每一个Broker
       updateMetadataRequest.liveBrokers.asScala.foreach { broker =>
         val nodes = new EnumMap[SecurityProtocol, Node](classOf[SecurityProtocol])
         val endPoints = new EnumMap[SecurityProtocol, EndPoint](classOf[SecurityProtocol])
-        // 遍历endPoints,将相关内容保存到定义的集合中
+        // 遍历请求中Broker的endPoints集合,获取每一个SecurityProtocol和对应的EndPoint
         broker.endPoints.asScala.foreach { case (protocol, ep) =>
           endPoints.put(protocol, EndPoint(ep.host, ep.port, protocol))
           nodes.put(protocol, new Node(broker.id, ep.host, ep.port))
@@ -200,17 +208,18 @@ private[server] class MetadataCache(brokerId: Int) extends Logging {
         aliveBrokers(broker.id) = Broker(broker.id, endPoints.asScala, Option(broker.rack))
         aliveNodes(broker.id) = nodes.asScala
       }
-      // 更新本地分区信息
+      // 遍历请求中的partitionStates集合，获取每一个分区的PartitionState
       updateMetadataRequest.partitionStates.asScala.foreach { case (tp, info) =>
         val controllerId = updateMetadataRequest.controllerId
         val controllerEpoch = updateMetadataRequest.controllerEpoch
-        // 如果是删除，参考：kafka.controller.ControllerBrokerRequestBatch.addUpdateMetadataRequestForBrokers
+        // 分区被删除了，参考：kafka.controller.ControllerBrokerRequestBatch.addUpdateMetadataRequestForBrokers
         if (info.leader == LeaderAndIsr.LeaderDuringDelete) {
+          // 删除缓存中该topic下的分区
           removePartitionInfo(tp.topic, tp.partition)
           stateChangeLogger.trace(s"Broker $brokerId deleted partition $tp from metadata cache in response to UpdateMetadata " +
             s"request sent by controller $controllerId epoch $controllerEpoch with correlation id $correlationId")
         } else {
-          // 解析info返回一个PartitionStateInfo
+          // 转换PartitionState为PartitionStateInfo，然后缓存到本地
           val partitionInfo = partitionStateToPartitionStateInfo(info)
           addOrUpdatePartitionInfo(tp.topic, tp.partition, partitionInfo)
           stateChangeLogger.trace(s"Broker $brokerId cached leader info $partitionInfo for partition $tp in response to " +
@@ -226,6 +235,11 @@ private[server] class MetadataCache(brokerId: Int) extends Logging {
     PartitionStateInfo(leaderInfo, partitionState.replicas.asScala.map(_.toInt))
   }
 
+  /**
+    * 是否包含指定的topic
+    * @param topic
+    * @return
+    */
   def contains(topic: String): Boolean = {
     inReadLock(partitionMetadataLock) {
       cache.contains(topic)
@@ -236,7 +250,7 @@ private[server] class MetadataCache(brokerId: Int) extends Logging {
   private def removePartitionInfo(topic: String, partitionId: Int): Boolean = {
     cache.get(topic).map { infos =>
       infos.remove(partitionId)
-      if (infos.isEmpty) cache.remove(topic)// 如果分区信息为空，那么删除这个topic
+      if (infos.isEmpty) cache.remove(topic)// 如果topic下没有分区信息，那么删除这个topic
       true
     }.getOrElse(false)
   }

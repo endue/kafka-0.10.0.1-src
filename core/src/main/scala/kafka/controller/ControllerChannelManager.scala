@@ -406,31 +406,29 @@ class ControllerBrokerRequestBatch(controller: KafkaController) extends  Logging
       }
     }
 
-    // 过滤出有效的分区
+    // 从参数partitions中过滤出未被删除的topic-partition
     val filteredPartitions = {
-      // 如果参数传递过来的为空，那么就取集合partitionLeadershipInfo中记录的所有TopicAndPartitions
+      // 如果参数partitions为空，取上下文中记录的所有TopicAndPartitions，否则取partitions
       val givenPartitions = if (partitions.isEmpty)
         controllerContext.partitionLeadershipInfo.keySet
       else
-        // 如果参数传递过来的不为空，返回参数TopicAndPartitions
         partitions
-      // 如果partitionsToBeDeleted为空，表示没有待删除的分区，返回计算出的givenPartitions
+      // 从givenPartitions中删除已被删除的topic-partition
       if (controller.deleteTopicManager.partitionsToBeDeleted.isEmpty)
         givenPartitions
       else
-        // 如果partitionsToBeDeleted不为空，表示有待删除的分区，过滤待删除的分区
         givenPartitions -- controller.deleteTopicManager.partitionsToBeDeleted
     }
-    // 有效的分区为空
+    // 没有有效的分区，封装一个空数据给对应broker
+    // 否则将剩余有效分区构建UpdateMetadataRequest发给对应broker
     if (filteredPartitions.isEmpty)
       brokerIds.filter(b => b >= 0).foreach { brokerId =>
         updateMetadataRequestMap.getOrElseUpdate(brokerId, mutable.Map.empty[TopicPartition, PartitionStateInfo])
       }
     else
-    // 遍历所有的分区，执行updateMetadataRequestMapFor回调方法
       filteredPartitions.foreach(partition => updateMetadataRequestMapFor(partition, beingDeleted = false))
 
-    // 遍历待删除的分区，发送给对应的broker节点，告诉他们删除该分区
+    // 遍历待删除的分区，发送给对应的broker节点，告诉它们删除该分区
     controller.deleteTopicManager.partitionsToBeDeleted.foreach(partition => updateMetadataRequestMapFor(partition, beingDeleted = true))
   }
 
