@@ -829,7 +829,7 @@ class GroupCoordinator(val brokerId: Int,
   }
   // 计算分区
   def partitionFor(group: String): Int = groupManager.partitionFor(group)
-  //  判断是否应该任务成员为存活状态
+
   private def shouldKeepMemberAlive(member: MemberMetadata, heartbeatDeadline: Long) =
     member.awaitingJoinCallback != null ||  // awaitingJoinCallback不为null，即kafkaConsumer正在等待JoinGroupResponse
       member.awaitingSyncCallback != null || // awaitingSyncCallback不为null，即kafkaConsumer正在等待SyncGroupResponse

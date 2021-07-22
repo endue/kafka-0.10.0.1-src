@@ -907,7 +907,7 @@ class KafkaApis(val requestChannel: RequestChannel,
       val responseBody = new GroupCoordinatorResponse(Errors.GROUP_AUTHORIZATION_FAILED.code, Node.noNode)
       requestChannel.sendResponse(new RequestChannel.Response(request, new ResponseSend(request.connectionId, responseHeader, responseBody)))
     } else {
-      // 计算要存储到"__consumer_offsets"的那一个partition上
+      // 计算当前consumer所属组要存储到"__consumer_offsets"的那一个分区上
       val partition = coordinator.partitionFor(groupCoordinatorRequest.groupId)
 
       // get metadata (and create the topic if necessary)
@@ -917,14 +917,12 @@ class KafkaApis(val requestChannel: RequestChannel,
       val responseBody = if (offsetsTopicMetadata.error != Errors.NONE) {
         new GroupCoordinatorResponse(Errors.GROUP_COORDINATOR_NOT_AVAILABLE.code, Node.noNode)
       } else {
-        // 遍历"__consumer_offsets" topic所有分区元数据
-        // 过滤出分区正好为计算的分区的那个partition
-        // 然后获取对应Partition的leader所在Broker即为该consumer的GroupCoordinator
-        val coordinatorEndpoint = offsetsTopicMetadata.partitionMetadata().asScala
+        // 从"__consumer_offsets"所有分区中查找上述计算出的分区的Leader所在Broker
+        val coordinatorEndpoint: Option[Node] = offsetsTopicMetadata.partitionMetadata().asScala
           .find(_.partition == partition)
           .map(_.leader())
 
-        // 返回响应消息Node endpoint
+        // 返回Node作为consumer的GroupCoordinator节点
         coordinatorEndpoint match {
           case Some(endpoint) if !endpoint.isEmpty =>
             new GroupCoordinatorResponse(Errors.NONE.code, endpoint)

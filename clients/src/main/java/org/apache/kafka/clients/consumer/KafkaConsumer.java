@@ -607,19 +607,18 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
                           Deserializer<V> valueDeserializer) {
         try {
             log.debug("Starting the Kafka consumer");
-            // 请求超时时间
-            this.requestTimeoutMs = config.getInt(ConsumerConfig.REQUEST_TIMEOUT_MS_CONFIG);// 默认 40 * 1000,
-            // 回话超时时间
-            int sessionTimeOutMs = config.getInt(ConsumerConfig.SESSION_TIMEOUT_MS_CONFIG);// 默认 30000
-            // fetch等待超时时间500
+            // 等待响应超时时间，默认40 * 1000
+            this.requestTimeoutMs = config.getInt(ConsumerConfig.REQUEST_TIMEOUT_MS_CONFIG);
+            // 会话超时时间， 默认30000，coordinator在该时间内未收到consumer的任何消息,则进行rebalance(https://www.cnblogs.com/hapjin/p/10926882.html)
+            int sessionTimeOutMs = config.getInt(ConsumerConfig.SESSION_TIMEOUT_MS_CONFIG);
+            // 服务端未有足够fetch.min.bytes数据时，fetch请求阻塞时间，默认500
             int fetchMaxWaitMs = config.getInt(ConsumerConfig.FETCH_MAX_WAIT_MS_CONFIG);
             // 验证参数
             if (this.requestTimeoutMs <= sessionTimeOutMs || this.requestTimeoutMs <= fetchMaxWaitMs)
                 throw new ConfigException(ConsumerConfig.REQUEST_TIMEOUT_MS_CONFIG + " should be greater than " + ConsumerConfig.SESSION_TIMEOUT_MS_CONFIG + " and " + ConsumerConfig.FETCH_MAX_WAIT_MS_CONFIG);
             this.time = new SystemTime();
-            // 获取“client.id”配置
+            // 获取配置的client.id，不存在就生成默认值
             String clientId = config.getString(ConsumerConfig.CLIENT_ID_CONFIG);
-            // 不存在就生成一个默认的clientId
             if (clientId.length() <= 0)
                 clientId = "consumer-" + CONSUMER_CLIENT_ID_SEQUENCE.getAndIncrement();
             this.clientId = clientId;
@@ -632,11 +631,13 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
                     MetricsReporter.class);
             reporters.add(new JmxReporter(JMX_PREFIX));
             this.metrics = new Metrics(metricConfig, reporters, time);
-            // 消息重试等待时间间隔，默认 100
+            // 消息发送失败等待重试时间间隔，默认100
             this.retryBackoffMs = config.getLong(ConsumerConfig.RETRY_BACKOFF_MS_CONFIG);
+            // metadata最大有效时间，默认5 * 60 * 1000
             this.metadata = new Metadata(retryBackoffMs, config.getLong(ConsumerConfig.METADATA_MAX_AGE_CONFIG));
-            // 解析“bootstrap.servers”配置
+            // 获取配置的bootstrap.servers
             List<InetSocketAddress> addresses = ClientUtils.parseAndValidateAddresses(config.getList(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG));
+            // 更新metadata中集群列表
             this.metadata.update(Cluster.bootstrap(addresses), 0);
             String metricGrpPrefix = "consumer";
             ChannelBuilder channelBuilder = ClientUtils.createChannelBuilder(config.values());
@@ -1013,7 +1014,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
      * @return The fetched records (may be empty)
      */
     // 真正拉取消息的方法
-    // 每一次poll操作,会包括检查新的数据、做一些必要的心跳、自动commit以及offset更新操作，整体分为8步：
+    // 每一次poll操作,会包括检查新的数据、做一些必要的心跳、自动commit以及offset更新操作，整体分为7步：
     // 1.如果没有GroupCoordinator(kafkaServer节点)则获取一个并与之建立连接
     // 2.判断是否需要加入Group，如果需要就加入发送JOIN_GROUP->SYNC_GROUP请求，分别是加入Group和获取订阅的topic的被分配的分区
     // 3.执行一些延迟任务比如心跳、自动提交offset

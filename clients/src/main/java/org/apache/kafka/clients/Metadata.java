@@ -18,6 +18,8 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+
+import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.common.Cluster;
 import org.apache.kafka.common.Node;
 import org.apache.kafka.common.PartitionInfo;
@@ -187,6 +189,7 @@ public final class Metadata {
      * Update the cluster metadata
      * 更新metadata 该方法调用地点如下:
      * KafkaProducer初始化329行: {@link org.apache.kafka.clients.producer.KafkaProducer#KafkaProducer}
+     * KafkaConsumer初始化642行： {@link KafkaConsumer#KafkaConsumer}
      */
     public synchronized void update(Cluster cluster, long now) {
         // 修改needUpdate为false,表示不需要刷新了
