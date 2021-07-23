@@ -100,13 +100,13 @@ public abstract class AbstractCoordinator implements Closeable {
     // 当join group后该值为false
     // 分配分区失败后该值为false
     private boolean rejoinNeeded = true;
-    // 当前启动consumer的GroupCoordinator节点
+    // 收到GROUP_COORDINATOR请求响应后，初始化该值
     protected Node coordinator;
     // 成员ID，默认UNKNOWN_MEMBER_ID，当join group后该值变有效
     protected String memberId;
     // 当join group后返回的协议
     protected String protocol;
-    // 所属的代
+    // 当join group后返回的代
     protected int generation;
 
     /**
@@ -185,13 +185,11 @@ public abstract class AbstractCoordinator implements Closeable {
 
     /**
      * Block until the coordinator for this group is known and is ready to receive requests.
-     * 阻塞操作，等待获取到一个可用的Coordinator
+     * 阻塞操作获取一个可用的Coordinator
      */
     public void ensureCoordinatorReady() {
-        // while循环直到GroupCoordinator可用
         while (coordinatorUnknown()) {
-            // 发送“GROUP_COORDINATOR”消息到配置的“bootstrap.servers”上的任一节点
-            // 返回一个异步请求结果,(实际只是将请求记录到了unsent集合中)
+            // 发送"GROUP_COORDINATOR"消息到配置的"bootstrap.servers"上的某一节点(实际将请求记录到unsent集合中)
             RequestFuture<Void> future = sendGroupCoordinatorRequest();
             // 将unset集合中的请求发送出去，然后阻塞直到future执行完毕
             client.poll(future);
@@ -262,7 +260,6 @@ public abstract class AbstractCoordinator implements Closeable {
                 public void onSuccess(ByteBuffer value) {
                     // handle join completion in the callback so that the callback will be invoked
                     // even if the consumer is woken up before finishing the rebalance
-                    // 处理SYNC_GROUP的响应消息,value就是分配的结果
                     onJoinComplete(generation, memberId, protocol, value);
                     needsJoinPrepare = true;
                     heartbeatTask.reset();
@@ -536,9 +533,9 @@ public abstract class AbstractCoordinator implements Closeable {
     private RequestFuture<Void> sendGroupCoordinatorRequest() {
         // initiate the group metadata request
         // find a node to ask about the coordinator
-        // 获取“bootstrap.servers”上的任一节点
+        // 获取"bootstrap.servers"上的任一节点
         Node node = this.client.leastLoadedNode();
-        // 没有可用的server节点
+        // 没有可用节点
         if (node == null) {
             // TODO: If there are no brokers left, perhaps we should use the bootstrap set
             // from configuration?
@@ -605,16 +602,14 @@ public abstract class AbstractCoordinator implements Closeable {
     /**
      * Check if we know who the coordinator is and we have an active connection
      * @return true if the coordinator is unknown
-     * 判断GroupCoordinator是否已知
-     * 返回ture表示GroupCoordinator还需要未知状态
+     * 判断GroupCoordinator是否可用
      */
     public boolean coordinatorUnknown() {
-        // GroupCoordinator还未创建
         if (coordinator == null)
             return true;
         // GroupCoordinator不为null但是状态为DISCONNECTED的
         if (client.connectionFailed(coordinator)) {
-            // 针对GroupCoordinator已经无法访问的状态进行一些操作
+            // 删除发往该GroupCoordinator的消息
             coordinatorDead();
             return true;
         }

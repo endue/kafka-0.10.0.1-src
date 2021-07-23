@@ -91,8 +91,7 @@ public class Fetcher<K, V> {
     private final Metadata metadata;
     private final FetchManagerMetrics sensors;
     private final SubscriptionState subscriptions;
-    // 记录每次Fetch请求发出后响应中的数据
-    // 也就是缓存Fetch请求后的响应消息
+    // 缓存Fetch请求后的响应消息
     private final List<CompletedFetch> completedFetches;
     // 序列化相关
     private final Deserializer<K> keyDeserializer;
@@ -145,15 +144,13 @@ public class Fetcher<K, V> {
                         // 处理FETCH请求的响应
                         @Override
                         public void onSuccess(ClientResponse resp) {
-                            // 解析响应结果
                             FetchResponse response = new FetchResponse(resp.responseBody());
-                            // 获取拉取消息的topic-partition
                             Set<TopicPartition> partitions = new HashSet<>(response.responseData().keySet());
                             FetchResponseMetricAggregator metricAggregator = new FetchResponseMetricAggregator(sensors, partitions);
-                            // 遍历topic-partition和对应的拉取到的数据
+                            // 遍历topic-partition和对应拉取到的数据
                             for (Map.Entry<TopicPartition, FetchResponse.PartitionData> entry : response.responseData().entrySet()) {
                                 TopicPartition partition = entry.getKey();
-                                // 获取拉取到的offset
+                                // 拉取到的起始offset
                                 long fetchOffset = request.fetchData().get(partition).offset;
                                 // 拉取到的数据
                                 FetchResponse.PartitionData fetchData = entry.getValue();
@@ -395,7 +392,6 @@ public class Fetcher<K, V> {
             int recordsRemaining = maxPollRecords;
             // 遍历缓存中上次fetch请求获取到的数据
             Iterator<CompletedFetch> completedFetchesIterator = completedFetches.iterator();
-            // 获取记录
             while (recordsRemaining > 0) {
                 // 如果nextInLineRecords为null或者属性records为null或空，尝试从缓存completedFetches中拉取消息
                 if (nextInLineRecords == null || nextInLineRecords.isEmpty()) {

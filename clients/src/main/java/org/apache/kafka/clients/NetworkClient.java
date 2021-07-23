@@ -398,13 +398,12 @@ public class NetworkClient implements KafkaClient {
             // 计算一个node下标并获取对应node
             int idx = (offset + i) % nodes.size();
             Node node = nodes.get(idx);
-            // 计算当前node节点已发送或正在发送没有收到响应的消息集合大小
+            // 计算对node节点已发送或正在发送没有收到响应的消息集合大小
             int currInflight = this.inFlightRequests.inFlightRequestCount(node.idString());
             // 如果为0 && 当前节点可连接，那么返回该节点
             if (currInflight == 0 && this.connectionStates.isConnected(node.idString())) {
                 // if we find an established connection with no in-flight requests we can stop right away
                 return node;
-            // 如果与给定节点断开连接且还不能重新建立连接，则返回true，否则返回false
             } else if (!this.connectionStates.isBlackedOut(node.idString(), now) && currInflight < inflight) {
                 // otherwise if this is the best we have found so far, record that
                 inflight = currInflight;

@@ -1024,15 +1024,12 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
     // 7.拉取数据
     private Map<TopicPartition, List<ConsumerRecord<K, V>>> pollOnce(long timeout) {
         // TODO: Sub-requests should take into account the poll timeout (KAFKA-1894)
-        // 1.确保consumer与GroupCoordinator建立了连接
-        // 2.如果没有则与GroupCoordinator建立连接，后续还要申请加入组、被分配分区等操作
+        // 1.查找GroupCoordinator并与之建立连接
         coordinator.ensureCoordinatorReady();
 
         // ensure we have partitions assigned if we expect to
-        // 判断订阅状态是否自动分配分区
-        // 如果不是用户手动指定topic-partition的分区，那么这里就返回true
         if (subscriptions.partitionsAutoAssigned())
-            // 加入Group并分配分区
+            // 2.自动分配分区则加入Group并获取分区分配结果
             coordinator.ensurePartitionAssignment();
 
         // fetch positions if we have partitions we're subscribed to that we

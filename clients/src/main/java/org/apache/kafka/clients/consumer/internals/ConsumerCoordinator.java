@@ -416,10 +416,8 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
             // track of the fact that we need to rebalance again to reflect the change to the topic subscription. Without
             // ensuring that the metadata is fresh, any metadata update that changes the topic subscriptions and arrives with a
             // rebalance in progress will essentially be ignored. See KAFKA-3949 for the complete description of the problem.
-            // 如果是AUTO_PATTERN订阅模式，则需要确保元数据是最新的
             if (subscriptions.hasPatternSubscription())
                 client.ensureFreshMetadata();
-            // 确保group是可用的
             ensureActiveGroup();
         }
     }

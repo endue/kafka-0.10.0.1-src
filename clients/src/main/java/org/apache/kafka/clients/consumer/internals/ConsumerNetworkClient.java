@@ -235,7 +235,7 @@ public class ConsumerNetworkClient implements Closeable {
         // ensure we don't poll any longer than the deadline for
         // the next scheduled task
         // 计算延迟任务队列中最近一个要处理的任务还需多久执行
-        // 防止参数timeout的实际超过任务的实际，导致任务没有执行
+        // 防止参数timeout超过任务的时间，导致任务没有执行
         timeout = Math.min(timeout, delayedTasks.nextTimeout(now));
         // 真正的发送消息以及处理响应
         clientPoll(timeout, now);
